@@ -1,6 +1,6 @@
 'use strict';
 
-const { delay } = require('./dom');
+const { delay, clickElement, escapeXPathText } = require('./dom');
 
 /**
  * Set native select + Select2 (same pattern as lis_worksheet_speed.js).
@@ -29,38 +29,152 @@ async function setStatusByLabel(page, label) {
     return ok;
 }
 
+/** Selectors for the ASP.NET BU `<select>`. */
+const BU_SELECT_SELECTOR =
+    'select[id*="ddlBunit"], select[name*="ddlBunit"], select[id*="BusinessUnit"], select[name*="BusinessUnit"]';
+
 /**
+ * Find the matching `<option>` and return its `{ value, text }` (or `null`).
  * @param {import('puppeteer').Page} page
- * @param {string} businessUnit - visible option text or value fragment
+ * @param {string} bu
+ */
+async function findBuOption(page, bu) {
+    return page.evaluate(
+        (sel, raw) => {
+            const select = document.querySelector(sel);
+            if (!select) return null;
+            const wanted = String(raw || '').trim().toLowerCase();
+            if (!wanted) return null;
+            const options = Array.from(select.options || []);
+            const exact = options.find(
+                (o) => String(o.text || '').trim().toLowerCase() === wanted
+            );
+            const byValue = !exact && /^\d+$/.test(wanted)
+                ? options.find((o) => String(o.value || '').trim() === wanted)
+                : null;
+            const byContains = !exact && !byValue
+                ? options.find((o) => String(o.text || '').trim().toLowerCase().includes(wanted))
+                : null;
+            const opt = exact || byValue || byContains;
+            if (!opt) return null;
+            return { value: String(opt.value), text: String(opt.text || '').trim() };
+        },
+        BU_SELECT_SELECTOR,
+        bu
+    );
+}
+
+/**
+ * Read what the BU control currently reports — both the underlying select value
+ * and the visible Select2 rendered text.
+ * @param {import('puppeteer').Page} page
+ */
+async function readBuState(page) {
+    return page.evaluate((sel) => {
+        const select = document.querySelector(sel);
+        if (!select) return { exists: false };
+        const opt = select.options[select.selectedIndex] || null;
+        const rendered = document.querySelector(
+            ".select2-selection__rendered[title*='Business Unit'], #select2-" +
+                (select.id || '') +
+                '-container'
+        );
+        return {
+            exists: true,
+            value: String(select.value || ''),
+            text: opt ? String(opt.text || '').trim() : '',
+            rendered: rendered ? String(rendered.textContent || '').trim() : ''
+        };
+    }, BU_SELECT_SELECTOR);
+}
+
+/**
+ * Set Business Unit reliably:
+ *   1) native value+change on the underlying select (fires Select2 listeners via jQuery)
+ *   2) verify by reading select.value back; if not applied, open Select2 dropdown and click the option
+ *   3) verify again and return the actual selected option text (or `null`)
+ * @param {import('puppeteer').Page} page
+ * @param {string} businessUnit - visible option text (e.g. "ROHTAK")
+ * @returns {Promise<string|null>}
  */
 async function setBusinessUnitByLabel(page, businessUnit) {
     if (!businessUnit || !String(businessUnit).trim()) {
         console.log('[filters] business unit: skipped (no value)');
-        return false;
+        return null;
     }
-    const ok = await page.evaluate((bu) => {
-        const select = document.querySelector(
-            'select[id*="ddlBunit"], select[name*="ddlBunit"], select[id*="BusinessUnit"], select[name*="BusinessUnit"]'
+    const bu = String(businessUnit).trim();
+
+    const target = await findBuOption(page, bu);
+    if (!target) {
+        console.log(`[filters] business unit: no matching option for "${bu}"`);
+        return null;
+    }
+
+    await page.evaluate(
+        (sel, value) => {
+            const select = document.querySelector(sel);
+            if (!select) return;
+            select.value = value;
+            select.dispatchEvent(new Event('input', { bubbles: true }));
+            select.dispatchEvent(new Event('change', { bubbles: true }));
+            if (window.jQuery) {
+                const $sel = window.jQuery(select);
+                if ($sel.data('select2')) {
+                    $sel.val(value).trigger('change.select2');
+                    $sel.trigger('change');
+                }
+            }
+        },
+        BU_SELECT_SELECTOR,
+        target.value
+    );
+    await delay(350);
+
+    let state = await readBuState(page);
+    if (state.exists && state.value === target.value) {
+        console.log(`[filters] business unit set to "${state.text}" (value ${state.value}) via native set.`);
+        return state.text;
+    }
+
+    console.log(
+        `[filters] business unit: native set did not stick (current value="${state && state.value}", target="${target.value}"). Falling back to Select2 click flow.`
+    );
+
+    try {
+        await clickElement(
+            page,
+            [
+                "//span[contains(@class, 'select2-selection') and @title='Business Unit']",
+                "//select[contains(@id,'ddlBunit')]/following::span[contains(@class,'select2-selection')][1]",
+                "//select[contains(@id,'BusinessUnit')]/following::span[contains(@class,'select2-selection')][1]"
+            ],
+            { retries: 3, waitTimeout: 8000 }
         );
-        if (!select) return false;
-        const options = Array.from(select.options || []);
-        const matchingOption = options.find(
-            (opt) =>
-                opt.text.trim() === bu ||
-                opt.value === bu ||
-                (opt.text || '').trim().includes(bu)
+        await delay(450);
+        await clickElement(
+            page,
+            [
+                `//li[contains(@class, 'select2-results__option') and normalize-space(text())=${escapeXPathText(target.text)}]`,
+                `//li[contains(@class, 'select2-results__option') and contains(text(), ${escapeXPathText(target.text)})]`,
+                `//li[contains(@class, 'select2-results__option') and contains(translate(normalize-space(text()), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), ${escapeXPathText(target.text.toLowerCase())})]`
+            ],
+            { retries: 4, waitTimeout: 6000 }
         );
-        if (!matchingOption) return false;
-        select.value = matchingOption.value;
-        select.dispatchEvent(new Event('change', { bubbles: true }));
-        if (window.jQuery && window.jQuery(select).data('select2')) {
-            window.jQuery(select).val(matchingOption.value).trigger('change');
-        }
-        return true;
-    }, businessUnit);
-    if (ok) await delay(220);
-    if (!ok) console.log(`[filters] business unit: could not match "${businessUnit}"`);
-    return ok;
+        await delay(350);
+    } catch (e) {
+        console.log(`[filters] business unit: Select2 click flow failed (${e.message})`);
+    }
+
+    state = await readBuState(page);
+    if (state.exists && state.value === target.value) {
+        console.log(`[filters] business unit set to "${state.text}" (value ${state.value}) via Select2 click.`);
+        return state.text;
+    }
+
+    console.log(
+        `[filters] business unit: did not apply (still value="${state && state.value}" rendered="${state && state.rendered}").`
+    );
+    return null;
 }
 
 /**
@@ -250,7 +364,7 @@ async function setTextFilter(page, kind, value) {
  */
 async function applyFilters(page, f) {
     const applied = {};
-    if (f.bu) applied.businessUnit = (await setBusinessUnitByLabel(page, f.bu)) ? f.bu : null;
+    if (f.bu) applied.businessUnit = await setBusinessUnitByLabel(page, f.bu);
     if (f.status) applied.status = (await setStatusByLabel(page, f.status)) ? f.status : null;
     if (f.testCode) applied.testCode = (await setTestCode(page, f.testCode)) ? f.testCode : null;
     if (f.fromDate) applied.fromDate = (await setWorksheetDate(page, 'txtFdate', f.fromDate)) ? f.fromDate : null;
@@ -270,6 +384,7 @@ async function applyFilters(page, f) {
 
 module.exports = {
     applyFilters,
+    readBuState,
     setBusinessUnitByLabel,
     setStatusByLabel,
     setTestCode,

@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>lis-nav-bot</title>
+    <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+    <header>
+        <h1>lis-nav-bot</h1>
+        <p class="muted">Read-only LIS Sample Worksheet runner. Credentials load from <code>.env</code> on the server only.</p>
+    </header>
+
+    <main class="layout">
+        <section class="card">
+            <h2>Run</h2>
+            <form id="run-form">
+                <div class="grid2">
+                    <label>Business unit <input name="bu" type="text" placeholder="ROHTAK" autocomplete="off" /></label>
+                    <label>Status <input name="status" type="text" placeholder="--All-- or Partially Tested" /></label>
+                    <label>Test code <input name="testCode" type="text" /></label>
+                    <label>From date <input name="fromDate" type="text" placeholder="DD/MM/YYYY" /></label>
+                    <label>To date <input name="toDate" type="text" placeholder="DD/MM/YYYY" /></label>
+                    <label>From hour <input name="fromHour" type="number" min="0" max="23" /></label>
+                    <label>To hour <input name="toHour" type="number" min="0" max="23" /></label>
+                    <label>Client code <input name="clientCode" type="text" /></label>
+                    <label>SID filter <input name="sid" type="text" /></label>
+                    <label>Vail id <input name="vailId" type="text" /></label>
+                    <label>PID <input name="pid" type="text" /></label>
+                    <label>Dept no <input name="deptNo" type="text" /></label>
+                    <label>Open SID (modal) <input name="openSid" id="openSid" type="text" /></label>
+                    <label>Out dir <input name="outDir" type="text" placeholder="./out" /></label>
+                </div>
+                <fieldset class="checks">
+                    <label><input name="scrapePackages" id="scrapePackages" type="checkbox" /> Scrape package labels</label>
+                    <label><input name="dryRun" type="checkbox" /> Dry run (no Search)</label>
+                    <label><input name="headless" type="checkbox" /> Headless</label>
+                    <label><input name="skipRegionalBadge" type="checkbox" /> Skip regional badge rows</label>
+                    <label><input name="noScreenshots" type="checkbox" /> No screenshots</label>
+                </fieldset>
+                <div class="form-actions">
+                    <button type="submit" id="submit-btn">Run</button>
+                    <button type="button" id="clear-btn" class="btn-secondary">Clear results</button>
+                    <span id="run-status" class="muted"></span>
+                </div>
+            </form>
+        </section>
+
+        <section class="card" id="latest-card">
+            <div class="row-between">
+                <h2>Latest result</h2>
+                <span id="latest-status-pill" class="status-pill" hidden></span>
+            </div>
+            <p id="filters-applied-line" class="muted filters-line"></p>
+            <div id="latest-empty" class="empty">No run yet.</div>
+            <div id="latest-summary" class="summary-table-wrap" hidden></div>
+            <div class="packages-section latest-packages-panel" id="packages-section" hidden>
+                <div class="row-between packages-header">
+                    <div>
+                        <h3 class="packages-heading">Results</h3>
+                        <p class="muted small">Package labels and totals from this run.</p>
+                    </div>
+                    <div class="packages-stats" id="packages-stats"></div>
+                </div>
+                <div class="packages-toolbar">
+                    <input id="packages-search" type="search" placeholder="Filter labels…" autocomplete="off" />
+                    <span class="muted small" id="packages-shown"></span>
+                </div>
+                <div class="table-wrap packages-table-scroll" id="packages-table-wrap"></div>
+            </div>
+        </section>
+
+        <section class="card span2">
+            <div class="row-between">
+                <h2>Run history</h2>
+                <button type="button" id="refresh-history">Refresh</button>
+            </div>
+            <div class="table-wrap">
+                <table id="history-table">
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>Started</th>
+                            <th>Mode</th>
+                            <th>Pages / rows</th>
+                            <th>SIDs p.1</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+            <p class="muted" id="history-path"></p>
+        </section>
+
+        <section class="card span2">
+            <h2>Selected run detail</h2>
+            <p class="muted">Click a row in the table. Package scrape data appears under <code>packages</code> when present.</p>
+            <div class="tabs">
+                <button type="button" class="tab active" data-tab="main">main.json</button>
+                <button type="button" class="tab" data-tab="packages">packages.json</button>
+                <button type="button" class="tab" data-tab="table">Label table</button>
+            </div>
+            <div id="detail-packages-table-wrap" class="detail-table-wrap packages-table-host" hidden></div>
+            <pre id="detail-json" class="json-out">—</pre>
+        </section>
+    </main>
+
+    <script src="/app.js"></script>
+</body>
+</html>

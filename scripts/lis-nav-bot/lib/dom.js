@@ -1,5 +1,13 @@
 'use strict';
 
+/** Puppeteer v20+ removed {@link Page.$x}; XPath uses {@link Page.$$} with an `xpath/` selector. */
+function toPuppeteerXPath(expr) {
+    const s = String(expr).trim();
+    if (s.startsWith('xpath/')) return s;
+    if (s.startsWith('//')) return `xpath/.${s}`;
+    return `xpath/${s}`;
+}
+
 /** @param {number} ms */
 function delay(ms) {
     return new Promise((r) => setTimeout(r, ms));
@@ -23,7 +31,7 @@ async function waitForElement(page, xpaths, timeout = 10000) {
     while (Date.now() - startedAt < timeout) {
         for (const xpath of xpaths) {
             try {
-                const handles = await page.$x(xpath);
+                const handles = await page.$$(toPuppeteerXPath(xpath));
                 if (handles && handles.length > 0) {
                     const h = handles[0];
                     for (let i = 1; i < handles.length; i++) {
@@ -91,6 +99,7 @@ async function typeElement(page, xpaths, value) {
 module.exports = {
     delay,
     escapeXPathText,
+    toPuppeteerXPath,
     waitForElement,
     clickElement,
     typeElement
