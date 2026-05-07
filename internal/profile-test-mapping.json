@@ -1,0 +1,289 @@
+{
+  "document_title": "Master profile code → included tests/profiles (internal)",
+  "source": "Add/Edit Master Profile screenshots; selection mode was Profile(s) in all captures.",
+  "generated_note": "Where two screenshots for the same code differed, both variant lists are kept under capture_variants; use live LIMS to confirm the authoritative package.",
+  "lis_worksheet": {
+    "page": "Sample Worksheet",
+    "path_example": "lis.genomicslab.in/Worksheet/SampleWorksheet.aspx",
+    "column": "Test Names",
+    "package_name_convention": "Package or profile identifiers often appear inside square brackets at the end of a line in Test Names (e.g. Glycated Hemoglobin (HbA1c) [ROHTAK HR203A]). The same cell can list other profiles or tests on separate lines without brackets; those lines are still part of the same sample row.",
+    "linking_to_master_profiles": "Bracket text may match the master profile display name (e.g. [ROHTAK HR203A]) while internal codes use short codes (e.g. HR203A). When building parsers, strip brackets and normalize against both name and code.",
+    "observed_examples": [
+      {
+        "bracket_label": "ARTHRITIS PROFILE BASIC",
+        "sid": "8233028",
+        "test_names_lines": [
+          "Anti Cyclic Citrullinated Peptide (Anti - CCP) [ARTHRITIS PROFILE BASIC]",
+          "Uric acid",
+          "C-Reactive Protein (CRP)",
+          "Rheumatoid Arthritis Factor (Nephelometry)",
+          "Anti Strepto lysin O (ASO) Qualitative [ARTHRITIS PROFILE BASIC]"
+        ]
+      },
+      {
+        "bracket_label": "ROHTAK HR203A",
+        "maps_to_profile_code": "HR203A",
+        "examples": [
+          {
+            "sid": "8402134",
+            "test_names_lines": [
+              "CBC WITH ESR",
+              "Glycated Hemoglobin (HbA1c) [ROHTAK HR203A]"
+            ]
+          },
+          {
+            "sid": "8402130",
+            "test_names_lines": [
+              "Thyroid Profile I",
+              "LIPID PROFILE",
+              "Liver Function Test",
+              "IRON PROFILE",
+              "KFT WITH ELECTROLYTES [ROHTAK HR203A]",
+              "VITAMIN D",
+              "Vitamin B12 -Serum"
+            ]
+          },
+          {
+            "sid": "8402138",
+            "test_names_lines": [
+              "tTG IgA Tissue Transglutaminase Antibody IgA",
+              "Thyroid Profile I",
+              "LIPID PROFILE",
+              "Liver Function Test",
+              "IRON PROFILE",
+              "KFT WITH ELECTROLYTES [ROHTAK HR203A]",
+              "VITAMIN D",
+              "Vitamin B12 -Serum"
+            ]
+          }
+        ]
+      }
+    ],
+    "parsing_hint": "On each line in Test Names, capture the substring between the last [ and ]; dedupe labels per cell, then map to master profile code or full display name."
+  },
+  "profiles": [
+    {
+      "code": "HR201A",
+      "name": "ROHTAK HR201A",
+      "ct": 1200,
+      "mrp": 1200,
+      "included_profiles_or_tests": [
+        "Thyroid Profile I",
+        "LIPID PROFILE",
+        "Liver Function Test",
+        "CBC WITH ESR",
+        "KFT WITH ELECTROLYTES",
+        "Glucose - Fasting"
+      ]
+    },
+    {
+      "code": "HR202A",
+      "name": "HR202A HEALTH PACKAGE",
+      "ct": 1800,
+      "mrp": 1800,
+      "included_profiles_or_tests": [
+        "Thyroid Profile I",
+        "LIPID PROFILE",
+        "Liver Function Test",
+        "CBC WITH ESR",
+        "KFT WITH ELECTROLYTES",
+        "Complete Urine Examination",
+        "Glucose - Fasting",
+        "Glycated Hemoglobin (HbA1c)"
+      ]
+    },
+    {
+      "code": "HR203A",
+      "name": "ROHTAK HR203A",
+      "lis_worksheet_bracket_labels": [
+        "ROHTAK HR203A"
+      ],
+      "ct": 2500,
+      "mrp": 2500,
+      "capture_variants": [
+        {
+          "label": "capture_a",
+          "included_profiles_or_tests": [
+            "Thyroid Profile I",
+            "LIPID PROFILE",
+            "Liver Function Test",
+            "IRON PROFILE",
+            "CBC WITH ESR",
+            "KFT WITH ELECTROLYTES",
+            "Complete Urine Examination",
+            "VITAMIN D",
+            "Vitamin B12 -Serum",
+            "Glucose - Fasting"
+          ]
+        },
+        {
+          "label": "capture_b",
+          "included_profiles_or_tests": [
+            "LIPID PROFILE",
+            "Liver Function Test",
+            "IRON PROFILE",
+            "CBC WITH ESR",
+            "KFT WITH ELECTROLYTES",
+            "Complete Urine Examination",
+            "VITAMIN D",
+            "Vitamin B12 - Serum",
+            "Glucose - Fasting",
+            "Glycated Hemoglobin (HbA1c)"
+          ]
+        }
+      ],
+      "included_profiles_or_tests_merged_unique": [
+        "Thyroid Profile I",
+        "LIPID PROFILE",
+        "Liver Function Test",
+        "IRON PROFILE",
+        "CBC WITH ESR",
+        "KFT WITH ELECTROLYTES",
+        "Complete Urine Examination",
+        "VITAMIN D",
+        "Vitamin B12 - Serum",
+        "Glucose - Fasting",
+        "Glycated Hemoglobin (HbA1c)"
+      ]
+    },
+    {
+      "code": "HR204A",
+      "name": "HR204A HEALTH PACKAGE",
+      "ct": 3200,
+      "mrp": 3200,
+      "capture_variants": [
+        {
+          "label": "capture_a",
+          "included_profiles_or_tests": [
+            "Thyroid Profile I",
+            "LIPID PROFILE",
+            "Liver Function Test",
+            "IRON PROFILE",
+            "CBC WITH ESR",
+            "KFT WITH ELECTROLYTES",
+            "Complete Urine Examination",
+            "VITAMIN D",
+            "C-Reactive Protein (CRP)",
+            "Vitamin B12 - Serum"
+          ]
+        },
+        {
+          "label": "capture_b",
+          "included_profiles_or_tests": [
+            "IRON PROFILE",
+            "CBC WITH ESR",
+            "KFT WITH ELECTROLYTES",
+            "Complete Urine Examination",
+            "VITAMIN D",
+            "C-Reactive Protein (CRP)",
+            "Vitamin B12 -Serum",
+            "Glucose - Fasting",
+            "Glycated Hemoglobin (HBA1c)",
+            "Rheumatoid Arthritis Factor (Nephelometry)"
+          ]
+        }
+      ],
+      "included_profiles_or_tests_merged_unique": [
+        "Thyroid Profile I",
+        "LIPID PROFILE",
+        "Liver Function Test",
+        "IRON PROFILE",
+        "CBC WITH ESR",
+        "KFT WITH ELECTROLYTES",
+        "Complete Urine Examination",
+        "VITAMIN D",
+        "C-Reactive Protein (CRP)",
+        "Vitamin B12 - Serum",
+        "Glucose - Fasting",
+        "Glycated Hemoglobin (HBA1c)",
+        "Rheumatoid Arthritis Factor (Nephelometry)"
+      ]
+    },
+    {
+      "code": "P501",
+      "name": "P501 HEALTH PROFILE",
+      "ct": 2500,
+      "mrp": 2500,
+      "capture_variants": [
+        {
+          "label": "capture_a",
+          "included_profiles_or_tests": [
+            "Thyroid Profile I",
+            "LIPID PROFILE",
+            "Liver Function Test",
+            "Kidney Function Test with Electrolytes",
+            "IRON PROFILE",
+            "CBC WITH ESR",
+            "Complete Urine Examination",
+            "VITAMIN D",
+            "Testosterone - Total",
+            "Vitamin B12 - Serum"
+          ]
+        },
+        {
+          "label": "capture_b",
+          "included_profiles_or_tests": [
+            "Liver Function Test",
+            "Kidney Function Test with Electrolytes",
+            "IRON PROFILE",
+            "CBC WITH ESR",
+            "Complete Urine Examination",
+            "VITAMIN D",
+            "Testosterone - Total",
+            "Vitamin B12 - Serum",
+            "Glucose - Fasting",
+            "Glycated Hemoglobin (HBA1c)"
+          ]
+        }
+      ],
+      "included_profiles_or_tests_merged_unique": [
+        "Thyroid Profile I",
+        "LIPID PROFILE",
+        "Liver Function Test",
+        "Kidney Function Test with Electrolytes",
+        "IRON PROFILE",
+        "CBC WITH ESR",
+        "Complete Urine Examination",
+        "VITAMIN D",
+        "Testosterone - Total",
+        "Vitamin B12 - Serum",
+        "Glucose - Fasting",
+        "Glycated Hemoglobin (HBA1c)"
+      ]
+    },
+    {
+      "code": "P042",
+      "name": "P042 GENOMICS HEALTH PACKAGE",
+      "ct": 1500,
+      "mrp": 1500,
+      "included_profiles_or_tests": [
+        "Thyroid Profile I",
+        "LIPID PROFILE",
+        "Liver Function Test",
+        "Kidney Function Test with Electrolytes",
+        "CBC WITH ESR",
+        "Complete Urine Examination",
+        "eGFR (estimated Glomerular Filtration Rate)",
+        "Glucose - Fasting"
+      ]
+    },
+    {
+      "code": "P036A",
+      "name": "P036A HEALTH CARE PROFILE 1.2",
+      "ct": 4200,
+      "mrp": 4200,
+      "included_profiles_or_tests": [
+        "Thyroid Profile I",
+        "LIPID PROFILE",
+        "Liver Function Test",
+        "Kidney Function Test with Electrolytes",
+        "IRON PROFILE",
+        "CBC WITH ESR",
+        "Complete Urine Examination",
+        "eGFR (estimated Glomerular Filtration Rate)",
+        "Glucose - Fasting",
+        "Glycated Hemoglobin (HBA1c)"
+      ]
+    }
+  ]
+}
