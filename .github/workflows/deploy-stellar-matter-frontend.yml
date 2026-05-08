@@ -28,10 +28,11 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
-          cache-dependency-path: web/package-lock.json
+          # Workspaces hoist deps to the root lockfile; web/ has no package-lock.json
+          # of its own. Cache + install from the root then build the web workspace.
+          cache-dependency-path: package-lock.json
 
-      - name: Install web deps
-        working-directory: web
+      - name: Install workspace deps
         run: npm ci
 
       - name: Build SPA (VITE_API_BASE_URL baked in)
