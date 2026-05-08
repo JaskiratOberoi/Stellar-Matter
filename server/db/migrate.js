@@ -1,7 +1,15 @@
 'use strict';
 
 // Phase 3 migration: bare-minimum schema for the auth surface.
-// Phase 8 (runs in Postgres) will extend this file with runs/run_packages.
+// Phase 8 (runs in Postgres) — runs + run_packages tables. The on-disk
+// out/run-*.json + out/run-*-packages.json files remain the canonical
+// artefact (they survive `docker compose down -v` because they live on
+// the bind-mounted host volume); Postgres is a derived index used by
+// /api/runs/tiles + /api/runs/:id so the tile wall doesn't have to scan
+// hundreds of files per request and so cross-org scoping can be done
+// in the query layer instead of in JS. Backfill is idempotent — every
+// run not yet in Postgres gets ingested at startup, and every fresh
+// run is upserted right after lib/run.js writes its JSON.
 // Phase 9 (audit log) — append-only audit_log table with three indexes.
 // Phase 10 (orgs) — organizations + user_org_assignments tables, with the
 // default org seeded and every existing user auto-assigned to it.
@@ -145,6 +153,74 @@ async function migrate() {
         );
 
         await seedSuperAdmin(client);
+
+        // Phase 8: runs + run_packages. id is the run's ISO-ish timestamp slug
+        // (e.g. "2026-05-07T07-29-13-035Z") which is also the on-disk file
+        // basename — so a run row maps 1:1 to out/run-<id>.json on disk.
+        // org_id defaults to 'org-default' so legacy on-disk runs ingested
+        // before Phase 10 stamping land in the same tenant as the seed user.
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS runs (
+                id TEXT PRIMARY KEY,
+                org_id TEXT NOT NULL DEFAULT 'org-default'
+                    REFERENCES organizations(id) ON DELETE RESTRICT,
+                started_at TIMESTAMPTZ,
+                finished_at TIMESTAMPTZ,
+                source TEXT NOT NULL DEFAULT 'scrape',
+                mode TEXT NOT NULL DEFAULT 'general',
+                bu TEXT,
+                from_date TEXT,
+                to_date TEXT,
+                from_hour INT,
+                to_hour INT,
+                dry_run BOOLEAN NOT NULL DEFAULT false,
+                exit_code INT,
+                errors_count INT NOT NULL DEFAULT 0,
+                sids_count INT NOT NULL DEFAULT 0,
+                unique_label_count INT NOT NULL DEFAULT 0,
+                other_tests_row_count INT NOT NULL DEFAULT 0,
+                total_printed_pages INT NOT NULL DEFAULT 0,
+                envelopes_big INT NOT NULL DEFAULT 0,
+                envelopes_small INT NOT NULL DEFAULT 0,
+                envelopes_unknown INT NOT NULL DEFAULT 0,
+                urine_containers JSONB,
+                filter JSONB,
+                filters_applied JSONB,
+                filters_requested JSONB,
+                paths JSONB,
+                ingested_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                source_file_mtime TIMESTAMPTZ
+            );
+        `);
+        await client.query(
+            `CREATE INDEX IF NOT EXISTS runs_org_started_idx
+             ON runs (org_id, started_at DESC);`
+        );
+        await client.query(
+            `CREATE INDEX IF NOT EXISTS runs_started_idx
+             ON runs (started_at DESC);`
+        );
+
+        // run_packages: one row per (run_id, label). position preserves the
+        // count-desc ordering buildTileFromRunFiles() computes so the
+        // dashboard can reproduce the top-50 list with a single ORDER BY.
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS run_packages (
+                run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+                label TEXT NOT NULL,
+                count INT NOT NULL DEFAULT 0,
+                pages_per_report INT,
+                envelope_kind TEXT NOT NULL DEFAULT 'small'
+                    CHECK (envelope_kind IN ('small', 'big')),
+                envelope_estimated BOOLEAN NOT NULL DEFAULT false,
+                position INT NOT NULL DEFAULT 0,
+                PRIMARY KEY (run_id, label)
+            );
+        `);
+        await client.query(
+            `CREATE INDEX IF NOT EXISTS run_packages_run_position_idx
+             ON run_packages (run_id, position);`
+        );
     } finally {
         client.release();
     }

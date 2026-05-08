@@ -373,6 +373,11 @@ let authApi = null;
 let adminApi = null;
 let runMigrate = null;
 let auditLog = null;
+// Phase 8: runs ingest helpers. When DATABASE_URL is set we ingest each
+// completed run into Postgres (UPSERT keyed on the on-disk filename) and
+// the tile wall reads from `runs` instead of `fs.readdirSync(outDir)`. The
+// disk JSON is still the canonical artefact — Postgres is a derived index.
+let runsDb = null;
 try {
     const serverDir = path.resolve(__dirname, '..', '..', 'server');
     auth = require(path.join(serverDir, 'auth'));
@@ -380,6 +385,7 @@ try {
     adminApi = require(path.join(serverDir, 'routes', 'adminApi'));
     runMigrate = require(path.join(serverDir, 'db', 'migrate')).migrate;
     auditLog = require(path.join(serverDir, 'audit')).logAudit;
+    runsDb = require(path.join(serverDir, 'db', 'runs'));
 } catch (e) {
     // Auth deps not installed yet — fall through and serve the legacy open dashboard.
     if (process.env.DATABASE_URL) {
@@ -405,6 +411,17 @@ if (auth) {
 if (runMigrate) {
     Promise.resolve()
         .then(() => runMigrate())
+        .then(() => {
+            // Phase 8: backfill any on-disk run artifacts that aren't yet in
+            // Postgres. Idempotent — only runs whose source_file_mtime is
+            // older than the disk file get re-ingested. Fire-and-forget so
+            // the server keeps booting even if backfill takes a few seconds.
+            if (runsDb) {
+                return runsDb.backfillFromDisk(resolveOutDir()).catch((err) => {
+                    console.warn('[stellar-matter] runs backfill failed:', err && err.message ? err.message : err);
+                });
+            }
+        })
         .catch((err) => console.error('[stellar-matter] migration failed:', err));
 }
 
@@ -467,12 +484,8 @@ app.get('/api/bu', async (_req, res) => {
     res.json(data);
 });
 
-app.get('/api/runs/tiles', (req, res) => {
+app.get('/api/runs/tiles', async (req, res) => {
     const outDir = resolveOutDir();
-    /** @type {object[]} */
-    const tiles = [];
-    /** @type {object[]} */
-    const errors = [];
     // Org scoping: caller's active_org_id from JWT, with 'org-default' as the
     // single-tenant fallback. super_admin can pass ?all_orgs=1 to inspect every
     // org's data (e.g. to verify a multi-tenant migration). DB-less / open mode
@@ -481,9 +494,39 @@ app.get('/api/runs/tiles', (req, res) => {
     const isSuperAdmin = !!(req.user && req.user.role === 'super_admin');
     const activeOrgId = (req.user && req.user.activeOrgId) || (req.user ? 'org-default' : null);
     const filterOrgId = req.user && !(allOrgs && isSuperAdmin) ? activeOrgId : null;
+
+    // Phase 8: prefer Postgres-backed tiles when DATABASE_URL is set. The
+    // backfillFromDisk() boot hook keeps the table in sync; disk remains the
+    // canonical artefact and we fall back to it on any DB error so a Postgres
+    // hiccup never blanks the dashboard.
+    if (runsDb && process.env.DATABASE_URL) {
+        try {
+            const tiles = await runsDb.listTiles({
+                orgId: filterOrgId,
+                allOrgs: !filterOrgId
+            });
+            if (Array.isArray(tiles)) {
+                return res.json({
+                    tiles,
+                    errors: [],
+                    outDir,
+                    orgId: filterOrgId,
+                    allOrgs: !filterOrgId,
+                    source: 'postgres'
+                });
+            }
+        } catch (e) {
+            console.warn('[stellar-matter] /api/runs/tiles DB read failed, falling back to disk:', e.message);
+        }
+    }
+
+    /** @type {object[]} */
+    const tiles = [];
+    /** @type {object[]} */
+    const errors = [];
     try {
         if (!fs.existsSync(outDir)) {
-            return res.json({ tiles: [], errors: [], outDir, orgId: filterOrgId, allOrgs: !filterOrgId });
+            return res.json({ tiles: [], errors: [], outDir, orgId: filterOrgId, allOrgs: !filterOrgId, source: 'disk' });
         }
         const names = fs.readdirSync(outDir);
         for (const name of names) {
@@ -507,7 +550,7 @@ app.get('/api/runs/tiles', (req, res) => {
             return (b._mtime || 0) - (a._mtime || 0);
         });
         const cleaned = tiles.map(({ _mtime, ...rest }) => rest);
-        res.json({ tiles: cleaned, errors, outDir, orgId: filterOrgId, allOrgs: !filterOrgId });
+        res.json({ tiles: cleaned, errors, outDir, orgId: filterOrgId, allOrgs: !filterOrgId, source: 'disk' });
     } catch (e) {
         res.status(500).json({ error: String(e && e.message ? e.message : e) });
     }
@@ -624,6 +667,12 @@ app.post('/api/run', requireSuperAdmin, async (req, res) => {
                     items[i].outMainPath = r.outMainPath;
                     items[i].outPackagesPath = r.outPackagesPath;
                     items[i].exitCode = r.exitCode;
+                    // Phase 8: surface this child run in Postgres immediately
+                    // so the tile wall sees it even before the next backfill
+                    // sweep. Fire-and-forget; ingestRunSafe never throws.
+                    if (runsDb && cid) {
+                        runsDb.ingestRunSafe(resolveOutDir(), cid).catch(() => {});
+                    }
                     if (r.exitCode === 0) {
                         completed.push(bu);
                         jobState.fanOut.completed.push(bu);
@@ -688,6 +737,13 @@ app.post('/api/run', requireSuperAdmin, async (req, res) => {
         const runSingle = async () => {
             try {
                 const r = await runLisNavBot({ ...body, mode, orgId, startedAt });
+                // Phase 8: ingest the freshly-written run into Postgres so
+                // the next /api/runs/tiles call sees it without waiting for
+                // the next boot-time backfill.
+                if (runsDb) {
+                    const cid = runChildIdFromOutMainPath(r.outMainPath);
+                    if (cid) runsDb.ingestRunSafe(resolveOutDir(), cid).catch(() => {});
+                }
                 jobState = {
                     state: 'idle',
                     runId,
@@ -817,7 +873,7 @@ app.get('/api/runs', (_req, res) => {
     }
 });
 
-app.get('/api/runs/:id', (req, res) => {
+app.get('/api/runs/:id', async (req, res) => {
     const id = String(req.params.id || '')
         .replace(/[^0-9A-Za-z-_.TZ]/g, '')
         .trim();
@@ -825,6 +881,35 @@ app.get('/api/runs/:id', (req, res) => {
     const outDir = resolveOutDir();
     const mainPath = path.join(outDir, `run-${id}.json`);
     const pkgPath = path.join(outDir, `run-${id}-packages.json`);
+
+    // Phase 8: when DATABASE_URL is set, gate the response by the run's
+    // org_id stored in Postgres so a user can't fetch another org's run by
+    // guessing the timestamp slug. super_admin with ?all_orgs=1 bypasses.
+    // The on-disk JSON files remain the canonical payload — DB is only used
+    // to authorize. Falls through to a pure-disk path if the DB lookup
+    // misses (e.g. backfill hasn't happened yet for a brand-new artifact).
+    if (runsDb && process.env.DATABASE_URL && req.user) {
+        try {
+            const allOrgs = String(req.query.all_orgs || '') === '1' && req.user.role === 'super_admin';
+            const pool = require('../../server/db/pool').getPool();
+            const c = await pool.connect();
+            try {
+                const r = await c.query(`SELECT org_id FROM runs WHERE id = $1`, [id]);
+                if (r.rows.length > 0 && !allOrgs) {
+                    const rowOrg = r.rows[0].org_id;
+                    const userOrg = req.user.activeOrgId || 'org-default';
+                    if (rowOrg !== userOrg) {
+                        return res.status(404).json({ error: 'Run file not found' });
+                    }
+                }
+            } finally {
+                c.release();
+            }
+        } catch (e) {
+            console.warn('[stellar-matter] /api/runs/:id authz lookup failed:', e.message);
+        }
+    }
+
     if (!fs.existsSync(mainPath)) {
         return res.status(404).json({ error: 'Run file not found', mainPath });
     }
