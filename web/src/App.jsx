@@ -8,6 +8,7 @@ import { RunProgress } from './components/RunProgress.jsx';
 import { RoleGate } from './components/RoleGate.jsx';
 import { LoginPage } from './pages/LoginPage.jsx';
 import { AdminUsersPage } from './pages/AdminUsersPage.jsx';
+import { AdminAuditLogPage } from './pages/AdminAuditLogPage.jsx';
 import { useAuth } from './contexts/AuthContext.jsx';
 import { useTiles } from './hooks/useTiles.js';
 import { useBuOptions } from './hooks/useBuOptions.js';
@@ -222,6 +223,14 @@ export function App() {
                 element={
                     <RoleGate roles={['super_admin']}>
                         <AdminUsersPage />
+                    </RoleGate>
+                }
+            />
+            <Route
+                path="/admin/audit-log"
+                element={
+                    <RoleGate roles={['super_admin']}>
+                        <AdminAuditLogPage />
                     </RoleGate>
                 }
             />

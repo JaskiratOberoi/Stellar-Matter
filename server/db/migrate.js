@@ -3,6 +3,10 @@
 // Phase 3 migration: bare-minimum schema for the auth surface.
 // Phase 8 (runs in Postgres) and Phase 10 (orgs) extend this file with
 // runs/run_packages and organizations/user_org_assignments tables.
+//
+// Phase 9 (audit log) lives here too: a single append-only table that captures
+// who did what (login outcomes, admin user mutations, run starts) with a
+// before/after JSON pair for diffing. Idempotent: CREATE TABLE IF NOT EXISTS.
 
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
@@ -43,6 +47,37 @@ async function migrate() {
                 active BOOLEAN NOT NULL DEFAULT true
             );
         `);
+
+        // audit_log: append-only. actor_id is nullable for failed logins where
+        // we have a username string but no resolved user row. before/after are
+        // jsonb so we can run jsonpath queries when investigating an incident.
+        // metadata is a free-form jsonb bag (run id, target BU list, etc).
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS audit_log (
+                id BIGSERIAL PRIMARY KEY,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                actor_id TEXT,
+                actor_username TEXT,
+                action TEXT NOT NULL,
+                target_type TEXT,
+                target_id TEXT,
+                outcome TEXT NOT NULL CHECK (outcome IN ('success', 'failure')),
+                ip TEXT,
+                user_agent TEXT,
+                "before" JSONB,
+                "after" JSONB,
+                metadata JSONB
+            );
+        `);
+        await client.query(
+            `CREATE INDEX IF NOT EXISTS audit_log_created_at_idx ON audit_log (created_at DESC);`
+        );
+        await client.query(
+            `CREATE INDEX IF NOT EXISTS audit_log_action_idx ON audit_log (action, created_at DESC);`
+        );
+        await client.query(
+            `CREATE INDEX IF NOT EXISTS audit_log_actor_idx ON audit_log (actor_id, created_at DESC);`
+        );
 
         await seedSuperAdmin(client);
     } finally {

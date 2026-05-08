@@ -58,9 +58,14 @@ export function Topbar({
                 {authRequired && user && (
                     <span className="user-chip muted small">
                         {user.role === 'super_admin' && (
-                            <Link to="/admin/users" className="chip chip-tool admin-nav-link">
-                                Admin
-                            </Link>
+                            <>
+                                <Link to="/admin/users" className="chip chip-tool admin-nav-link">
+                                    Users
+                                </Link>
+                                <Link to="/admin/audit-log" className="chip chip-tool admin-nav-link">
+                                    Audit log
+                                </Link>
+                            </>
                         )}
                         <span>
                             {user.display_name || user.username}

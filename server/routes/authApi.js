@@ -9,6 +9,7 @@ const bcrypt = require('bcryptjs');
 const { getPool, useDatabase } = require('../db/pool');
 const { signToken, requireAuth, loadUserById } = require('../auth');
 const { loginLimiter } = require('../rateLimit');
+const { logAudit } = require('../audit');
 
 const router = express.Router();
 
@@ -28,14 +29,34 @@ router.post('/login', loginLimiter, async (req, res) => {
             [username]
         );
         if (r.rows.length === 0) {
+            await logAudit(req, {
+                action: 'auth.login',
+                outcome: 'failure',
+                actorUsername: username,
+                metadata: { reason: 'unknown_user' }
+            });
             return res.status(401).json({ error: 'Invalid credentials' });
         }
         const u = r.rows[0];
         if (!u.active) {
+            await logAudit(req, {
+                action: 'auth.login',
+                outcome: 'failure',
+                actorId: u.id,
+                actorUsername: u.username,
+                metadata: { reason: 'account_disabled' }
+            });
             return res.status(403).json({ error: 'Account disabled' });
         }
         const ok = await bcrypt.compare(password, u.password_hash);
         if (!ok) {
+            await logAudit(req, {
+                action: 'auth.login',
+                outcome: 'failure',
+                actorId: u.id,
+                actorUsername: u.username,
+                metadata: { reason: 'bad_password' }
+            });
             return res.status(401).json({ error: 'Invalid credentials' });
         }
         const token = signToken({
@@ -43,6 +64,13 @@ router.post('/login', loginLimiter, async (req, res) => {
             username: u.username,
             role: u.role,
             displayName: u.display_name
+        });
+        await logAudit(req, {
+            action: 'auth.login',
+            outcome: 'success',
+            actorId: u.id,
+            actorUsername: u.username,
+            metadata: { role: u.role }
         });
         res.json({
             token,

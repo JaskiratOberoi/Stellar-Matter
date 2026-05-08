@@ -344,12 +344,14 @@ let auth = null;
 let authApi = null;
 let adminApi = null;
 let runMigrate = null;
+let auditLog = null;
 try {
     const serverDir = path.resolve(__dirname, '..', '..', 'server');
     auth = require(path.join(serverDir, 'auth'));
     authApi = require(path.join(serverDir, 'routes', 'authApi'));
     adminApi = require(path.join(serverDir, 'routes', 'adminApi'));
     runMigrate = require(path.join(serverDir, 'db', 'migrate')).migrate;
+    auditLog = require(path.join(serverDir, 'audit')).logAudit;
 } catch (e) {
     // Auth deps not installed yet — fall through and serve the legacy open dashboard.
     if (process.env.DATABASE_URL) {
@@ -509,6 +511,23 @@ app.post('/api/run', requireSuperAdmin, async (req, res) => {
         fanOut: null,
         lastFanOut: null
     };
+
+    if (auditLog) {
+        // Fire-and-forget: audit insert doesn't gate the run kicking off.
+        auditLog(req, {
+            action: 'run.start',
+            targetType: 'run',
+            targetId: runId,
+            outcome: 'success',
+            metadata: {
+                source,
+                business_units: businessUnits.length ? businessUnits : (body && body.bu ? [body.bu] : []),
+                from_date: body && body.fromDate ? String(body.fromDate) : null,
+                to_date: body && body.toDate ? String(body.toDate) : null,
+                fan_out: businessUnits.length > 0
+            }
+        }).catch(() => {});
+    }
 
     /** @type {Record<string, unknown>} */
     const bodySansUnits = { ...body };
