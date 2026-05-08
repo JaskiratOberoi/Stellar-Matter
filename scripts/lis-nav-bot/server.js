@@ -13,6 +13,10 @@ const app = express();
 const PORT = Number(process.env.LIS_UI_PORT || 4377);
 const HOST = process.env.LIS_UI_HOST || '127.0.0.1';
 
+function listecApiBase() {
+    return (process.env.LISTEC_API_BASE_URL || 'http://127.0.0.1:3100').replace(/\/$/, '');
+}
+
 function resolveOutDir() {
     const raw = process.env.LIS_OUT_DIR || './out';
     return path.isAbsolute(raw) ? raw : path.resolve(process.cwd(), raw);
@@ -130,7 +134,157 @@ function buildSummary(result, paths = {}) {
     };
 }
 
-/** @type {{ state: 'idle'|'running', runId: string|null, startedAt: string|null, error: string|null, summary: object|null, result: object|null, outMainPath: string|null, outPackagesPath: string|null, exitCode: number|null }} */
+function makeOtherTestsPinned(otherTestsRowCount) {
+    const n = Math.max(0, Math.floor(Number(otherTestsRowCount) || 0));
+    if (n <= 0) return null;
+    return { label: 'Other tests', count: n, pagesPerReport: 1, isOther: true };
+}
+
+/**
+ * @param {Record<string, unknown>} occ
+ * @param {number} otherN
+ * @param {Record<string, number>} normalizedMap
+ */
+function computePrintedTotals(occ, otherN, normalizedMap) {
+    const pinned = makeOtherTestsPinned(otherN);
+    let knownSum = 0;
+    let unknownLabels = 0;
+    /** @param {{ label: string, count: number, pagesPerReport: number|null, isOther?: boolean }} row */
+    const add = (row) => {
+        const c = Number(row.count) || 0;
+        if (row.isOther) {
+            knownSum += c * (row.pagesPerReport != null ? Number(row.pagesPerReport) : 1);
+            return;
+        }
+        if (row.pagesPerReport != null && Number.isFinite(Number(row.pagesPerReport))) {
+            knownSum += c * Number(row.pagesPerReport);
+        } else unknownLabels++;
+    };
+    if (pinned) add({ ...pinned, isOther: true });
+    for (const [label, count] of Object.entries(occ || {})) {
+        const norm = normalizePackageLabel(label);
+        const ppr = normalizedMap[norm];
+        add({
+            label,
+            count: Number(count) || 0,
+            pagesPerReport: ppr != null && Number.isFinite(Number(ppr)) ? Number(ppr) : null
+        });
+    }
+    return { knownSum, unknownLabels };
+}
+
+/**
+ * @param {string} outDir
+ * @param {string} packagesFileName
+ */
+function buildTileFromRunFiles(outDir, packagesFileName) {
+    const m = /^run-(.+)-packages\.json$/i.exec(packagesFileName);
+    if (!m) return null;
+    const id = m[1];
+    const pkgPath = path.join(outDir, packagesFileName);
+    const mainPath = path.join(outDir, `run-${id}.json`);
+    /** @type {Record<string, unknown>} */
+    let pkg;
+    try {
+        pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+    } catch {
+        return null;
+    }
+    let main = null;
+    if (fs.existsSync(mainPath)) {
+        try {
+            main = JSON.parse(fs.readFileSync(mainPath, 'utf8'));
+        } catch {
+            main = null;
+        }
+    }
+    const occ = pkg.labelOccurrences && typeof pkg.labelOccurrences === 'object' ? pkg.labelOccurrences : {};
+    const otherN =
+        pkg.otherTestsRowCount != null && Number.isFinite(Number(pkg.otherTestsRowCount))
+            ? Math.max(0, Math.floor(Number(pkg.otherTestsRowCount)))
+            : 0;
+    const { normalizedMap } = readPackagePagesFile();
+    const labelRows = Object.entries(occ)
+        .map(([label, count]) => {
+            const norm = normalizePackageLabel(label);
+            const ppr = normalizedMap[norm];
+            return {
+                label,
+                count: Number(count) || 0,
+                pagesPerReport: ppr != null && Number.isFinite(Number(ppr)) ? Number(ppr) : null
+            };
+        })
+        .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+    const { knownSum, unknownLabels } = computePrintedTotals(occ, otherN, normalizedMap);
+    const pinned = makeOtherTestsPinned(otherN);
+    const occSum = Object.values(occ).reduce((s, v) => s + (Number(v) || 0), 0);
+    const occurrences = occSum + (pinned ? pinned.count : 0);
+    const uniqueLabels =
+        pkg.uniqueLabelCount != null && Number.isFinite(Number(pkg.uniqueLabelCount))
+            ? Number(pkg.uniqueLabelCount)
+            : labelRows.length + (pinned ? 1 : 0);
+    const filter = (pkg.filter && typeof pkg.filter === 'object' ? pkg.filter : null) || {};
+    const req = (main && main.filtersRequested) || {};
+    const bu =
+        (filter.bu != null && String(filter.bu).trim() && String(filter.bu).trim()) ||
+        (req.bu != null && String(req.bu).trim() && String(req.bu).trim()) ||
+        '—';
+    const source = (main && main.source) || (pkg.source && String(pkg.source)) || 'scrape';
+    const sidCount = main && Array.isArray(main.sidsFoundOnPage1) ? main.sidsFoundOnPage1.length : 0;
+    const errors = (main && Array.isArray(main.errors) ? main.errors : []) || [];
+    const startedAt = (main && main.startedAt) || pkg.startedAt || null;
+    const top50 = labelRows.slice(0, 50);
+    return {
+        id,
+        startedAt,
+        finishedAt: null,
+        source,
+        bu,
+        fromDate: filter.fromDate != null ? String(filter.fromDate) : req.fromDate != null ? String(req.fromDate) : null,
+        toDate: filter.toDate != null ? String(filter.toDate) : req.toDate != null ? String(req.toDate) : null,
+        fromHour: filter.fromHour != null ? filter.fromHour : req.fromHour,
+        toHour: filter.toHour != null ? filter.toHour : req.toHour,
+        totals: {
+            totalPrintedPages: knownSum,
+            estimated: unknownLabels > 0,
+            sids: sidCount,
+            occurrences,
+            uniqueLabels,
+            otherTestsRowCount: otherN,
+            errors: errors.length
+        },
+        paths: {
+            mainJson: fs.existsSync(mainPath) ? mainPath : null,
+            packagesJson: pkgPath
+        },
+        labelRows: top50,
+        labelRowCount: labelRows.length,
+        filtersApplied: (main && main.filtersApplied) || (pkg.filtersApplied && typeof pkg.filtersApplied === 'object' ? pkg.filtersApplied : null)
+    };
+}
+
+async function fetchListecLookups() {
+    try {
+        const r = await fetch(`${listecApiBase()}/api/lookups`);
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const j = await r.json();
+        return {
+            businessUnits: Array.isArray(j.businessUnits) ? j.businessUnits : [],
+            statuses: Array.isArray(j.statuses) ? j.statuses : [],
+            departments: Array.isArray(j.departments) ? j.departments : [],
+            error: null
+        };
+    } catch (e) {
+        return {
+            businessUnits: [],
+            statuses: [],
+            departments: [],
+            error: String(e && e.message ? e : e)
+        };
+    }
+}
+
+/** @type {{ state: 'idle'|'running', runId: string|null, startedAt: string|null, error: string|null, summary: object|null, result: object|null, outMainPath: string|null, outPackagesPath: string|null, exitCode: number|null, fanOut?: object|null, lastFanOut?: object|null }} */
 let jobState = {
     state: 'idle',
     runId: null,
@@ -140,7 +294,9 @@ let jobState = {
     result: null,
     outMainPath: null,
     outPackagesPath: null,
-    exitCode: null
+    exitCode: null,
+    fanOut: null,
+    lastFanOut: null
 };
 
 app.use(express.json({ limit: '64kb' }));
@@ -165,8 +321,79 @@ app.get('/api/run/status', (_req, res) => {
         result: jobState.state === 'idle' ? jobState.result : null,
         outMainPath: jobState.state === 'idle' ? jobState.outMainPath : null,
         outPackagesPath: jobState.state === 'idle' ? jobState.outPackagesPath : null,
-        exitCode: jobState.state === 'idle' ? jobState.exitCode : null
+        exitCode: jobState.state === 'idle' ? jobState.exitCode : null,
+        fanOut: jobState.fanOut,
+        lastFanOut: jobState.state === 'idle' ? jobState.lastFanOut : null
     });
+});
+
+/**
+ * @param {Record<string, unknown>} body
+ */
+function normalizeBusinessUnits(body) {
+    const raw = body.businessUnits;
+    if (!Array.isArray(raw)) return [];
+    return [...new Set(raw.map((s) => String(s || '').trim()).filter(Boolean))];
+}
+
+/**
+ * @param {Record<string, unknown>} body
+ */
+function resolveSource(body) {
+    const raw = body.source != null ? String(body.source) : process.env.LIS_SOURCE || '';
+    return raw && /^sql$/i.test(raw) ? 'sql' : 'scrape';
+}
+
+/**
+ * @param {string | null | undefined} p
+ */
+function runChildIdFromOutMainPath(p) {
+    if (!p) return null;
+    const m = /[/\\]run-(.+)\.json$/i.exec(String(p));
+    return m ? m[1] : null;
+}
+
+app.get('/api/bu', async (_req, res) => {
+    const data = await fetchListecLookups();
+    res.json(data);
+});
+
+app.get('/api/runs/tiles', (_req, res) => {
+    const outDir = resolveOutDir();
+    /** @type {object[]} */
+    const tiles = [];
+    /** @type {object[]} */
+    const errors = [];
+    try {
+        if (!fs.existsSync(outDir)) {
+            return res.json({ tiles: [], errors: [], outDir });
+        }
+        const names = fs.readdirSync(outDir);
+        for (const name of names) {
+            if (!/^run-.+-packages\.json$/i.test(name)) continue;
+            if (name.includes('-error')) continue;
+            try {
+                const full = path.join(outDir, name);
+                const st = fs.statSync(full);
+                const t = buildTileFromRunFiles(outDir, name);
+                if (t) {
+                    tiles.push({ ...t, _mtime: st.mtimeMs });
+                }
+            } catch (e) {
+                errors.push({ file: name, error: String(e && e.message ? e.message : e) });
+            }
+        }
+        tiles.sort((a, b) => {
+            const ta = a.startedAt ? Date.parse(String(a.startedAt)) : 0;
+            const tb = b.startedAt ? Date.parse(String(b.startedAt)) : 0;
+            if (ta !== tb) return tb - ta;
+            return (b._mtime || 0) - (a._mtime || 0);
+        });
+        const cleaned = tiles.map(({ _mtime, ...rest }) => rest);
+        res.json({ tiles: cleaned, errors, outDir });
+    } catch (e) {
+        res.status(500).json({ error: String(e && e.message ? e.message : e) });
+    }
 });
 
 app.post('/api/run', async (req, res) => {
@@ -178,6 +405,15 @@ app.post('/api/run', async (req, res) => {
     }
 
     const body = req.body && typeof req.body === 'object' ? req.body : {};
+    const source = resolveSource(body);
+    const businessUnits = normalizeBusinessUnits(body);
+    if (businessUnits.length && source !== 'sql') {
+        return res.status(400).json({
+            error:
+                'Multi–business unit runs require SQL source. Switch to “SQL (Listec)” or clear extra BU chips and use a single BU for web scrape.'
+        });
+    }
+
     const startedAt = new Date().toISOString();
     const runId = startedAt.replace(/[:.]/g, '-');
 
@@ -190,12 +426,114 @@ app.post('/api/run', async (req, res) => {
         result: null,
         outMainPath: null,
         outPackagesPath: null,
-        exitCode: null
+        exitCode: null,
+        fanOut: null,
+        lastFanOut: null
     };
 
+    /** @type {Record<string, unknown>} */
+    const bodySansUnits = { ...body };
+    delete bodySansUnits.businessUnits;
+
     setImmediate(() => {
-        runLisNavBot({ ...body, startedAt })
-            .then((r) => {
+        const runFanOutSerial = async () => {
+            /** @type {{ bu: string, state: string, childRunId?: string|null, error?: string|null, outMainPath?: string|null, outPackagesPath?: string|null, exitCode?: number }[]} */
+            const items = businessUnits.map((bu) => ({ bu, state: 'queued', childRunId: null, error: null }));
+            /** @type {string[]} */
+            const completed = [];
+            /** @type {string[]} */
+            const failed = [];
+            jobState.fanOut = {
+                batchRunId: runId,
+                queued: businessUnits.slice(),
+                completed: [],
+                failed: [],
+                items
+            };
+
+            let lastR = /** @type {{ result: object, outMainPath: string|null, outPackagesPath: string|null, exitCode: number }|null} */ (null);
+            for (let i = 0; i < businessUnits.length; i++) {
+                const bu = businessUnits[i];
+                items[i].state = 'running';
+                const childStartedAt = new Date().toISOString();
+                try {
+                    const r = await runLisNavBot({
+                        ...bodySansUnits,
+                        source: 'sql',
+                        bu,
+                        startedAt: childStartedAt
+                    });
+                    lastR = r;
+                    const cid = runChildIdFromOutMainPath(r.outMainPath);
+                    items[i].state = r.exitCode === 0 ? 'done' : 'failed';
+                    items[i].childRunId = cid;
+                    items[i].outMainPath = r.outMainPath;
+                    items[i].outPackagesPath = r.outPackagesPath;
+                    items[i].exitCode = r.exitCode;
+                    if (r.exitCode === 0) {
+                        completed.push(bu);
+                        jobState.fanOut.completed.push(bu);
+                    } else {
+                        failed.push(bu);
+                        jobState.fanOut.failed.push(bu);
+                        items[i].error = (r.result.errors && r.result.errors[0]) || 'Run failed';
+                    }
+                } catch (e) {
+                    const msg = String(e && e.message ? e.message : e);
+                    items[i].state = 'failed';
+                    items[i].error = msg;
+                    failed.push(bu);
+                    jobState.fanOut.failed.push(bu);
+                }
+            }
+
+            const anyFail = failed.length > 0;
+            const errMsg = anyFail ? `Failed BU(s): ${failed.join(', ')}` : null;
+            const fanOutSnapshot = {
+                batchRunId: runId,
+                queued: businessUnits.slice(),
+                completed: completed.slice(),
+                failed: failed.slice(),
+                items: items.map((x) => ({ ...x }))
+            };
+
+            if (lastR) {
+                jobState = {
+                    state: 'idle',
+                    runId,
+                    startedAt,
+                    error: anyFail ? errMsg : null,
+                    summary: buildSummary(lastR.result, {
+                        outMainPath: lastR.outMainPath,
+                        outPackagesPath: lastR.outPackagesPath
+                    }),
+                    result: lastR.result,
+                    outMainPath: lastR.outMainPath,
+                    outPackagesPath: lastR.outPackagesPath,
+                    exitCode: anyFail ? 1 : lastR.exitCode,
+                    fanOut: null,
+                    lastFanOut: fanOutSnapshot
+                };
+            } else {
+                jobState = {
+                    state: 'idle',
+                    runId,
+                    startedAt,
+                    error: errMsg || 'No runs completed',
+                    summary: null,
+                    result: null,
+                    outMainPath: null,
+                    outPackagesPath: null,
+                    exitCode: 1,
+                    fanOut: null,
+                    lastFanOut: fanOutSnapshot
+                };
+            }
+        };
+
+        const runSingle = async () => {
+            try {
+                const r = await runLisNavBot({ ...body, startedAt });
                 jobState = {
                     state: 'idle',
                     runId,
@@ -205,10 +543,11 @@ app.post('/api/run', async (req, res) => {
                     result: r.result,
                     outMainPath: r.outMainPath,
                     outPackagesPath: r.outPackagesPath,
-                    exitCode: r.exitCode
+                    exitCode: r.exitCode,
+                    fanOut: null,
+                    lastFanOut: null
                 };
-            })
-            .catch((e) => {
+            } catch (e) {
                 jobState = {
                     state: 'idle',
                     runId,
@@ -218,12 +557,54 @@ app.post('/api/run', async (req, res) => {
                     result: null,
                     outMainPath: null,
                     outPackagesPath: null,
-                    exitCode: 1
+                    exitCode: 1,
+                    fanOut: null,
+                    lastFanOut: null
+                };
+            }
+        };
+
+        if (businessUnits.length) {
+            runFanOutSerial().catch((e) => {
+                const partial = jobState.fanOut;
+                jobState = {
+                    state: 'idle',
+                    runId,
+                    startedAt,
+                    error: String(e && e.message ? e.message : e),
+                    summary: null,
+                    result: null,
+                    outMainPath: null,
+                    outPackagesPath: null,
+                    exitCode: 1,
+                    fanOut: null,
+                    lastFanOut: partial
                 };
             });
+        } else {
+            runSingle().catch((e) => {
+                jobState = {
+                    state: 'idle',
+                    runId,
+                    startedAt,
+                    error: String(e && e.message ? e.message : e),
+                    summary: null,
+                    result: null,
+                    outMainPath: null,
+                    outPackagesPath: null,
+                    exitCode: 1,
+                    fanOut: null,
+                    lastFanOut: null
+                };
+            });
+        }
     });
 
-    res.json({ runId, startedAt });
+    const payload =
+        businessUnits.length > 0
+            ? { runId, startedAt, queued: businessUnits.slice(), completed: [], failed: [] }
+            : { runId, startedAt };
+    res.json(payload);
 });
 
 app.get('/api/runs', (_req, res) => {

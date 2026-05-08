@@ -2,6 +2,8 @@
     const LS_VIEW = 'lisbot:view';
     const LS_SIDEBAR = 'lisbot:sidebar';
     const LS_SOURCE = 'lisbot:source';
+    const LS_HIDDEN = 'lisbot:hidden-tiles';
+    const LS_BU_SELECTION = 'lisbot:bu-selection';
 
     const form = document.getElementById('run-form');
     const submitBtn = document.getElementById('submit-btn');
@@ -12,84 +14,65 @@
     const appShell = document.getElementById('app-shell');
     const runSidebar = document.getElementById('run-sidebar');
 
-    const resultsPlaceholder = document.getElementById('results-placeholder');
-    const resultsBody = document.getElementById('results-body');
-    const runningShade = document.getElementById('running-shade');
     const lastUpdatedEl = document.getElementById('last-updated');
     const viewResults = document.getElementById('view-results');
     const viewHistory = document.getElementById('view-history');
     const tabResultsBtn = document.getElementById('tab-results');
     const tabHistoryBtn = document.getElementById('tab-history');
 
-    const packageMetricsZone = document.getElementById('package-metrics');
-    const nonPackageBanner = document.getElementById('non-package-banner');
-    const nonPackageMode = document.getElementById('non-package-mode');
-    const nonPackageStats = document.getElementById('non-package-stats');
+    const runProgressWrap = document.getElementById('run-progress-wrap');
+    const runProgressStrip = document.getElementById('run-progress-strip');
+    const resultsError = document.getElementById('results-error');
+    const tileEmpty = document.getElementById('tile-empty');
+    const tileGrid = document.getElementById('tile-grid');
+    const restoreHiddenWrap = document.getElementById('restore-hidden-wrap');
+    const restoreHiddenBtn = document.getElementById('restore-hidden-btn');
 
-    const kpiTotalPages = document.getElementById('kpi-total-pages');
-    const kpiTotalSub = document.getElementById('kpi-total-pages-sub');
-    const kpiEstChip = document.getElementById('kpi-estimated-chip');
-    const kpiOccurrences = document.getElementById('kpi-occurrences');
-    const kpiUnique = document.getElementById('kpi-unique');
-    const kpiPagesScanned = document.getElementById('kpi-pages-scanned');
-    const kpiRecoveries = document.getElementById('kpi-recoveries');
-    const kpiErrors = document.getElementById('kpi-errors');
+    const dateChipRow = document.getElementById('date-quick-chips');
+    const buChipGrid = document.getElementById('bu-chip-grid');
+    const buChipAllBtn = document.getElementById('bu-chip-all');
+    const buChipClearBtn = document.getElementById('bu-chip-clear-selection');
+    const buLookupError = document.getElementById('bu-lookup-error');
+    const buFreeText = /** @type {HTMLInputElement|null} */ (form.querySelector('input[name="bu"]'));
+    const fromDateInput = /** @type {HTMLInputElement|null} */ (form.querySelector('input[name="fromDate"]'));
+    const toDateInput = /** @type {HTMLInputElement|null} */ (form.querySelector('input[name="toDate"]'));
 
-    const heroCalloutLabel = document.getElementById('hero-callout-label');
-    const heroCalloutSub = document.getElementById('hero-callout-sub');
-    const heroCalloutPages = document.getElementById('hero-callout-pages');
+    const runModal = /** @type {HTMLDialogElement|null} */ (document.getElementById('run-modal'));
+    const runModalEyebrow = document.getElementById('run-modal-eyebrow');
+    const runModalTitle = document.getElementById('run-modal-title');
+    const runModalSub = document.getElementById('run-modal-sub');
+    const runModalClose = document.getElementById('run-modal-close');
+    const runModalPaths = document.getElementById('run-modal-paths');
+    const modalPackagesWrap = document.getElementById('modal-packages-wrap');
+    const modalPackagesSearch = /** @type {HTMLInputElement|null} */ (document.getElementById('modal-packages-search'));
+    const modalPackagesShown = document.getElementById('modal-packages-shown');
+    const runModalTotalPages = document.getElementById('run-modal-total-pages');
+    const runModalEstChip = document.getElementById('run-modal-est-chip');
 
-    const filtersAppliedLine = document.getElementById('filters-applied-line');
-    const runMetaStrip = document.getElementById('run-meta-strip');
-    const recoveryDrawer = document.getElementById('recovery-drawer');
-    const recoveryBody = document.getElementById('recovery-body');
-
-    const packagesSection = document.getElementById('packages-section');
-    const packagesTableWrap = document.getElementById('packages-table-wrap');
-    const packagesStats = document.getElementById('packages-stats');
-    const packagesShown = document.getElementById('packages-shown');
-    const packagesSearch = document.getElementById('packages-search');
-    const historyTable = document.querySelector('#history-table tbody');
+    const historyTable = /** @type {HTMLTableSectionElement|null} */ (document.querySelector('#history-table tbody'));
     const historyPath = document.getElementById('history-path');
     const refreshHistory = document.getElementById('refresh-history');
     const detailJson = document.getElementById('detail-json');
     const detailPackagesWrap = document.getElementById('detail-packages-table-wrap');
-    const scrapePackages = document.getElementById('scrapePackages');
-    const openSid = document.getElementById('openSid');
+    const scrapePackages = /** @type {HTMLInputElement|null} */ (document.getElementById('scrapePackages'));
+    const openSid = /** @type {HTMLInputElement|null} */ (document.getElementById('openSid'));
 
     let activeTab = 'main';
-    let pollTimer = null;
-    let selectedId = null;
-    let lastLatestPackageRows = [];
-    /** @type {ReturnType<typeof makeOtherTestsPinned>|null} */
-    let lastLatestPinned = null;
-    /** @type {any} */
-    let lastDashboardPayload = null;
+    let pollTimer = /** @type {ReturnType<typeof setInterval>|null} */ (null);
+    let selectedId = /** @type {string|null} */ (null);
+
+    /** @type {{ id: string, label: string }[]} */
+    let buOptions = [];
+    /** @type {Set<string>} */
+    let buSelected = new Set();
+    /** @type {{ tiles: any[], errors: any[] }} */
+    let lastTilePayload = { tiles: [], errors: [] };
+    /** @type {any[]} */
+    let visibleTiles = [];
 
     /** @type {'results'|'history'} */
     let currentView =
         typeof localStorage !== 'undefined' && localStorage.getItem(LS_VIEW) === 'history' ? 'history' : 'results';
-
-    let pendingFocusResults = false;
-
-    /**
-     * @param {{ label: string, count: number, pagesPerReport?: number|null, totalPages?: number|null, isOther?: boolean }[]} bodyRows
-     * @param {{ label: string, count: number, pagesPerReport?: number|null, isOther?: boolean }|null} pinnedRow
-     * @returns {{ knownSum: number, unknownLabels: number }}
-     */
-    function aggregateWholeScanPrintedPagesFromRows(bodyRows, pinnedRow) {
-        let knownSum = 0;
-        let unknownLabels = 0;
-        /** @param {{ label?: string, count?: number, isOther?: boolean, pagesPerReport?: number|null, totalPages?: number|null }} row */
-        const add = (row) => {
-            const p = resolveTotalPagesProduct(row);
-            if (p == null) unknownLabels++;
-            else knownSum += p;
-        };
-        if (pinnedRow && Number(pinnedRow.count) > 0) add(pinnedRow);
-        (bodyRows || []).forEach(add);
-        return { knownSum, unknownLabels };
-    }
 
     function escapeHtml(s) {
         return String(s)
@@ -99,7 +82,27 @@
             .replace(/"/g, '&quot;');
     }
 
+    function readHiddenSet() {
+        try {
+            const raw = localStorage.getItem(LS_HIDDEN);
+            if (!raw) return new Set();
+            const arr = JSON.parse(raw);
+            return new Set(Array.isArray(arr) ? arr.map(String) : []);
+        } catch {
+            return new Set();
+        }
+    }
+
+    function writeHiddenSet(set) {
+        try {
+            localStorage.setItem(LS_HIDDEN, JSON.stringify([...set]));
+        } catch {
+            /**/
+        }
+    }
+
     function syncOpenSidDisabled() {
+        if (!scrapePackages) return;
         const dis = scrapePackages.checked;
         if (openSid) {
             openSid.disabled = dis;
@@ -119,13 +122,10 @@
         }
 
         const isResults = currentView === 'results';
-
         if (tabResultsBtn) tabResultsBtn.setAttribute('aria-selected', isResults ? 'true' : 'false');
         if (tabHistoryBtn) tabHistoryBtn.setAttribute('aria-selected', isResults ? 'false' : 'true');
-
         tabResultsBtn?.classList.toggle('active', isResults);
         tabHistoryBtn?.classList.toggle('active', !isResults);
-
         if (viewResults) viewResults.hidden = !isResults;
         if (viewHistory) viewHistory.hidden = isResults;
     }
@@ -179,7 +179,6 @@
             });
         });
     }
-
     setupDetailTabs();
 
     form?.addEventListener('keydown', (e) => {
@@ -195,19 +194,15 @@
     });
 
     (function setupViewShortcuts() {
-        /** @type {ReturnType<typeof setTimeout>|null} */
-        let clearT = null;
+        let clearT = /** @type {ReturnType<typeof setTimeout>|null} */ (null);
         let awaitingSecond = false;
         window.addEventListener(
             'keydown',
-            /** @param {KeyboardEvent} e */
             (e) => {
                 const ae = /** @type {HTMLElement|null} */ (document.activeElement);
                 const tn = ae && ae.tagName;
                 if (tn === 'INPUT' || tn === 'TEXTAREA' || tn === 'SELECT') return;
-
                 const ch = typeof e.key === 'string' && e.key.length === 1 ? e.key.toLowerCase() : '';
-
                 if (ch === 'g') {
                     if (clearT) clearTimeout(clearT);
                     awaitingSecond = true;
@@ -217,10 +212,8 @@
                     }, 950);
                     return;
                 }
-
                 if (!awaitingSecond) return;
                 if (ch !== 'r' && ch !== 'h') return;
-
                 e.preventDefault();
                 awaitingSecond = false;
                 if (clearT) clearTimeout(clearT);
@@ -231,7 +224,10 @@
         );
     })();
 
-    /** @param {string} s */
+    /* ------------------------------------------------------------------ */
+    /* Package-pages map + label helpers (shared with modal table)        */
+    /* ------------------------------------------------------------------ */
+
     function normalizePackageLabel(s) {
         return String(s || '')
             .replace(/\s+/g, ' ')
@@ -242,7 +238,6 @@
     /** @type {Record<string, number>} */
     let clientPagesByNorm = {};
 
-    /** @returns {Promise<void>} */
     function loadPackagePagesMap() {
         return fetch('/api/package-pages')
             .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
@@ -259,10 +254,6 @@
             });
     }
 
-    /**
-     * @param {{ label: string, count: number, pagesPerReport?: number|null, totalPages?: number|null }} row
-     * @returns {number|null}
-     */
     function resolvePagesPerReport(row) {
         if (row.isOther === true) return 1;
         if (row.pagesPerReport != null && Number.isFinite(Number(row.pagesPerReport))) return Number(row.pagesPerReport);
@@ -271,10 +262,6 @@
         return Number.isFinite(n) ? n : null;
     }
 
-    /**
-     * @param {{ label: string, count: number, pagesPerReport?: number|null, totalPages?: number|null, isOther?: boolean }} row
-     * @returns {number|null}
-     */
     function resolveTotalPagesProduct(row) {
         const ppr = resolvePagesPerReport(row);
         if (ppr == null) return null;
@@ -282,73 +269,57 @@
         return c * ppr;
     }
 
-    /** @param {Record<string, number>|null|undefined} occ */
     function rowsFromLabelOccurrences(occ) {
         if (!occ || typeof occ !== 'object') return [];
         return Object.entries(occ).map(([label, count]) => ({ label, count: Number(count) || 0 }));
     }
 
-    /** @returns {{ label: string, count: number, pagesPerReport: number, isOther: true }|null} */
     function makeOtherTestsPinned(count) {
         const n = Math.floor(Number(count)) || 0;
         if (n < 1) return null;
         return { label: 'Other tests', count: n, pagesPerReport: 1, isOther: /** @type {const} */ (true) };
     }
 
-    /**
-     * @param {*} summary
-     * @param {*} result
-     * @returns {{ packageRows: Array<{ label: string, count: number }>, pinned: ReturnType<typeof makeOtherTestsPinned>, isScrape: boolean }}
-     */
-    function buildPackageDataset(summary, result) {
-        const isScrape = !!(summary && summary.scrapePackages);
-        /** @type {Array<{ label: string, count: number, pagesPerReport?: number|null, totalPages?: number|null }>} */
-        let packageRows = [];
-        if (summary && Array.isArray(summary.packageLabelRows)) {
-            packageRows = summary.packageLabelRows.slice();
-        } else {
-            packageRows = rowsFromLabelOccurrences(
-                result && result.scrapePackages && result.scrapePackages.labelOccurrences
-            );
-        }
-        const otherN =
-            (summary && typeof summary.otherTestsRowCount === 'number' && Number.isFinite(summary.otherTestsRowCount)
-                ? summary.otherTestsRowCount
-                : null) ??
-            (result &&
-            result.scrapePackages &&
-            typeof result.scrapePackages.otherTestsRowCount === 'number' &&
-            Number.isFinite(result.scrapePackages.otherTestsRowCount)
-                ? result.scrapePackages.otherTestsRowCount
-                : 0);
-        const pinned = makeOtherTestsPinned(otherN);
-        return { packageRows, pinned, isScrape };
+    function aggregateWholeScanPrintedPagesFromRows(bodyRows, pinnedRow) {
+        let knownSum = 0;
+        let unknownLabels = 0;
+        const add = (row) => {
+            const p = resolveTotalPagesProduct(row);
+            if (p == null) unknownLabels++;
+            else knownSum += p;
+        };
+        if (pinnedRow && Number(pinnedRow.count) > 0) add(pinnedRow);
+        (bodyRows || []).forEach(add);
+        return { knownSum, unknownLabels };
     }
 
-    /** Stateful table — sort + filter; footer uses shared totals helper */
-    /** @param {HTMLElement|null} host */
+    /* ------------------------------------------------------------------ */
+    /* Reusable per-package sortable/filterable table                      */
+    /* ------------------------------------------------------------------ */
+
     function createPackagesTable(host) {
-        if (!host)
+        if (!host) {
             return {
-                /** @returns {void} */
                 setRows() {},
-                /** @returns {void} */ setFilter() {},
+                setFilter() {},
                 redraw() {},
-                /** @returns {{ total: number, unique: number }} */ getStats: () => ({ total: 0, unique: 0 })
+                getStats: () => ({ total: 0, unique: 0 }),
+                getAggregates: () => ({ knownSum: 0, unknownLabels: 0 })
             };
+        }
 
         const state = /** @type {any} */ ({
-            rows: /** @type {Array<{ label: string, count: number }>} */ ([]),
-            pinned: /** @type {ReturnType<typeof makeOtherTestsPinned>} */ (null),
+            rows: [],
+            pinned: null,
             sortKey: 'count',
             sortDir: 'desc',
             filter: '',
-            onCount: /** @type {((visible: number, total: number) => void)|null} */ (null)
+            onCount: null
         });
 
         function filtered() {
             const q = state.filter.trim().toLowerCase();
-            const rs = q ? state.rows.filter((/** @type {*} */ r) => r.label.toLowerCase().includes(q)) : state.rows.slice();
+            const rs = q ? state.rows.filter((r) => r.label.toLowerCase().includes(q)) : state.rows.slice();
             const k = state.sortKey;
             const dir = state.sortDir === 'asc' ? 1 : -1;
             const ascend = state.sortDir === 'asc';
@@ -412,11 +383,11 @@
                 const totalPagesProduct = resolveTotalPagesProduct(pinnedRow);
                 const pagesCell =
                     totalPagesProduct != null
-                        ? `<td class="pages-num">${escapeHtml(String(totalPagesProduct.toLocaleString('en-US')))}</td>`
+                        ? `<td class="pages-num">${escapeHtml(totalPagesProduct.toLocaleString('en-US'))}</td>`
                         : '<td class="pages-cell"><span class="unknown-chip">unknown</span></td>';
                 html +=
-                    `<tr class="pinned-row">` +
-                    `<td class="rank rank-pinned">—</td>` +
+                    '<tr class="pinned-row">' +
+                    '<td class="rank rank-pinned">—</td>' +
                     `<td class="label">${escapeHtml(pinnedRow.label)}</td>` +
                     `<td class="count">${escapeHtml(String(pinnedRow.count))}</td>` +
                     pagesCell +
@@ -428,7 +399,7 @@
                 const totalPagesProduct = resolveTotalPagesProduct(row);
                 const pagesCell =
                     totalPagesProduct != null
-                        ? `<td class="pages-num">${escapeHtml(String(totalPagesProduct.toLocaleString('en-US')))}</td>`
+                        ? `<td class="pages-num">${escapeHtml(totalPagesProduct.toLocaleString('en-US'))}</td>`
                         : '<td class="pages-cell"><span class="unknown-chip">unknown</span></td>';
                 html +=
                     `<tr class="${trClass}">` +
@@ -443,7 +414,6 @@
                 state.rows,
                 hasPinned ? pinnedRow : null
             );
-
             const totalPagesCellNum = knownSum.toLocaleString('en-US');
             const totalPagesCellBody =
                 unknownLabels === 0
@@ -451,20 +421,16 @@
                     : `${escapeHtml(totalPagesCellNum)} <span class="muted">${escapeHtml(
                           ` (${unknownLabels} label${unknownLabels === 1 ? '' : 's'} unmapped — minimum)`
                       )}</span>`;
-
             const tfootPagesCls = `pages-num packages-tfoot-pages${unknownLabels > 0 ? ' estimated-sum' : ''}`;
 
             html +=
-                '</tbody>' +
-                '<tfoot>' +
-                '<tr class="packages-tfoot-row">' +
+                '</tbody><tfoot><tr class="packages-tfoot-row">' +
                 `<td colspan="3" class="packages-tfoot-label">${escapeHtml('Total printed pages · whole scan')}</td>` +
                 `<td class="${tfootPagesCls}">${totalPagesCellBody}${
                     unknownLabels > 0 ? ' <span class="muted estimated-chip-inline">estimated</span>' : ''
                 }</td>` +
-                '</tr>' +
-                '</tfoot>' +
-                '</table>';
+                '</tr></tfoot></table>';
+
             host.innerHTML = html;
 
             host.querySelectorAll('th.sortable').forEach((th) => {
@@ -481,11 +447,10 @@
         }
 
         return {
-            /** @type {(rows: any[], opts?: object) => void} */
             setRows(rows, opts = {}) {
-                state.rows = rows.slice();
+                state.rows = (rows || []).slice();
                 state.pinned = opts.pinned && opts.pinned.isOther && Number(opts.pinned.count) > 0 ? opts.pinned : null;
-                if (opts.onCount) state.onCount = opts.onCount;
+                state.onCount = opts.onCount || null;
                 state.sortKey = 'count';
                 state.sortDir = 'desc';
                 state.rows.sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
@@ -497,9 +462,12 @@
             },
             getStats() {
                 return {
-                    total: state.rows.reduce((s, /** @type {*} */ r) => s + r.count, 0) + (state.pinned ? state.pinned.count : 0),
+                    total: state.rows.reduce((s, r) => s + r.count, 0) + (state.pinned ? state.pinned.count : 0),
                     unique: state.rows.length + (state.pinned ? 1 : 0)
                 };
+            },
+            getAggregates() {
+                return aggregateWholeScanPrintedPagesFromRows(state.rows, state.pinned);
             },
             redraw() {
                 render();
@@ -507,37 +475,18 @@
         };
     }
 
-    const latestPackagesTable = packagesTableWrap ? createPackagesTable(packagesTableWrap) : null;
     const detailPackagesTable = detailPackagesWrap ? createPackagesTable(detailPackagesWrap) : null;
+    const modalPackagesTable = modalPackagesWrap ? createPackagesTable(modalPackagesWrap) : null;
 
-    if (packagesSearch && latestPackagesTable) {
-        packagesSearch.addEventListener('input', (e) => latestPackagesTable.setFilter(/** @type {*} */ (e.target).value));
+    if (modalPackagesSearch && modalPackagesTable) {
+        modalPackagesSearch.addEventListener('input', (e) => {
+            modalPackagesTable.setFilter(/** @type {HTMLInputElement} */ (e.target).value);
+        });
     }
 
-    /** @param {typeof lastLatestPackageRows} rows */
-    /** @param {ReturnType<typeof makeOtherTestsPinned>} pinned */
-    function renderPackagesStats(rows, pinned) {
-        if (!packagesStats) return;
-        let total = rows.reduce((s, r) => s + r.count, 0);
-        if (pinned && pinned.count > 0) total += pinned.count;
-        const unknownN = rows.filter((r) => !r.isOther && resolvePagesPerReport(r) == null).length;
-        const parts = [
-            `<span class="stat-pill"><span>Unique labels</span><strong>${rows.length}</strong></span>`,
-            `<span class="stat-pill"><span>Total occurrences</span><strong>${total}</strong></span>`
-        ];
-        if (unknownN > 0) {
-            parts.push(
-                `<span class="stat-pill stat-pill-info"><span>Unmapped</span><strong>${unknownN}</strong></span>`
-            );
-        }
-        packagesStats.innerHTML = parts.join('');
-    }
-
-    function setShownCount(visible, total) {
-        if (!packagesShown) return;
-        packagesShown.textContent =
-            visible === total ? `${total} label${total === 1 ? '' : 's'}` : `${visible} of ${total} labels`;
-    }
+    /* ------------------------------------------------------------------ */
+    /* Status pill + last-updated                                          */
+    /* ------------------------------------------------------------------ */
 
     function setStatusPill(kind, text) {
         if (!latestStatusPill) return;
@@ -551,360 +500,49 @@
     }
 
     function bumpLastUpdated() {
-        if (lastUpdatedEl) lastUpdatedEl.textContent = `Updated ${new Date().toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`;
-    }
-
-    function fmtPath(p) {
-        if (!p) return `<span class="muted">—</span>`;
-        return `<span class="path">${escapeHtml(String(p))}</span>`;
-    }
-
-    function modeLabel(summary) {
-        if (!summary) return '—';
-        if (summary.dryRun) return 'dry-run';
-        if (summary.scrapePackages) return 'package scrape';
-        return 'normal search';
-    }
-
-    /** @param {*} summary */
-    function scrapeOccurrences(summary) {
-        const n =
-            summary && summary.rowCount != null && Number.isFinite(Number(summary.rowCount))
-                ? Number(summary.rowCount)
-                : 0;
-        return Math.max(0, Math.floor(n));
-    }
-
-    /** @param {Array<{label:string,count:number}>} packageRows */
-    function heroFromRows(packageRows, pinned) {
-        if (!heroCalloutLabel || !heroCalloutPages) return;
-
-        /** @type {(typeof packageRows)[0]|null} */
-        let star = null;
-        for (const row of packageRows || []) {
-            if (!star || Number(row.count) > Number(star.count)) star = row;
-        }
-
-        if (!star) {
-            heroCalloutLabel.innerHTML =
-                pinned && pinned.count > 0
-                    ? `Only bracket-less “${escapeHtml(pinned.label)}” cells detected this run (${escapeHtml(
-                          String(pinned.count)
-                      )}).`
-                    : 'No labelled packages in scrape output.';
-            if (heroCalloutSub) heroCalloutSub.textContent = pinned ? `${pinned.count} cells × 1 page each` : '';
-            heroCalloutPages.textContent = pinned ? String(pinned.count * 1) : '—';
-            return;
-        }
-
-        heroCalloutLabel.textContent = star.label;
-
-        const ppr = resolvePagesPerReport(star);
-        const tp = resolveTotalPagesProduct(star);
-        heroCalloutSub.textContent =
-            ppr != null
-                ? `${Number(star.count).toLocaleString('en-US')} occurrence(s) × ${ppr.toLocaleString('en-US')} page(s)/print`
-                : 'Pages per printed report unknown for this label — map it in package-pages.json.';
-
-        heroCalloutPages.textContent = tp != null ? tp.toLocaleString('en-US') : '—';
-    }
-
-    /**
-     * @param {*} summary
-     * @param {*} j - status payload fragment
-     */
-    function populateRecoveryDrawer(summary) {
-        if (!recoveryDrawer || !recoveryBody) return;
-
-        const rc = Number(summary && summary.recoveryCount) || 0;
-        const rev =
-            summary && summary.recoveryEvents && Array.isArray(summary.recoveryEvents) ? summary.recoveryEvents : [];
-        recoveryDrawer.hidden = rc < 1;
-        recoveryBody.textContent =
-            rc < 1
-                ? ''
-                : rev.length
-                  ? rev
-                        .map(
-                            /** @type {*} */
-                            (ev) =>
-                                `#${ev.attempt} ${ev.succeeded ? 'ok' : 'fail'} pager=${ev.atPagerPage ?? '—'} — ${ev.reason}${ev.error ? ` err=${ev.error}` : ''} @ ${ev.at || ''}`
-                        )
-                        .join('\n')
-                  : String(rc);
-
-        recoveryDrawer.open = false;
-    }
-
-    /**
-     * @param {*} summary
-     * @param {*} j
-     */
-    function renderRunMetaStrip(summary, j) {
-        if (!runMetaStrip) return;
-
-        const errCount = Array.isArray(summary && summary.errors) ? summary.errors.length : 0;
-        const errCell =
-            errCount === 0
-                ? escapeHtml('0')
-                : `<span class="errors-cell">${escapeHtml(summary.errors.join('\n'))}</span>`;
-
-        const exit =
-            j && j.exitCode === 0
-                ? '<span class="status-pill ok">success</span>'
-                : `<span class="status-pill err">exit ${escapeHtml(String(j && j.exitCode))}</span>`;
-
-        const parts = [
-            `<dl><dt>Status</dt><dd>${exit}</dd></dl>`,
-            j && j.error
-                ? `<dl><dt>Request</dt><dd class="errors-cell">${escapeHtml(String(j.error))}</dd></dl>`
-                : '',
-            `<dl><dt>Run id</dt><dd>${j && j.runId ? `<code>${escapeHtml(String(j.runId))}</code>` : '—'}</dd></dl>`,
-            `<dl><dt>Started</dt><dd>${summary && summary.startedAt ? escapeHtml(String(summary.startedAt)) : '—'}</dd></dl>`,
-            `<dl><dt>Mode</dt><dd>${escapeHtml(modeLabel(summary))}</dd></dl>`,
-            `<dl><dt>Main JSON</dt><dd>${fmtPath((j && j.outMainPath) || (summary && summary.outMainPath))}</dd></dl>`,
-            summary && (summary.scrapePackages || (j && j.outPackagesPath))
-                ? `<dl><dt>Packages JSON</dt><dd>${fmtPath((j && j.outPackagesPath) || (summary && summary.outPackagesPath))}</dd></dl>`
-                : '',
-            `<dl><dt>Errors</dt><dd>${errCell}</dd></dl>`
-        ];
-
-        runMetaStrip.innerHTML = parts.filter(Boolean).join('');
-    }
-
-    /**
-     * @param {*} summary
-     * @param {*} result
-     * @param {*} j
-     */
-    function renderPackageKpis(summary, result) {
-        const { packageRows, pinned } = buildPackageDataset(summary, result);
-        const agg = aggregateWholeScanPrintedPagesFromRows(packageRows, pinned);
-
-        const occ = scrapeOccurrences(summary);
-        const uniq =
-            summary && summary.uniqueLabelCount != null && Number.isFinite(Number(summary.uniqueLabelCount))
-                ? Number(summary.uniqueLabelCount)
-                : packageRows.length;
-
-        if (kpiTotalPages) kpiTotalPages.textContent = agg.knownSum.toLocaleString('en-US');
-        if (kpiTotalSub) {
-            kpiTotalSub.textContent =
-                agg.unknownLabels > 0
-                    ? `Minimum until ${agg.unknownLabels} label${agg.unknownLabels === 1 ? '' : 's'} have pages/report mapping`
-                    : 'Sum of (count × pages per report) + Other tests';
-        }
-        if (kpiEstChip) kpiEstChip.hidden = agg.unknownLabels === 0;
-
-        if (kpiOccurrences) kpiOccurrences.textContent = occ.toLocaleString('en-US');
-        if (kpiUnique) kpiUnique.textContent = uniq.toLocaleString('en-US');
-        if (kpiPagesScanned) {
-            kpiPagesScanned.textContent =
-                summary && summary.pagesScanned != null && Number.isFinite(Number(summary.pagesScanned))
-                    ? String(summary.pagesScanned)
-                    : '—';
-        }
-        if (kpiRecoveries) {
-            kpiRecoveries.textContent =
-                summary && summary.recoveryCount != null ? String(summary.recoveryCount) : '0';
-        }
-        if (kpiErrors) {
-            const ec = Array.isArray(summary && summary.errors) ? summary.errors.length : 0;
-            kpiErrors.textContent = String(ec);
-        }
-
-        heroFromRows(packageRows, pinned);
-        populateRecoveryDrawer(summary);
-    }
-
-    /**
-     * @param {*} j
-     * @param {{ fromRefresh?: boolean }} [opts]
-     */
-    function renderResultsDashboard(j, opts = {}) {
-        const summary = (j && j.summary) || {};
-        const result = (j && j.result) || null;
-
-        if (resultsPlaceholder) resultsPlaceholder.hidden = true;
-        if (resultsBody) resultsBody.hidden = false;
-
-        bumpLastUpdated();
-
-        if (resultsBody) {
-            resultsBody.classList.remove('dashboard-state-running');
-            if (runningShade) runningShade.hidden = true;
-        }
-
-        if (filtersAppliedLine) {
-            const req = (result && result.filtersRequested) || {};
-            const app = (result && result.filtersApplied) || {};
-            const parts = [];
-            if (req.bu != null && String(req.bu).trim()) {
-                if (app.businessUnit) parts.push(`BU: ${app.businessUnit}`);
-                else parts.push(`BU not applied (“${String(req.bu).trim()}”)`);
-            }
-            if (req.status != null && String(req.status).trim()) {
-                if (app.status) parts.push(`Status: ${app.status}`);
-                else parts.push(`Status not applied (“${String(req.status).trim()}”)`);
-            }
-            if (req.testCode != null && String(req.testCode).trim() && !app.testCode) parts.push('Test code not applied');
-            filtersAppliedLine.textContent = parts.length ? parts.join(' · ') : '';
-        }
-
-        renderRunMetaStrip(summary, j);
-
-        const isScrape = !!summary.scrapePackages;
-
-        if (packageMetricsZone) packageMetricsZone.hidden = !isScrape;
-        if (nonPackageBanner) nonPackageBanner.hidden = isScrape;
-
-        if (!isScrape && nonPackageMode && nonPackageStats) {
-            nonPackageMode.textContent = modeLabel(summary);
-            const sidN = summary.sidsOnPage1 != null ? Number(summary.sidsOnPage1) : 0;
-            nonPackageStats.innerHTML = `Page-1 SIDs: <strong>${sidN.toLocaleString('en-US')}</strong> · exit <code>${escapeHtml(
-                String(j && j.exitCode != null ? j.exitCode : '—')
-            )}</code>`;
-        }
-
-        if (isScrape) renderPackageKpis(summary, result);
-        if (recoveryDrawer && !isScrape) {
-            recoveryDrawer.hidden = true;
-            if (recoveryBody) recoveryBody.textContent = '';
-        }
-
-        if (!opts.fromRefresh) {
-            if (pendingFocusResults && currentView === 'history') {
-                setView('results');
-            }
-            pendingFocusResults = false;
+        if (lastUpdatedEl) {
+            lastUpdatedEl.textContent = `Updated ${new Date().toLocaleTimeString(undefined, {
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            })}`;
         }
     }
 
-    function showDashboardRunning() {
-        if (resultsPlaceholder) resultsPlaceholder.hidden = true;
-        if (resultsBody) {
-            resultsBody.hidden = false;
-            resultsBody.classList.add('dashboard-state-running');
-        }
-        if (runningShade) runningShade.hidden = false;
-
-        if (packageMetricsZone) packageMetricsZone.hidden = false;
-        if (nonPackageBanner) nonPackageBanner.hidden = true;
-
-        const dash = ['—', '…', '···'];
-        const ph = (/** @type {HTMLElement|null} */ el, i) => {
-            if (el) el.textContent = dash[i % dash.length];
-        };
-        ph(kpiTotalPages, 0);
-        ph(kpiOccurrences, 1);
-        ph(kpiUnique, 2);
-        ph(kpiPagesScanned, 0);
-        ph(kpiRecoveries, 1);
-        ph(kpiErrors, 2);
-        if (kpiTotalSub) kpiTotalSub.textContent = 'Working…';
-        if (kpiEstChip) kpiEstChip.hidden = true;
-        if (heroCalloutLabel) heroCalloutLabel.textContent = 'Run in progress';
-        if (heroCalloutSub) heroCalloutSub.textContent = '';
-        if (heroCalloutPages) heroCalloutPages.textContent = '—';
-        if (runMetaStrip) runMetaStrip.innerHTML = '';
-        if (recoveryDrawer) recoveryDrawer.hidden = true;
-        if (packagesSection) packagesSection.hidden = true;
-    }
-
-    /**
-     * @param {*} summary
-     * @param {*} result
-     */
-    function renderLatestPackages(summary, result) {
-        if (!packagesSection || !latestPackagesTable) return;
-        const { packageRows, pinned, isScrape } = buildPackageDataset(summary, result);
-        lastLatestPackageRows = packageRows.slice();
-        lastLatestPinned = pinned || null;
-
-        if (!isScrape || (!packageRows.length && !pinned)) {
-            packagesSection.hidden = true;
-            lastLatestPackageRows = [];
-            lastLatestPinned = null;
-            return;
-        }
-        packagesSection.hidden = false;
-        renderPackagesStats(packageRows, pinned);
-        latestPackagesTable.setRows(packageRows, { onCount: setShownCount, pinned });
-        if (packagesSearch) packagesSearch.value = '';
-        latestPackagesTable.setFilter('');
-    }
-
-    function clearLatest() {
-        setStatusPill(null);
-        runStatus.textContent = '';
-        if (filtersAppliedLine) filtersAppliedLine.textContent = '';
-        pendingFocusResults = false;
-
-        if (resultsPlaceholder) {
-            resultsPlaceholder.hidden = false;
-        }
-        if (resultsBody) {
-            resultsBody.hidden = true;
-            resultsBody.classList.remove('dashboard-state-running');
-        }
-        if (runningShade) runningShade.hidden = true;
-
-        if (packageMetricsZone) packageMetricsZone.hidden = false;
-
-        kpiTotalPages && (kpiTotalPages.textContent = '—');
-        kpiOccurrences && (kpiOccurrences.textContent = '—');
-        kpiUnique && (kpiUnique.textContent = '—');
-        kpiPagesScanned && (kpiPagesScanned.textContent = '—');
-        kpiRecoveries && (kpiRecoveries.textContent = '—');
-        kpiErrors && (kpiErrors.textContent = '—');
-        if (kpiTotalSub) kpiTotalSub.textContent = '';
-        if (kpiEstChip) kpiEstChip.hidden = true;
-        heroCalloutLabel && (heroCalloutLabel.textContent = '—');
-        heroCalloutSub && (heroCalloutSub.textContent = '');
-        heroCalloutPages && (heroCalloutPages.textContent = '—');
-        runMetaStrip && (runMetaStrip.innerHTML = '');
-        if (recoveryDrawer) {
-            recoveryDrawer.hidden = true;
-            recoveryBody && (recoveryBody.textContent = '');
-        }
-        if (packagesSection) packagesSection.hidden = true;
-        lastLatestPackageRows = [];
-        lastLatestPinned = null;
-        lastDashboardPayload = null;
-    }
-
-    clearBtn?.addEventListener('click', clearLatest);
+    /* ------------------------------------------------------------------ */
+    /* Source picker                                                       */
+    /* ------------------------------------------------------------------ */
 
     function applySourceVisibility(source) {
         const wantSql = source === 'sql';
-        const els = form.querySelectorAll('[data-source-only]');
-        els.forEach((el) => {
+        form.querySelectorAll('[data-source-only]').forEach((el) => {
             const tag = el.getAttribute('data-source-only');
-            el.hidden = wantSql && tag === 'scrape';
+            /** @type {HTMLElement} */ (el).hidden = wantSql && tag === 'scrape';
         });
         const hint = document.getElementById('source-hint');
         if (hint) {
             hint.textContent = wantSql
-                ? 'Calls the Listec service (LISTEC_API_BASE_URL, default http://127.0.0.1:3100) — no browser, no scraping.'
-                : 'Drives the LIS web grid via headless Chromium.';
+                ? 'Calls the Listec service (LISTEC_API_BASE_URL, default http://127.0.0.1:3100) — multi-BU runs allowed.'
+                : 'Drives the LIS web grid via headless Chromium. Multi-BU runs require SQL.';
         }
+        renderBuChips();
     }
 
     function getSourceFromForm() {
-        const radio = form.querySelector('input[name="source"]:checked');
+        const radio = /** @type {HTMLInputElement|null} */ (form.querySelector('input[name="source"]:checked'));
         return radio ? String(radio.value) : 'scrape';
     }
 
     function setSourceOnForm(value) {
         const v = value === 'sql' ? 'sql' : 'scrape';
-        const radio = form.querySelector(`input[name="source"][value="${v}"]`);
+        const radio = /** @type {HTMLInputElement|null} */ (form.querySelector(`input[name="source"][value="${v}"]`));
         if (radio) radio.checked = true;
         applySourceVisibility(v);
     }
 
     try {
         setSourceOnForm(localStorage.getItem(LS_SOURCE) || 'scrape');
-    } catch (_) {
+    } catch {
         applySourceVisibility('scrape');
     }
 
@@ -913,13 +551,482 @@
             const v = getSourceFromForm();
             try {
                 localStorage.setItem(LS_SOURCE, v);
-            } catch (_) {}
+            } catch {
+                /**/
+            }
             applySourceVisibility(v);
         });
     });
 
+    /* ------------------------------------------------------------------ */
+    /* Date quick picks                                                    */
+    /* ------------------------------------------------------------------ */
+
+    function pad2(n) {
+        return String(n).padStart(2, '0');
+    }
+    function fmtDDMMYYYY(d) {
+        return `${pad2(d.getDate())}/${pad2(d.getMonth() + 1)}/${d.getFullYear()}`;
+    }
+    function offsetDays(n) {
+        const d = new Date();
+        d.setHours(0, 0, 0, 0);
+        d.setDate(d.getDate() + n);
+        return d;
+    }
+    function todayRange() {
+        const d = offsetDays(0);
+        return { from: d, to: d };
+    }
+    function singleDay(n) {
+        const d = offsetDays(n);
+        return { from: d, to: d };
+    }
+    function lastNDays(n) {
+        return { from: offsetDays(-n), to: offsetDays(0) };
+    }
+    function monthRange(monthOffset) {
+        const now = new Date();
+        const start = new Date(now.getFullYear(), now.getMonth() + monthOffset, 1);
+        const end = new Date(now.getFullYear(), now.getMonth() + monthOffset + 1, 0);
+        start.setHours(0, 0, 0, 0);
+        end.setHours(0, 0, 0, 0);
+        return { from: start, to: end };
+    }
+
+    const QUICK = [
+        { id: 'today', label: 'TODAY', build: todayRange },
+        { id: 'yest', label: 'YESTERDAY', build: () => singleDay(-1) },
+        { id: 'last7', label: '\u22127D', build: () => lastNDays(6) },
+        { id: 'thisMonth', label: 'THIS MONTH', build: () => monthRange(0) },
+        { id: 'lastMonth', label: 'LAST MONTH', build: () => monthRange(-1) }
+    ];
+
+    function rangesEqual(rangeFromInputs, target) {
+        if (!fromDateInput || !toDateInput) return false;
+        return fromDateInput.value === fmtDDMMYYYY(target.from) && toDateInput.value === fmtDDMMYYYY(target.to);
+    }
+
+    function syncDateChipState() {
+        if (!dateChipRow) return;
+        dateChipRow.querySelectorAll('.chip[data-quick]').forEach((btn) => {
+            const id = btn.getAttribute('data-quick');
+            const def = QUICK.find((q) => q.id === id);
+            const pressed = !!(def && rangesEqual(null, def.build()));
+            btn.setAttribute('aria-pressed', pressed ? 'true' : 'false');
+        });
+    }
+
+    function renderDateChips() {
+        if (!dateChipRow) return;
+        dateChipRow.innerHTML = QUICK.map(
+            (q) => `<button type="button" class="chip" data-quick="${q.id}" aria-pressed="false">${escapeHtml(q.label)}</button>`
+        ).join('');
+        dateChipRow.querySelectorAll('button.chip[data-quick]').forEach((btn) => {
+            btn.addEventListener('click', () => {
+                const id = btn.getAttribute('data-quick');
+                const def = QUICK.find((q) => q.id === id);
+                if (!def || !fromDateInput || !toDateInput) return;
+                const r = def.build();
+                fromDateInput.value = fmtDDMMYYYY(r.from);
+                toDateInput.value = fmtDDMMYYYY(r.to);
+                syncDateChipState();
+            });
+        });
+    }
+    renderDateChips();
+    fromDateInput?.addEventListener('input', syncDateChipState);
+    toDateInput?.addEventListener('input', syncDateChipState);
+
+    /* ------------------------------------------------------------------ */
+    /* BU chips                                                            */
+    /* ------------------------------------------------------------------ */
+
+    function loadBuSelection() {
+        try {
+            const raw = localStorage.getItem(LS_BU_SELECTION);
+            if (!raw) return new Set();
+            const arr = JSON.parse(raw);
+            return new Set(Array.isArray(arr) ? arr.map(String) : []);
+        } catch {
+            return new Set();
+        }
+    }
+
+    function saveBuSelection() {
+        try {
+            localStorage.setItem(LS_BU_SELECTION, JSON.stringify([...buSelected]));
+        } catch {
+            /**/
+        }
+    }
+
+    buSelected = loadBuSelection();
+
+    function renderBuChips() {
+        if (!buChipGrid) return;
+        const wantSql = getSourceFromForm() === 'sql';
+        const fallback = form.querySelector('.bu-fallback-label');
+        if (fallback) /** @type {HTMLElement} */ (fallback).hidden = wantSql && buOptions.length > 0;
+        if (!wantSql || !buOptions.length) {
+            buChipGrid.innerHTML = '';
+            buChipGrid.hidden = !wantSql;
+            buChipAllBtn && (buChipAllBtn.disabled = !wantSql || !buOptions.length);
+            buChipClearBtn && (buChipClearBtn.disabled = !wantSql || !buSelected.size);
+            return;
+        }
+        buChipGrid.hidden = false;
+        buChipGrid.innerHTML = buOptions
+            .map((opt) => {
+                const pressed = buSelected.has(opt.label) ? 'true' : 'false';
+                const safe = escapeHtml(opt.label);
+                return `<button type="button" class="chip bu-chip" data-bu="${safe}" aria-pressed="${pressed}">${safe}</button>`;
+            })
+            .join('');
+        buChipGrid.querySelectorAll('button.bu-chip').forEach((btn) => {
+            btn.addEventListener('click', () => {
+                const v = btn.getAttribute('data-bu') || '';
+                if (!v) return;
+                if (buSelected.has(v)) buSelected.delete(v);
+                else buSelected.add(v);
+                saveBuSelection();
+                btn.setAttribute('aria-pressed', buSelected.has(v) ? 'true' : 'false');
+                buChipClearBtn && (buChipClearBtn.disabled = !buSelected.size);
+            });
+        });
+        buChipAllBtn && (buChipAllBtn.disabled = false);
+        buChipClearBtn && (buChipClearBtn.disabled = !buSelected.size);
+    }
+
+    buChipAllBtn?.addEventListener('click', () => {
+        for (const opt of buOptions) buSelected.add(opt.label);
+        saveBuSelection();
+        renderBuChips();
+    });
+    buChipClearBtn?.addEventListener('click', () => {
+        buSelected.clear();
+        saveBuSelection();
+        renderBuChips();
+    });
+
+    function loadBuOptions() {
+        return fetch('/api/bu')
+            .then((r) => r.json())
+            .then((j) => {
+                const list = Array.isArray(j.businessUnits) ? j.businessUnits : [];
+                buOptions = list
+                    .map((row) => {
+                        if (typeof row === 'string') return { id: row, label: row };
+                        const label = String(row.name || row.label || row.id || '').trim();
+                        const id = row.id != null ? String(row.id) : label;
+                        return label ? { id, label } : null;
+                    })
+                    .filter(Boolean)
+                    .sort((a, b) => a.label.localeCompare(b.label));
+                if (buLookupError) {
+                    if (j.error) {
+                        buLookupError.hidden = false;
+                        buLookupError.textContent = `Could not reach Listec lookups (${j.error}); using free-text BU.`;
+                    } else {
+                        buLookupError.hidden = true;
+                        buLookupError.textContent = '';
+                    }
+                }
+                const known = new Set(buOptions.map((o) => o.label));
+                for (const v of [...buSelected]) if (!known.has(v)) buSelected.delete(v);
+                renderBuChips();
+            })
+            .catch((e) => {
+                buOptions = [];
+                if (buLookupError) {
+                    buLookupError.hidden = false;
+                    buLookupError.textContent = `BU lookup failed: ${String(e)}`;
+                }
+                renderBuChips();
+            });
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Tile wall                                                           */
+    /* ------------------------------------------------------------------ */
+
+    function tileEyebrow(tile, indexFromOne) {
+        const idx = String(indexFromOne).padStart(2, '0');
+        const src = String(tile.source || 'scrape').toUpperCase();
+        let timeStr = '';
+        if (tile.startedAt) {
+            const d = new Date(tile.startedAt);
+            if (!Number.isNaN(d.getTime())) {
+                timeStr = d.toLocaleString(undefined, {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    day: '2-digit',
+                    month: 'short'
+                });
+            }
+        }
+        const parts = [`${idx} / RUN`, src];
+        if (timeStr) parts.push(timeStr);
+        return parts.join(' \u00b7 ');
+    }
+
+    function fmtRange(fromDate, toDate) {
+        const from = (fromDate || '').trim();
+        const to = (toDate || '').trim();
+        if (!from && !to) return 'No date window';
+        if (from && to && from === to) return from;
+        if (from && to) return `${from} \u2192 ${to}`;
+        return from || to;
+    }
+
+    function topLabelFromTile(tile) {
+        if (!tile || !Array.isArray(tile.labelRows)) return null;
+        let best = null;
+        for (const r of tile.labelRows) {
+            if (!best || Number(r.count) > Number(best.count)) best = r;
+        }
+        return best;
+    }
+
+    function renderTileEmpty(hiddenCount) {
+        if (tileEmpty) tileEmpty.hidden = false;
+        if (tileGrid) {
+            tileGrid.hidden = true;
+            tileGrid.innerHTML = '';
+        }
+        if (restoreHiddenWrap && restoreHiddenBtn) {
+            if (hiddenCount > 0) {
+                restoreHiddenWrap.hidden = false;
+                restoreHiddenBtn.textContent = `Restore ${hiddenCount} hidden run${hiddenCount === 1 ? '' : 's'}`;
+            } else {
+                restoreHiddenWrap.hidden = true;
+                restoreHiddenBtn.textContent = '';
+            }
+        }
+    }
+
+    function renderTileGrid(tiles) {
+        visibleTiles = tiles.slice();
+        if (!tileGrid) return;
+        if (!tiles.length) {
+            const hidden = readHiddenSet();
+            renderTileEmpty(hidden.size);
+            return;
+        }
+        if (tileEmpty) tileEmpty.hidden = true;
+        tileGrid.hidden = false;
+
+        const totalsRecomputed = tiles.map((t) => {
+            const rows = Array.isArray(t.labelRows) ? t.labelRows : [];
+            const pinned = makeOtherTestsPinned(t.totals && t.totals.otherTestsRowCount);
+            const agg = aggregateWholeScanPrintedPagesFromRows(rows, pinned);
+            return { knownSum: agg.knownSum, estimated: agg.unknownLabels > 0 };
+        });
+
+        tileGrid.innerHTML = tiles
+            .map((t, i) => {
+                const eyebrow = tileEyebrow(t, i + 1);
+                const buLabel = String(t.bu || '\u2014');
+                const dateRange = fmtRange(t.fromDate, t.toDate);
+                const top = topLabelFromTile(t);
+                const totals = totalsRecomputed[i];
+                const totalNum = totals.knownSum.toLocaleString('en-US');
+                const topLabel = top
+                    ? `${escapeHtml(String(top.label).toUpperCase())}${
+                          top.count != null ? ` <span class="muted small">\u00d7 ${escapeHtml(String(top.count))}</span>` : ''
+                      }`
+                    : '<span class="muted small">no labels</span>';
+                const sids = (t.totals && t.totals.sids) || 0;
+                const occ = (t.totals && t.totals.occurrences) || 0;
+                const uniq = (t.totals && t.totals.uniqueLabels) || 0;
+                const errors = (t.totals && t.totals.errors) || 0;
+                const stats = [
+                    `${sids.toLocaleString('en-US')} SIDs`,
+                    `${uniq.toLocaleString('en-US')} labels`,
+                    `${occ.toLocaleString('en-US')} occ.`
+                ];
+                if (errors > 0) stats.push(`${errors} errors`);
+                const estChip = totals.estimated ? '<span class="tile-est">estimated minimum</span>' : '<span></span>';
+                return (
+                    `<button type="button" class="tile" data-tile-id="${escapeHtml(t.id)}">` +
+                    `<span class="tile-eyebrow">${escapeHtml(eyebrow)}</span>` +
+                    `<h3 class="tile-title">${escapeHtml(buLabel)}</h3>` +
+                    `<p class="tile-sub">${escapeHtml(dateRange)}</p>` +
+                    `<div class="tile-metric-row">` +
+                    `<span class="tile-metric-num">${escapeHtml(totalNum)}</span>` +
+                    `<span class="tile-metric-label">${topLabel}</span>` +
+                    `</div>` +
+                    `<p class="tile-stats">${stats.map(escapeHtml).join(' \u00b7 ')}</p>` +
+                    `<div class="tile-footer">` +
+                    `<span class="tile-cta">view breakdown \u2192</span>` +
+                    estChip +
+                    `</div>` +
+                    `</button>`
+                );
+            })
+            .join('');
+
+        tileGrid.querySelectorAll('button.tile[data-tile-id]').forEach((btn) => {
+            btn.addEventListener('click', () => {
+                const id = btn.getAttribute('data-tile-id');
+                const tile = visibleTiles.find((t) => String(t.id) === String(id));
+                if (tile) openRunModal(tile);
+            });
+        });
+    }
+
+    function loadTiles() {
+        return fetch('/api/runs/tiles')
+            .then((r) => r.json())
+            .then((j) => {
+                lastTilePayload = { tiles: Array.isArray(j.tiles) ? j.tiles : [], errors: j.errors || [] };
+                const hidden = readHiddenSet();
+                const visible = lastTilePayload.tiles.filter((t) => !hidden.has(String(t.id)));
+                if (resultsError) {
+                    if (lastTilePayload.errors.length) {
+                        resultsError.hidden = false;
+                        resultsError.textContent = `Tile load: ${lastTilePayload.errors
+                            .map((e) => `${e.file}: ${e.error}`)
+                            .join(' · ')}`;
+                    } else {
+                        resultsError.hidden = true;
+                        resultsError.textContent = '';
+                    }
+                }
+                renderTileGrid(visible);
+                bumpLastUpdated();
+            })
+            .catch((e) => {
+                if (resultsError) {
+                    resultsError.hidden = false;
+                    resultsError.textContent = `Failed to load tiles: ${String(e)}`;
+                }
+            });
+    }
+
+    restoreHiddenBtn?.addEventListener('click', () => {
+        try {
+            localStorage.removeItem(LS_HIDDEN);
+        } catch {
+            /**/
+        }
+        loadTiles();
+    });
+
+    /* ------------------------------------------------------------------ */
+    /* Run progress strip (multi-BU fan-out)                               */
+    /* ------------------------------------------------------------------ */
+
+    function setRunProgress(payload) {
+        if (!runProgressWrap || !runProgressStrip) return;
+        if (!payload) {
+            runProgressWrap.hidden = true;
+            runProgressStrip.innerHTML = '';
+            return;
+        }
+        const items = Array.isArray(payload.items) ? payload.items : [];
+        const total = items.length;
+        const done = items.filter((it) => it.state === 'done').length;
+        const lead = `${done}/${total}`;
+        const cells = items
+            .map((it) => {
+                const name = escapeHtml(String(it.bu || '\u2014'));
+                const mark =
+                    it.state === 'done'
+                        ? '\u2713'
+                        : it.state === 'running'
+                          ? '\u23f3'
+                          : it.state === 'failed'
+                            ? '\u00d7'
+                            : '\u2026';
+                return `${name} ${mark}`;
+            })
+            .join(' \u00b7 ');
+        runProgressStrip.textContent = `${lead}  ${cells}`;
+        runProgressWrap.hidden = false;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Modal                                                               */
+    /* ------------------------------------------------------------------ */
+
+    function openRunModal(tile) {
+        if (!runModal || !modalPackagesTable) return;
+        const idx = visibleTiles.findIndex((t) => String(t.id) === String(tile.id));
+        const eyebrow = tileEyebrow(tile, idx >= 0 ? idx + 1 : 1);
+        if (runModalEyebrow) runModalEyebrow.textContent = eyebrow;
+        if (runModalTitle) runModalTitle.textContent = String(tile.bu || '\u2014');
+        if (runModalSub) {
+            const range = fmtRange(tile.fromDate, tile.toDate);
+            const errs = (tile.totals && tile.totals.errors) || 0;
+            const status = errs > 0 ? `${errs} error${errs === 1 ? '' : 's'}` : 'success';
+            runModalSub.textContent = `${range} \u00b7 ${status}`;
+        }
+        if (runModalPaths) {
+            const main = tile.paths && tile.paths.mainJson;
+            const pkg = tile.paths && tile.paths.packagesJson;
+            const parts = [];
+            if (main) parts.push(`main: ${escapeHtml(String(main))}`);
+            if (pkg) parts.push(`packages: ${escapeHtml(String(pkg))}`);
+            runModalPaths.innerHTML = parts.join(' \u00b7 ');
+        }
+
+        const rows = Array.isArray(tile.labelRows) ? tile.labelRows : [];
+        const pinned = makeOtherTestsPinned(tile.totals && tile.totals.otherTestsRowCount);
+        modalPackagesTable.setRows(rows, {
+            pinned,
+            onCount: (visible, total) => {
+                if (modalPackagesShown) {
+                    modalPackagesShown.textContent =
+                        visible === total ? `${total} label${total === 1 ? '' : 's'}` : `${visible} of ${total} labels`;
+                }
+            }
+        });
+        if (modalPackagesSearch) {
+            modalPackagesSearch.value = '';
+            modalPackagesTable.setFilter('');
+        }
+        const agg = modalPackagesTable.getAggregates();
+        if (runModalTotalPages) runModalTotalPages.textContent = agg.knownSum.toLocaleString('en-US');
+        if (runModalEstChip) runModalEstChip.hidden = agg.unknownLabels === 0;
+
+        if (typeof runModal.showModal === 'function') {
+            try {
+                runModal.showModal();
+            } catch {
+                runModal.setAttribute('open', '');
+            }
+        } else {
+            runModal.setAttribute('open', '');
+        }
+    }
+
+    function closeRunModal() {
+        if (!runModal) return;
+        try {
+            if (typeof runModal.close === 'function') runModal.close();
+            else runModal.removeAttribute('open');
+        } catch {
+            runModal.removeAttribute('open');
+        }
+    }
+
+    runModalClose?.addEventListener('click', closeRunModal);
+    runModal?.addEventListener('click', (e) => {
+        if (e.target === runModal) closeRunModal();
+    });
+    runModal?.addEventListener('cancel', (e) => {
+        e.preventDefault();
+        closeRunModal();
+    });
+
+    /* ------------------------------------------------------------------ */
+    /* Submit + polling                                                    */
+    /* ------------------------------------------------------------------ */
+
     function formToBody() {
         const fd = new FormData(form);
+        /** @type {Record<string, any>} */
         const body = {};
         for (const [k, v] of fd.entries()) {
             if (v === '') continue;
@@ -933,27 +1040,47 @@
         if (fd.has('fromHour')) body.fromHour = Number(body.fromHour);
         if (fd.has('toHour')) body.toHour = Number(body.toHour);
         body.source = getSourceFromForm();
+        if (body.source === 'sql' && buSelected.size > 0) {
+            body.businessUnits = [...buSelected];
+            if (body.businessUnits.length === 1 && !body.bu) body.bu = body.businessUnits[0];
+        }
         return body;
     }
 
-    /** @returns {Promise<boolean>} */
+    function showError(msg) {
+        if (!resultsError) return;
+        resultsError.hidden = false;
+        resultsError.textContent = msg;
+    }
+
+    function clearError() {
+        if (resultsError) {
+            resultsError.hidden = true;
+            resultsError.textContent = '';
+        }
+    }
+
     async function pollUntilIdle() {
         const r = await fetch('/api/run/status');
         const j = await r.json();
         if (j.state === 'running') {
             runStatus.textContent = 'Running…';
             setStatusPill('running', 'running');
-            showDashboardRunning();
-            bumpLastUpdated();
+            if (j.fanOut) setRunProgress(j.fanOut);
             return false;
         }
         runStatus.textContent = j.exitCode === 0 ? 'Finished.' : 'Finished with errors.';
         setStatusPill(j.exitCode === 0 ? 'ok' : 'err', j.exitCode === 0 ? 'success' : 'error');
-
-        renderLatestPackages(j.summary, j.result);
-        renderResultsDashboard(j);
-        lastDashboardPayload = j;
+        if (j.lastFanOut) {
+            setRunProgress(j.lastFanOut);
+            setTimeout(() => setRunProgress(null), 4500);
+        } else {
+            setRunProgress(null);
+        }
+        if (j.error) showError(j.error);
+        else clearError();
         if (submitBtn) submitBtn.disabled = false;
+        await loadTiles();
         loadHistory();
         return true;
     }
@@ -963,42 +1090,47 @@
         if (submitBtn) submitBtn.disabled = true;
         runStatus.textContent = 'Starting…';
         setStatusPill('running', 'starting');
-        pendingFocusResults = true;
+        clearError();
 
-        if (filtersAppliedLine) filtersAppliedLine.textContent = '';
-        resultsPlaceholder.hidden = true;
-        resultsBody.hidden = false;
-        showDashboardRunning();
+        const body = formToBody();
+        if (Array.isArray(body.businessUnits) && body.businessUnits.length > 0) {
+            const items = body.businessUnits.map((bu) => ({ bu, state: 'queued' }));
+            setRunProgress({ batchRunId: 'pending', queued: body.businessUnits, completed: [], failed: [], items });
+        } else {
+            setRunProgress(null);
+            if (runProgressWrap) runProgressWrap.hidden = false;
+            if (runProgressStrip) runProgressStrip.textContent = 'Starting run…';
+        }
 
-        if (packagesSection) packagesSection.hidden = true;
         try {
             const r = await fetch('/api/run', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(formToBody())
+                body: JSON.stringify(body)
             });
             const j = await r.json();
             if (r.status === 409) {
                 runStatus.textContent = j.error || 'Busy';
                 setStatusPill('err', 'busy');
-                clearLatestPartial(j.error || 'Busy');
                 if (submitBtn) submitBtn.disabled = false;
+                setRunProgress(null);
                 return;
             }
             if (!r.ok) {
                 runStatus.textContent = 'Error';
                 setStatusPill('err', 'error');
-                showErrorBanner(j.error ? String(j.error) : JSON.stringify(j, null, 2));
+                showError(j.error ? String(j.error) : JSON.stringify(j, null, 2));
                 if (submitBtn) submitBtn.disabled = false;
+                setRunProgress(null);
                 return;
             }
 
-            pollTimer = /** @type {any} */ (null);
+            pollTimer = null;
             const doneNow = await pollUntilIdle();
             if (!doneNow) {
                 pollTimer = setInterval(async () => {
                     if (await pollUntilIdle()) {
-                        clearInterval(/** @type {*} */ (pollTimer));
+                        if (pollTimer) clearInterval(pollTimer);
                         pollTimer = null;
                     }
                 }, 1500);
@@ -1006,35 +1138,38 @@
         } catch (e) {
             runStatus.textContent = 'Request failed';
             setStatusPill('err', 'error');
-            showErrorBanner(String(e));
+            showError(String(e));
             if (submitBtn) submitBtn.disabled = false;
+            setRunProgress(null);
         }
     });
 
-    function clearLatestPartial(msg) {
-        lastDashboardPayload = null;
-        resultsPlaceholder.hidden = false;
-        resultsBody.hidden = true;
-        if (runningShade) runningShade.hidden = true;
-        lastUpdatedEl && (lastUpdatedEl.textContent = msg);
-    }
+    /* ------------------------------------------------------------------ */
+    /* Clear ledger (hide tiles in localStorage)                           */
+    /* ------------------------------------------------------------------ */
 
-    function showErrorBanner(msg) {
-        lastDashboardPayload = null;
-        resultsPlaceholder.hidden = true;
-        if (resultsBody) {
-            resultsBody.hidden = false;
-            resultsBody.classList.remove('dashboard-state-running');
+    clearBtn?.addEventListener('click', () => {
+        if (!visibleTiles.length) {
+            if (confirm('No visible tiles. Restore previously hidden tiles from localStorage?')) {
+                try {
+                    localStorage.removeItem(LS_HIDDEN);
+                } catch {
+                    /**/
+                }
+                loadTiles();
+            }
+            return;
         }
-        if (runningShade) runningShade.hidden = true;
-        if (packageMetricsZone) packageMetricsZone.hidden = true;
-        if (packagesSection) packagesSection.hidden = true;
-        if (nonPackageBanner) {
-            nonPackageBanner.hidden = false;
-            if (nonPackageMode) nonPackageMode.textContent = 'Error';
-            if (nonPackageStats) nonPackageStats.innerHTML = `<span class="errors-cell">${escapeHtml(msg)}</span>`;
-        }
-    }
+        if (!confirm(`Hide all ${visibleTiles.length} tile(s)? Files in /out are kept.`)) return;
+        const hidden = readHiddenSet();
+        for (const t of visibleTiles) hidden.add(String(t.id));
+        writeHiddenSet(hidden);
+        loadTiles();
+    });
+
+    /* ------------------------------------------------------------------ */
+    /* History view                                                        */
+    /* ------------------------------------------------------------------ */
 
     async function loadHistory() {
         if (!historyTable) return;
@@ -1068,7 +1203,7 @@
     }
 
     function renderDetailPlaceholder() {
-        if (!selectedId) {
+        if (!selectedId && detailJson) {
             detailJson.textContent = '—';
             if (detailPackagesWrap) {
                 detailPackagesWrap.hidden = true;
@@ -1078,7 +1213,6 @@
         }
     }
 
-    /** @returns {Promise<void>} */
     async function loadDetail(id) {
         if (!id || !detailJson) return;
         try {
@@ -1090,26 +1224,19 @@
                 detailJson.textContent = JSON.stringify(j, null, 2);
                 return;
             }
-
             if (activeTab === 'table') {
                 detailJson.hidden = true;
                 if (detailPackagesWrap && detailPackagesTable) {
                     detailPackagesWrap.hidden = false;
                     const occ = j.packages && j.packages.labelOccurrences;
                     const rows = rowsFromLabelOccurrences(occ);
-                    const otherN =
-                        j.packages && typeof j.packages.otherTestsRowCount === 'number'
-                            ? j.packages.otherTestsRowCount
-                            : 0;
-                    const pinned = makeOtherTestsPinned(otherN);
-                    detailPackagesTable.setRows(rows, { pinned });
+                    const otherN = j.packages && typeof j.packages.otherTestsRowCount === 'number' ? j.packages.otherTestsRowCount : 0;
+                    detailPackagesTable.setRows(rows, { pinned: makeOtherTestsPinned(otherN) });
                 }
                 return;
             }
-
             detailJson.hidden = false;
             if (detailPackagesWrap) detailPackagesWrap.hidden = true;
-
             const payload =
                 activeTab === 'packages' && j.packages
                     ? j.packages
@@ -1123,52 +1250,48 @@
         }
     }
 
-    /**
-     * Restore Results dashboard after refresh when the server still holds the last idle job.
-     * @returns {Promise<void>}
-     */
-    function hydrateFromLastJob() {
-        return fetch('/api/run/status')
-            .then((r) => r.json())
-            .then((j) => {
-                if (!j || j.state !== 'idle') return;
-                const s = j.summary;
-                if (!s || !s.startedAt) return;
-
-                renderLatestPackages(s, j.result);
-                renderResultsDashboard(j, { fromRefresh: true });
-                lastDashboardPayload = j;
-                if (runStatus) {
-                    runStatus.textContent =
-                        j.exitCode === 0 ? 'Finished.' : 'Finished with errors.';
-                }
-                if (typeof j.exitCode === 'number') {
-                    setStatusPill(j.exitCode === 0 ? 'ok' : 'err', j.exitCode === 0 ? 'success' : 'error');
-                }
-            })
-            .catch(() => {
-                /** ignore */
-            });
-    }
-
     refreshHistory?.addEventListener('click', () => {
         loadPackagePagesMap().finally(() => {
-            if (latestPackagesTable) latestPackagesTable.redraw();
             if (detailPackagesTable) detailPackagesTable.redraw();
-            if (lastDashboardPayload) {
-                renderLatestPackages(lastDashboardPayload.summary, lastDashboardPayload.result);
-                renderResultsDashboard(lastDashboardPayload, { fromRefresh: true });
-            } else if (!packagesSection?.hidden && lastLatestPackageRows.length) {
-                renderPackagesStats(lastLatestPackageRows, lastLatestPinned);
-            }
+            loadTiles();
             loadHistory();
         });
     });
 
-    loadPackagePagesMap().finally(() => {
-        if (latestPackagesTable) latestPackagesTable.redraw();
-        if (detailPackagesTable) detailPackagesTable.redraw();
-        hydrateFromLastJob().finally(() => loadHistory());
+    /* ------------------------------------------------------------------ */
+    /* Boot                                                                */
+    /* ------------------------------------------------------------------ */
+
+    function hydrateFromLastJob() {
+        return fetch('/api/run/status')
+            .then((r) => r.json())
+            .then((j) => {
+                if (!j) return;
+                if (j.state === 'running') {
+                    runStatus.textContent = 'Running…';
+                    setStatusPill('running', 'running');
+                    if (j.fanOut) setRunProgress(j.fanOut);
+                    if (!pollTimer) {
+                        pollTimer = setInterval(async () => {
+                            if (await pollUntilIdle()) {
+                                if (pollTimer) clearInterval(pollTimer);
+                                pollTimer = null;
+                            }
+                        }, 1500);
+                    }
+                } else if (typeof j.exitCode === 'number') {
+                    setStatusPill(j.exitCode === 0 ? 'ok' : 'err', j.exitCode === 0 ? 'success' : 'error');
+                    if (runStatus) runStatus.textContent = j.exitCode === 0 ? 'Finished.' : 'Finished with errors.';
+                }
+            })
+            .catch(() => {
+                /**/
+            });
+    }
+
+    Promise.all([loadPackagePagesMap(), loadBuOptions()]).finally(() => {
+        loadTiles();
+        loadHistory();
+        hydrateFromLastJob();
     });
 })();
-

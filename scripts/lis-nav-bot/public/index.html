@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>lis-nav-bot</title>
+    <title>Stellar Matter</title>
     <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
@@ -13,8 +13,8 @@
                 <span class="ico-sidebar" aria-hidden="true"></span>
             </button>
             <div class="topbar-brand">
-                <h1>lis-nav-bot</h1>
-                <p class="muted topbar-tagline"><code>.env</code> on server only · read-only</p>
+                <h1 class="wordmark">Stellar Matter</h1>
+                <p class="muted topbar-tagline eyebrow-lite"><code>.env</code> on server only · read-only</p>
             </div>
             <nav class="tablist" role="tablist" aria-label="Main sections">
                 <button type="button" id="tab-results" role="tab" aria-selected="true" aria-controls="view-results">Results</button>
@@ -30,30 +30,47 @@
     <div id="app-shell" class="app-shell">
         <aside id="run-sidebar" class="run-sidebar" aria-labelledby="sidebar-title">
             <div class="sidebar-inner">
-                <h2 id="sidebar-title" class="sidebar-heading">Run</h2>
+                <h2 id="sidebar-title" class="sidebar-heading eyebrow">Run</h2>
                 <form id="run-form">
                     <div class="sidebar-groups">
-                        <fieldset class="source-picker" id="source-picker" aria-label="Data source">
-                            <legend class="source-picker-legend">Data source</legend>
+                        <fieldset class="source-picker nexus-card source-picker-card" id="source-picker" aria-label="Data source">
+                            <legend class="source-picker-legend eyebrow-lite">Data source</legend>
                             <label><input type="radio" name="source" value="scrape" checked /> Web scrape</label>
-                            <label><input type="radio" name="source" value="sql" /> SQL (direct)</label>
+                            <label><input type="radio" name="source" value="sql" /> SQL (Listec)</label>
                             <p id="source-hint" class="muted small source-hint"></p>
                         </fieldset>
-                        <details open class="sidebar-detail">
-                            <summary>Core filters</summary>
-                            <div class="grid2 sidebar-grid">
-                                <label>Business unit <input name="bu" type="text" placeholder="ROHTAK" autocomplete="off" /></label>
-                                <label>Status <input name="status" type="text" placeholder="--All-- or Partially Tested" /></label>
-                                <label>Test code <input name="testCode" type="text" /></label>
+
+                        <section class="nexus-card section-card" aria-labelledby="filters-card-title">
+                            <h3 id="filters-card-title" class="section-card-title eyebrow">Filters</h3>
+                            <div class="field-block">
+                                <span class="eyebrow-lite field-label">Date quick picks</span>
+                                <div id="date-quick-chips" class="chip-row" role="group" aria-label="Date quick picks"></div>
                             </div>
-                        </details>
-                        <details open class="sidebar-detail">
-                            <summary>Date &amp; time</summary>
                             <div class="grid2 sidebar-grid">
                                 <label>From date <input name="fromDate" type="text" placeholder="DD/MM/YYYY" /></label>
                                 <label>To date <input name="toDate" type="text" placeholder="DD/MM/YYYY" /></label>
                                 <label>From hour <input name="fromHour" type="number" min="0" max="23" /></label>
                                 <label>To hour <input name="toHour" type="number" min="0" max="23" /></label>
+                            </div>
+                            <div class="field-block bu-field-block">
+                                <div class="row-between bu-chip-toolbar">
+                                    <span class="eyebrow-lite field-label">Business units</span>
+                                    <div class="chip-tool-group">
+                                        <button type="button" id="bu-chip-all" class="chip chip-tool">All</button>
+                                        <button type="button" id="bu-chip-clear-selection" class="chip chip-tool">Clear</button>
+                                    </div>
+                                </div>
+                                <div id="bu-chip-grid" class="chip-grid" role="group" aria-label="Business unit chips"></div>
+                                <p id="bu-lookup-error" class="muted small bu-lookup-msg" hidden></p>
+                                <label class="bu-fallback-label">BU (text) <input name="bu" type="text" placeholder="ROHTAK or id" autocomplete="off" /></label>
+                            </div>
+                        </section>
+
+                        <details open class="sidebar-detail">
+                            <summary>Core filters</summary>
+                            <div class="grid2 sidebar-grid">
+                                <label>Status <input name="status" type="text" placeholder="--All-- or Partially Tested" /></label>
+                                <label>Test code <input name="testCode" type="text" /></label>
                             </div>
                         </details>
                         <details open class="sidebar-detail">
@@ -82,106 +99,30 @@
                         </details>
                     </div>
                     <div class="form-actions">
-                        <button type="submit" id="submit-btn">Run</button>
-                        <button type="button" id="clear-btn" class="btn-secondary">Clear</button>
+                        <button type="submit" id="submit-btn" class="btn-primary">Run</button>
+                        <button type="button" id="clear-btn" class="btn-secondary chip-like">Clear ledger</button>
                         <span id="run-status" class="muted run-status-line"></span>
                     </div>
                 </form>
             </div>
         </aside>
 
-        <main class="main-pane">
+        <main class="main-pane tile-wall-outer">
             <section id="view-results" class="tabpanel" role="tabpanel" aria-labelledby="tab-results">
-                <div id="results-placeholder" class="results-placeholder">
-                    <p class="results-placeholder-lead">
-                        Run a <strong>package scrape</strong> to see KPI totals and the printable-pages estimate for the whole scan.
-                    </p>
-                    <p class="muted small">Shortcuts: Ctrl+Enter submits the form · <kbd>g</kbd> then <kbd>r</kbd> Results · <kbd>g</kbd> then <kbd>h</kbd> History</p>
+                <div id="run-progress-wrap" class="run-progress-wrap" hidden>
+                    <div class="run-progress-bar" aria-hidden="true"></div>
+                    <div id="run-progress-strip" class="run-progress-strip eyebrow-lite" aria-live="polite"></div>
                 </div>
-                <div id="results-body" class="results-body" hidden>
-                    <div id="running-shade" class="running-shade" hidden aria-hidden="true"></div>
-
-                    <div id="non-package-banner" class="non-package-banner" hidden>
-                        <div class="non-package-banner-inner">
-                            <span class="banner-title">Latest run · <span id="non-package-mode">—</span></span>
-                            <span id="non-package-stats" class="banner-stats muted"></span>
-                        </div>
+                <div id="results-error" class="results-error nexus-card" hidden></div>
+                <div id="tile-wall" class="tile-wall">
+                    <div id="tile-empty" class="tile-empty nexus-card">
+                        <p class="tile-empty-lead">No runs in view. Start a <strong>SQL</strong> or <strong>package scrape</strong> run — each completed job becomes a tile here.</p>
+                        <p class="muted small">Tiles are rebuilt from <code>out/run-*</code> on every load. <kbd>Ctrl</kbd>+<kbd>Enter</kbd> submits the form.</p>
+                        <p id="restore-hidden-wrap" class="restore-hidden-wrap" hidden>
+                            <button type="button" id="restore-hidden-btn" class="chip chip-tool"></button>
+                        </p>
                     </div>
-
-                    <div id="package-metrics" class="package-metrics" hidden>
-                        <div class="kpi-hero" id="kpi-hero">
-                            <div class="kpi-card kpi-card-primary" aria-labelledby="kpi-total-pages-label">
-                                <div class="kpi-card-primary-head">
-                                    <div id="kpi-total-pages-label" class="kpi-label">Total printed pages · whole scan</div>
-                                    <span id="kpi-estimated-chip" class="estimated-chip" hidden>estimated minimum</span>
-                                </div>
-                                <div id="kpi-total-pages" class="kpi-value">—</div>
-                                <div id="kpi-total-pages-sub" class="kpi-sub muted"></div>
-                            </div>
-                            <div class="kpi-card">
-                                <div class="kpi-label">Occurrences</div>
-                                <div id="kpi-occurrences" class="kpi-value">—</div>
-                                <div class="kpi-sub muted">bracket-label cells</div>
-                            </div>
-                            <div class="kpi-card">
-                                <div class="kpi-label">Unique labels</div>
-                                <div id="kpi-unique" class="kpi-value">—</div>
-                                <div class="kpi-sub muted">distinct packages</div>
-                            </div>
-                            <div class="kpi-card">
-                                <div class="kpi-label">Pager pages scanned</div>
-                                <div id="kpi-pages-scanned" class="kpi-value">—</div>
-                                <div class="kpi-sub muted">grid navigation</div>
-                            </div>
-                            <div class="kpi-card">
-                                <div class="kpi-label">Recoveries</div>
-                                <div id="kpi-recoveries" class="kpi-value">—</div>
-                                <div class="kpi-sub muted">session restores</div>
-                            </div>
-                            <div class="kpi-card">
-                                <div class="kpi-label">Errors</div>
-                                <div id="kpi-errors" class="kpi-value">—</div>
-                                <div class="kpi-sub muted">run messages</div>
-                            </div>
-                        </div>
-
-                        <section class="hero-callout" id="hero-callout" aria-label="Most printed package">
-                            <div class="hero-callout-copy">
-                                <span class="hero-callout-tag">Rank #1</span>
-                                <p id="hero-callout-label" class="hero-callout-label">—</p>
-                                <p id="hero-callout-sub" class="hero-callout-sub muted"></p>
-                            </div>
-                            <div class="hero-callout-metric">
-                                <span id="hero-callout-pages" class="hero-callout-pages-num">—</span>
-                                <span class="hero-callout-pages-label muted">printed pages across occurrences</span>
-                            </div>
-                        </section>
-                    </div>
-
-                    <footer class="run-meta-strip-wrap">
-                        <div id="filters-applied-line" class="filters-line-strip muted"></div>
-                        <div id="run-meta-strip" class="run-meta-strip" role="region" aria-label="Run identifiers"></div>
-                    </footer>
-
-                    <details id="recovery-drawer" class="recovery-drawer" hidden>
-                        <summary id="recovery-summary">Session recoveries</summary>
-                        <div id="recovery-body" class="recovery-body path"></div>
-                    </details>
-
-                    <section class="packages-section results-card" id="packages-section" hidden>
-                        <header class="row-between packages-header">
-                            <div>
-                                <h2 class="packages-heading">Labels</h2>
-                                <p class="muted small">Count × pages per printed report (<code>data/package-pages.json</code>), plus whole-scan footer row.</p>
-                            </div>
-                            <div class="packages-stats" id="packages-stats"></div>
-                        </header>
-                        <div class="packages-toolbar">
-                            <input id="packages-search" type="search" placeholder="Filter labels…" autocomplete="off" />
-                            <span class="muted small" id="packages-shown"></span>
-                        </div>
-                        <div class="table-wrap packages-table-host-main" id="packages-table-wrap"></div>
-                    </section>
+                    <div id="tile-grid" class="tile-grid" hidden></div>
                 </div>
             </section>
 
@@ -223,6 +164,32 @@
             </section>
         </main>
     </div>
+
+    <dialog id="run-modal" class="run-modal">
+        <div class="run-modal-inner nexus-card">
+            <header class="run-modal-header row-between">
+                <div>
+                    <p id="run-modal-eyebrow" class="eyebrow">Run</p>
+                    <h2 id="run-modal-title" class="run-modal-title">—</h2>
+                    <p id="run-modal-sub" class="muted small">—</p>
+                </div>
+                <button type="button" id="run-modal-close" class="chip chip-tool" aria-label="Close">Close</button>
+            </header>
+            <div class="run-modal-paths muted small path" id="run-modal-paths"></div>
+            <div class="packages-toolbar modal-packages-toolbar">
+                <input id="modal-packages-search" type="search" placeholder="Filter labels…" autocomplete="off" />
+                <span class="muted small" id="modal-packages-shown"></span>
+            </div>
+            <div id="modal-packages-wrap" class="packages-table-host-modal table-wrap"></div>
+            <footer class="run-modal-footer row-between">
+                <span class="eyebrow-lite">Total printed pages</span>
+                <div>
+                    <span id="run-modal-total-pages" class="display-num">—</span>
+                    <span id="run-modal-est-chip" class="estimated-chip-inline" hidden>estimated minimum</span>
+                </div>
+            </footer>
+        </div>
+    </dialog>
 
     <script src="/app.js"></script>
 </body>

@@ -26,6 +26,17 @@ To load a different Autobots `.env`, set **`LIS_AUTOBOTS_ENV`** to its full path
 - Start the UI: `npm run ui` (runs `node server.js`).
 - Opens on **http://127.0.0.1:4377/** by default. Override with **`LIS_UI_PORT`** (and optionally **`LIS_UI_HOST`**; bind to loopback only unless you know you need otherwise — do not expose this on a LAN without a reverse proxy and authentication).
 
+### UI tour
+
+The Results pane is a **tile wall**: every completed run drops one permanent tile. Tiles are rebuilt from `out/run-*.json` + `out/run-*-packages.json` on every page load, so refreshing the browser never loses history. Each tile shows the BU, the date window, the total printed pages (recomputed from `data/package-pages.json`), and a small stat strip; click anywhere on a tile to open a modal with the per-package breakdown (sortable, filterable). The modal closes on `Esc` or by clicking the backdrop.
+
+The sidebar keeps every form field but adds two chip pickers:
+
+- **Date quick picks** — `TODAY`, `YESTERDAY`, `−7D`, `THIS MONTH`, `LAST MONTH`. Each chip writes `DD/MM/YYYY` into the existing date inputs and toggles `aria-pressed` on a match.
+- **Business units** — multi-select chip grid loaded from `GET /api/bu` (a thin proxy to Listec `GET /api/lookups`). Selection is persisted in `localStorage` under `lisbot:bu-selection`. With **SQL** source and 2+ chips selected, the Run button fans out one serial run per BU and a top progress strip streams live status. If Listec is unreachable, the chip grid falls back to the free-text `bu` input.
+
+The **Clear ledger** button hides every visible tile by adding its run id to the `lisbot:hidden-tiles` set in `localStorage` — files in `out/` are preserved. A `Restore N hidden runs` link appears on the empty state to bring them back in one click.
+
 ## Usage
 
 ```bash
