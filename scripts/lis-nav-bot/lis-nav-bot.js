@@ -1,51 +1,35 @@
 #!/usr/bin/env node
 'use strict';
 
+// Phase 11 (cli-rename): This file used to be the canonical CLI entry-point.
+// The CLI now lives at top-level `cli/stellar-matter-cli.js`.
+//
+// We keep this shim around for one release so that any wrapper scripts,
+// scheduled tasks, or muscle-memory invocations of
+//
+//     node scripts/lis-nav-bot/lis-nav-bot.js …
+//
+// continue to work — but they'll print a loud deprecation warning so we
+// notice anything still pointing at the old path before deletion.
+//
+// Migration:
+//   - Library code moved from scripts/lis-nav-bot/lib/ to cli/lib/
+//   - CLI entry-point moved from scripts/lis-nav-bot/lis-nav-bot.js
+//     to cli/stellar-matter-cli.js
+//   - Run via: `npm run cli -- …` or `node cli/stellar-matter-cli.js …`
+//
+// This shim will be removed in a future release.
+
 const path = require('path');
-const { Command } = require('commander');
-const { loadLisNavBotEnv } = require('./lib/load-env');
-loadLisNavBotEnv(__dirname);
 
-const { runLisNavBot } = require('./lib/run');
+const RED = '\x1b[31m';
+const YELLOW = '\x1b[33m';
+const RESET = '\x1b[0m';
 
-async function main() {
-    const program = new Command();
-    program
-        .name('lis-nav-bot')
-        .description('Read-only LIS Sample Worksheet navigation (no worksheet writes)')
-        .option('--bu <name>', 'Business unit label')
-        .option('--status <label>', 'Worksheet status label')
-        .option('--test-code <code>', 'Test code filter')
-        .option('--from-date <DD/MM/YYYY>', 'From date')
-        .option('--to-date <DD/MM/YYYY>', 'To date')
-        .option('--from-hour <0-23>', 'From hour', (v) => Number(v))
-        .option('--to-hour <0-23>', 'To hour', (v) => Number(v))
-        .option('--client-code <code>', 'Client code')
-        .option('--sid <sid>', 'SID search field')
-        .option('--vail-id <id>', 'Vail / valid id')
-        .option('--pid <pid>', 'PID')
-        .option('--dept-no <no>', 'Department (numeric code or name substring)')
-        .option('--open-sid <sid>', 'After search, open this SID worksheet modal (read-only)')
-        .option('--headless', 'Run headless Chromium', false)
-        .option('--dry-run', 'Login + filters only; do not click Search', false)
-        .option('--out-dir <dir>', 'Output directory', process.env.LIS_OUT_DIR || './out')
-        .option('--no-screenshots', 'Skip PNG screenshots', false)
-        .option('--skip-regional-badge', 'Skip gvSample rows with regional mcc badge (QUGEN pattern)', false)
-        .option('--scrape-packages', 'Paginate gvSample and extract bracket package labels mapped to SIDs', false)
-        .option('--source <scrape|sql>', 'Data source: web scrape (default) or direct SQL via Listec service', 'scrape')
-        .parse(process.argv);
+process.stderr.write(
+    `${YELLOW}[deprecated]${RESET} ${RED}scripts/lis-nav-bot/lis-nav-bot.js${RESET} is a removal-notice shim.\n` +
+    `             Use ${YELLOW}node cli/stellar-matter-cli.js${RESET} (or ${YELLOW}npm run cli --${RESET}) instead.\n` +
+    `             This shim will be removed in a future release.\n\n`
+);
 
-    const opts = program.opts();
-
-    console.log('READ-ONLY MODE — no LIS writes will be performed.');
-
-    try {
-        const { exitCode } = await runLisNavBot(opts);
-        process.exit(exitCode);
-    } catch (e) {
-        console.error(e && e.message ? e.message : e);
-        process.exit(1);
-    }
-}
-
-main();
+require(path.join(__dirname, '..', '..', 'cli', 'stellar-matter-cli.js'));

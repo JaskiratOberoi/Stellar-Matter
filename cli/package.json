@@ -1,0 +1,21 @@
+{
+  "name": "stellar-matter-cli",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Stellar Matter CLI — read-only LIS Sample Worksheet navigation. Renamed from lis-nav-bot in Phase 11; the legacy entry-point at scripts/lis-nav-bot/lis-nav-bot.js is a removal-notice shim that delegates here.",
+  "main": "stellar-matter-cli.js",
+  "bin": {
+    "stellar-matter-cli": "./stellar-matter-cli.js"
+  },
+  "scripts": {
+    "start": "node stellar-matter-cli.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "commander": "^12.1.0",
+    "dotenv": "^16.4.7",
+    "puppeteer": "^23.11.1"
+  }
+}

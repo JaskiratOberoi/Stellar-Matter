@@ -37,19 +37,26 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 COPY server/package.json ./server/package.json
 COPY web/package.json ./web/package.json
+# Phase 11 (cli-rename): the CLI moved from scripts/lis-nav-bot/ to top-level
+# cli/ and is now a real workspace. Copy its manifest so npm ci installs its
+# deps (puppeteer, commander, dotenv) into the workspace-hoisted node_modules.
+COPY cli/package.json ./cli/package.json
 
 # Also install the legacy CLI's deps so scripts/lis-nav-bot/server.js can
-# require puppeteer + express + dotenv when launched as the entrypoint.
+# require puppeteer + express + dotenv when launched as the entrypoint. The
+# scripts/lis-nav-bot/package.json is kept as the server's package boundary
+# until server.js itself is moved.
 COPY scripts/lis-nav-bot/package.json ./scripts/lis-nav-bot/package.json
 
 RUN if [ -f package-lock.json ]; then npm ci --omit=dev; else npm install --omit=dev; fi \
     && cd scripts/lis-nav-bot \
     && (if [ -f package-lock.json ]; then npm ci --omit=dev; else npm install --omit=dev; fi)
 
-# Bring in the rest of the app source (server, routes, legacy CLI, data,
-# and the prebuilt SPA from the web-build stage).
+# Bring in the rest of the app source (server, routes, CLI, data, and the
+# prebuilt SPA from the web-build stage).
 COPY server ./server
 COPY scripts ./scripts
+COPY cli ./cli
 # data/package-pages.json is the source of truth for the pages-per-package
 # mapping. Bind-mounted in docker-compose so edits don't require rebuild.
 COPY scripts/lis-nav-bot/data ./scripts/lis-nav-bot/data

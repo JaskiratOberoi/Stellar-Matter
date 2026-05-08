@@ -6,7 +6,8 @@
   "type": "module",
   "workspaces": [
     "web",
-    "server"
+    "server",
+    "cli"
   ],
   "scripts": {
     "dev": "concurrently -k -n server,web -c cyan,magenta \"npm run dev -w server\" \"npm run dev -w web\"",
@@ -15,7 +16,10 @@
     "build": "npm run build -w web",
     "start": "node server/index.js",
     "migrate": "node server/db/migrate.js",
-    "cli": "node scripts/lis-nav-bot/lis-nav-bot.js"
+    "cli": "node cli/stellar-matter-cli.js"
+  },
+  "bin": {
+    "stellar-matter-cli": "cli/stellar-matter-cli.js"
   },
   "engines": {
     "node": ">=20"

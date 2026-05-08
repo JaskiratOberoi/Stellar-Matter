@@ -4,10 +4,14 @@ const path = require('path');
 const fs = require('fs');
 const express = require('express');
 
-const { loadLisNavBotEnv } = require('./lib/load-env');
+// Phase 11 (cli-rename): library code moved to top-level cli/lib/. Server
+// still lives here for now because tooling + Docker COPY paths still point
+// at scripts/lis-nav-bot/server.js, but the lib imports are pointed at the
+// new home so the move is one-directional.
+const { loadLisNavBotEnv } = require('../../cli/lib/load-env');
 loadLisNavBotEnv(__dirname);
 
-const { runLisNavBot } = require('./lib/run');
+const { runLisNavBot } = require('../../cli/lib/run');
 
 const app = express();
 const PORT = Number(process.env.LIS_UI_PORT || 4377);
