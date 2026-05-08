@@ -29,8 +29,8 @@ export function Topbar({
                 </button>
                 <div className="topbar-brand">
                     <h1 className="wordmark">Stellar Matter</h1>
-                    <p className="muted topbar-tagline eyebrow-lite">
-                        <code>.env</code> on server only · read-only
+                    <p className="muted topbar-tagline">
+                        <span>Official counter for materials in Genomics</span>
                     </p>
                 </div>
                 <nav className="tablist" role="tablist" aria-label="Main sections">
