@@ -7,6 +7,16 @@ export function RunModal({ tile, kind, indexFromOne, clientPagesByNorm, onClose 
     const dialogRef = useRef(null);
     const [filter, setFilter] = useState('');
 
+    // Stash onClose in a ref so the open/close useEffect doesn't re-run every
+    // time the parent passes a fresh arrow function. Without this, the parent's
+    // tile-polling re-render gives us a new onClose reference, which triggers
+    // effect cleanup → dlg.close() → re-open via dlg.showModal() — and showModal
+    // resets the dialog's scroll to the top, defeating any user scroll.
+    const onCloseRef = useRef(onClose);
+    useEffect(() => {
+        onCloseRef.current = onClose;
+    }, [onClose]);
+
     const rows = useMemo(() => (Array.isArray(tile?.labelRows) ? tile.labelRows : []), [tile]);
     const pinned = useMemo(
         () => (tile ? makeOtherTestsPinned(tile.totals && tile.totals.otherTestsRowCount) : null),
@@ -25,8 +35,13 @@ export function RunModal({ tile, kind, indexFromOne, clientPagesByNorm, onClose 
         return matched + (hasPinned ? 1 : 0);
     }, [rows, filter, hasPinned]);
 
+    // Open / close the native <dialog> exactly once per tile identity. Depending
+    // on tile?.id (a stable string) instead of the tile object reference means a
+    // background tiles refresh that hands us a fresh-but-equivalent object will
+    // NOT trigger close+reopen — so the user's scroll position is preserved.
+    const tileId = tile?.id || null;
     useEffect(() => {
-        if (!tile) return;
+        if (!tileId) return;
         setFilter('');
         const dlg = dialogRef.current;
         if (!dlg) return;
@@ -41,10 +56,10 @@ export function RunModal({ tile, kind, indexFromOne, clientPagesByNorm, onClose 
         }
         const onCancel = (e) => {
             e.preventDefault();
-            onClose();
+            onCloseRef.current && onCloseRef.current();
         };
         const onClick = (e) => {
-            if (e.target === dlg) onClose();
+            if (e.target === dlg) onCloseRef.current && onCloseRef.current();
         };
         dlg.addEventListener('cancel', onCancel);
         dlg.addEventListener('click', onClick);
@@ -58,7 +73,7 @@ export function RunModal({ tile, kind, indexFromOne, clientPagesByNorm, onClose 
                 dlg.removeAttribute('open');
             }
         };
-    }, [tile, onClose]);
+    }, [tileId]);
 
     if (!tile) return null;
 
