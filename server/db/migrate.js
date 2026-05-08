@@ -111,8 +111,10 @@ async function migrate() {
              ON user_org_assignments (org_id);`
         );
 
-        // Seed the default org and auto-assign every existing user to it.
-        // ON CONFLICT DO NOTHING keeps this safe across re-runs.
+        // Seed the default org and auto-assign every existing non-admin user
+        // to it. super_admin gets a separate INSERT in seedSuperAdmin() so
+        // they land as 'org_admin' instead of 'member'. ON CONFLICT DO NOTHING
+        // keeps this safe across re-runs.
         await client.query(
             `INSERT INTO organizations (id, slug, name)
              VALUES ($1, $2, $3)
@@ -123,10 +125,22 @@ async function migrate() {
             `INSERT INTO user_org_assignments (user_id, org_id, role)
              SELECT u.id, $1, 'member'
              FROM users u
-             WHERE NOT EXISTS (
-                 SELECT 1 FROM user_org_assignments a
-                 WHERE a.user_id = u.id AND a.org_id = $1
-             )`,
+             WHERE u.role <> 'super_admin'
+               AND NOT EXISTS (
+                   SELECT 1 FROM user_org_assignments a
+                   WHERE a.user_id = u.id AND a.org_id = $1
+               )`,
+            [DEFAULT_ORG_ID]
+        );
+        // super_admins always belong to org-default as org_admin. UPSERT lifts
+        // any pre-existing 'member' rows to 'org_admin' so a re-run heals
+        // historical data.
+        await client.query(
+            `INSERT INTO user_org_assignments (user_id, org_id, role)
+             SELECT u.id, $1, 'org_admin'
+             FROM users u
+             WHERE u.role = 'super_admin'
+             ON CONFLICT (user_id, org_id) DO UPDATE SET role = 'org_admin'`,
             [DEFAULT_ORG_ID]
         );
 
