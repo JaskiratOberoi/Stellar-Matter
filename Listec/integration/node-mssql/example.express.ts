@@ -7,13 +7,18 @@
  * Copy listec.types.ts + listec.client.ts next to this file (or adjust imports).
  */
 
-import 'dotenv/config';
+import { config as loadEnv } from 'dotenv';
+import path from 'path';
+loadEnv({ path: path.resolve(__dirname, '..', '..', '.env') });
+loadEnv();
 import express from 'express';
-import { fetchWorksheetReports, closeListecPool } from './listec.client';
+import { fetchWorksheetReports, closeListecPool, fetchAllWorksheetReports } from './listec.client';
 import type { WorksheetReportFilters } from './listec.types';
+import { aggregatePackages } from './listec.aggregate';
 
 const app = express();
-const port = Number(process.env.PORT ?? 3100);
+const port = Number(process.env.LISTEC_API_PORT ?? process.env.PORT ?? 3100);
+const host = process.env.LISTEC_API_HOST ?? '127.0.0.1';
 
 function parseNum(v: string | undefined): number | null {
   if (v === undefined || v === '') return null;
@@ -68,12 +73,29 @@ app.get('/api/worksheet-reports', async (req, res) => {
   }
 });
 
+/**
+ * Drains every page for the filter window and returns rows mapped into
+ * { sid, testNamesText } pairs plus pre-computed totals — purpose-built
+ * for lis-nav-bot's package-label aggregator.
+ */
+app.get('/api/worksheet-reports/packages', async (req, res) => {
+  try {
+    const f = filtersFromQuery(req.query);
+    const rows = await fetchAllWorksheetReports(f);
+    const summary = aggregatePackages(rows);
+    res.json(summary);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    res.status(400).json({ error: msg });
+  }
+});
+
 app.get('/health', (_req, res) => {
   res.json({ ok: true });
 });
 
-const server = app.listen(port, () => {
-  console.log(`Worksheet API listening on http://127.0.0.1:${port}`);
+const server = app.listen(port, host, () => {
+  console.log(`Worksheet API listening on http://${host}:${port}`);
 });
 
 async function shutdown() {

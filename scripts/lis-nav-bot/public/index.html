@@ -33,6 +33,12 @@
                 <h2 id="sidebar-title" class="sidebar-heading">Run</h2>
                 <form id="run-form">
                     <div class="sidebar-groups">
+                        <fieldset class="source-picker" id="source-picker" aria-label="Data source">
+                            <legend class="source-picker-legend">Data source</legend>
+                            <label><input type="radio" name="source" value="scrape" checked /> Web scrape</label>
+                            <label><input type="radio" name="source" value="sql" /> SQL (direct)</label>
+                            <p id="source-hint" class="muted small source-hint"></p>
+                        </fieldset>
                         <details open class="sidebar-detail">
                             <summary>Core filters</summary>
                             <div class="grid2 sidebar-grid">
@@ -58,7 +64,7 @@
                                 <label>Vail id <input name="vailId" type="text" /></label>
                                 <label>PID <input name="pid" type="text" /></label>
                                 <label>Dept no <input name="deptNo" type="text" /></label>
-                                <label>Open SID (modal) <input name="openSid" id="openSid" type="text" /></label>
+                                <label data-source-only="scrape"><span>Open SID (modal)</span> <input name="openSid" id="openSid" type="text" /></label>
                             </div>
                         </details>
                         <details open class="sidebar-detail">
@@ -66,12 +72,12 @@
                             <div class="sidebar-grid single">
                                 <label>Out dir <input name="outDir" type="text" placeholder="./out" /></label>
                             </div>
-                            <fieldset class="checks">
-                                <label><input name="scrapePackages" id="scrapePackages" type="checkbox" /> Package scrape</label>
+                            <fieldset class="checks" id="run-checks">
+                                <label data-source-only="scrape"><input name="scrapePackages" id="scrapePackages" type="checkbox" /> Package scrape</label>
                                 <label><input name="dryRun" type="checkbox" /> Dry run</label>
-                                <label><input name="headless" type="checkbox" /> Headless</label>
-                                <label><input name="skipRegionalBadge" type="checkbox" /> Skip regional badge</label>
-                                <label><input name="noScreenshots" type="checkbox" /> No screenshots</label>
+                                <label data-source-only="scrape"><input name="headless" type="checkbox" /> Headless</label>
+                                <label data-source-only="scrape"><input name="skipRegionalBadge" type="checkbox" /> Skip regional badge</label>
+                                <label data-source-only="scrape"><input name="noScreenshots" type="checkbox" /> No screenshots</label>
                             </fieldset>
                         </details>
                     </div>

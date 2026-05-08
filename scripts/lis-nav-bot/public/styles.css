@@ -237,6 +237,41 @@ kbd {
     font-weight: 600;
 }
 
+.source-picker {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.55rem 0.7rem;
+    margin: 0 0 0.65rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+}
+
+.source-picker-legend {
+    padding: 0 0.3rem;
+    font-size: 0.75rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.source-picker label {
+    flex-direction: row;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.85rem;
+    cursor: pointer;
+}
+
+.source-picker .source-hint {
+    margin: 0.15rem 0 0;
+    line-height: 1.3;
+}
+
+.run-sidebar.collapsed-visual .source-picker {
+    display: none;
+}
+
 .sidebar-detail summary {
     cursor: pointer;
     font-weight: 600;

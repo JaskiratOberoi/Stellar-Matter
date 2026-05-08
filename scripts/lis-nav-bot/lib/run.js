@@ -119,6 +119,13 @@ async function runLisNavBot(programOpts) {
 
     const opts = programOpts || {};
 
+    const sourceRaw = pickStr('LIS_SOURCE', opts.source);
+    const source = sourceRaw && /^sql$/i.test(sourceRaw) ? 'sql' : 'scrape';
+    if (source === 'sql') {
+        const { runViaSql } = require('./sql-source');
+        return runViaSql(opts);
+    }
+
     const { username, password } = resolveCredentials();
     if (!username || !password) {
         const err = new Error(

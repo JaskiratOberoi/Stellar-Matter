@@ -32,6 +32,7 @@ async function main() {
         .option('--no-screenshots', 'Skip PNG screenshots', false)
         .option('--skip-regional-badge', 'Skip gvSample rows with regional mcc badge (QUGEN pattern)', false)
         .option('--scrape-packages', 'Paginate gvSample and extract bracket package labels mapped to SIDs', false)
+        .option('--source <scrape|sql>', 'Data source: web scrape (default) or direct SQL via Listec service', 'scrape')
         .parse(process.argv);
 
     const opts = program.opts();

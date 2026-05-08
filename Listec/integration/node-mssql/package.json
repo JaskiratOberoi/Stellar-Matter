@@ -1,0 +1,27 @@
+{
+    "name": "listec-worksheet-api",
+    "version": "0.1.0",
+    "private": true,
+    "description": "HTTP service that exposes Noble.dbo.usp_listec_worksheet_report_json",
+    "scripts": {
+        "deploy:sp": "ts-node scripts/deploy-sp.ts",
+        "dev": "ts-node example.express.ts",
+        "build": "tsc -p tsconfig.json",
+        "start": "node dist/example.express.js"
+    },
+    "engines": {
+        "node": ">=18"
+    },
+    "dependencies": {
+        "dotenv": "^16.4.7",
+        "express": "^4.21.2",
+        "mssql": "^11.0.1"
+    },
+    "devDependencies": {
+        "@types/express": "^4.17.21",
+        "@types/mssql": "^9.1.5",
+        "@types/node": "^20.14.10",
+        "ts-node": "^10.9.2",
+        "typescript": "^5.5.4"
+    }
+}

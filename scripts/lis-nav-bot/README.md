@@ -63,6 +63,37 @@ Long runs that exceed the LIS worksheet session lifetime are **automatically rec
 - **Normal / open-SID mode:** reads SIDs from **page 1** only.
 - **`--scrape-packages`:** walks **all** grid pages returned by Search until the pager stops (plus ellipsis / `Page$N` jumps).
 
+## Data source: web scrape vs SQL (direct)
+
+Two execution paths produce the same `out/run-*.json` + `out/run-*-packages.json` artifacts so the dashboard works unchanged.
+
+| Source | How it works | When to use |
+|--------|--------------|-------------|
+| **Web scrape** (default) | Headless Chromium logs in, applies filters, paginates `gvSample`. | LIS DB unreachable, or you need the open-SID modal/screenshots. |
+| **SQL (direct)** | Calls the Listec mssql HTTP service ([`Listec/integration/node-mssql/`](../../Listec/integration/node-mssql/)) which executes `dbo.usp_listec_worksheet_report_json` against `Noble`. One round-trip, no browser. | Default for production reporting — orders of magnitude faster, no session recovery, returns full results in one call. |
+
+Switch via:
+
+- UI: **Data source** radio at the top of the Run sidebar (persisted in `localStorage` under `lisbot:source`).
+- CLI: `--source sql` or env `LIS_SOURCE=sql`.
+
+SQL source env:
+
+```bash
+LISTEC_API_BASE_URL=http://127.0.0.1:3100   # default
+```
+
+To bring up the Listec service:
+
+```bash
+cd Listec/integration/node-mssql
+npm install
+npm run deploy:sp ../../sp/usp_listec_worksheet_report_json.sql   # one-time
+npm run dev                                                       # service on :3100
+```
+
+Note: the SP requires SQL Server **2016+** (uses `FOR JSON PATH`). The grant of a dedicated `listec_ro` login is deferred — the service today uses the credentials in `Listec/.env` (gitignored). Rotate / least-privilege per the bundle's [`docs/worksheet-report-sp.md`](../../Listec/docs/worksheet-report-sp.md).
+
 ## See also
 
 [`../../internal/lis-navigation-reference.md`](../../internal/lis-navigation-reference.md)

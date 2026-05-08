@@ -1,6 +1,7 @@
 (function () {
     const LS_VIEW = 'lisbot:view';
     const LS_SIDEBAR = 'lisbot:sidebar';
+    const LS_SOURCE = 'lisbot:source';
 
     const form = document.getElementById('run-form');
     const submitBtn = document.getElementById('submit-btn');
@@ -873,6 +874,49 @@
 
     clearBtn?.addEventListener('click', clearLatest);
 
+    function applySourceVisibility(source) {
+        const wantSql = source === 'sql';
+        const els = form.querySelectorAll('[data-source-only]');
+        els.forEach((el) => {
+            const tag = el.getAttribute('data-source-only');
+            el.hidden = wantSql && tag === 'scrape';
+        });
+        const hint = document.getElementById('source-hint');
+        if (hint) {
+            hint.textContent = wantSql
+                ? 'Calls the Listec service (LISTEC_API_BASE_URL, default http://127.0.0.1:3100) — no browser, no scraping.'
+                : 'Drives the LIS web grid via headless Chromium.';
+        }
+    }
+
+    function getSourceFromForm() {
+        const radio = form.querySelector('input[name="source"]:checked');
+        return radio ? String(radio.value) : 'scrape';
+    }
+
+    function setSourceOnForm(value) {
+        const v = value === 'sql' ? 'sql' : 'scrape';
+        const radio = form.querySelector(`input[name="source"][value="${v}"]`);
+        if (radio) radio.checked = true;
+        applySourceVisibility(v);
+    }
+
+    try {
+        setSourceOnForm(localStorage.getItem(LS_SOURCE) || 'scrape');
+    } catch (_) {
+        applySourceVisibility('scrape');
+    }
+
+    form.querySelectorAll('input[name="source"]').forEach((radio) => {
+        radio.addEventListener('change', () => {
+            const v = getSourceFromForm();
+            try {
+                localStorage.setItem(LS_SOURCE, v);
+            } catch (_) {}
+            applySourceVisibility(v);
+        });
+    });
+
     function formToBody() {
         const fd = new FormData(form);
         const body = {};
@@ -887,6 +931,7 @@
         body.noScreenshots = fd.has('noScreenshots');
         if (fd.has('fromHour')) body.fromHour = Number(body.fromHour);
         if (fd.has('toHour')) body.toHour = Number(body.toHour);
+        body.source = getSourceFromForm();
         return body;
     }
 

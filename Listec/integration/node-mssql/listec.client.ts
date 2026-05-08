@@ -12,20 +12,31 @@ import type { WorksheetReportFilters, WorksheetReportRow, TestResult } from './l
 
 let poolPromise: Promise<sql.ConnectionPool> | null = null;
 
+/** Split `host` or `host,port` (mirrors SQL Server connection-string convention). */
+function splitServer(raw: string): { host: string; port: number | undefined } {
+  const trimmed = raw.trim();
+  const m = /^(.+?)[,:](\d+)$/.exec(trimmed);
+  if (m) return { host: m[1].trim(), port: Number(m[2]) };
+  return { host: trimmed, port: undefined };
+}
+
 export function getListecPoolConfig(): sql.config {
-  const server = process.env.LISTEC_SQL_SERVER;
+  const rawServer = process.env.LISTEC_SQL_SERVER;
   const database = process.env.LISTEC_SQL_DATABASE ?? 'Noble';
   const user = process.env.LISTEC_SQL_USER;
   const password = process.env.LISTEC_SQL_PASSWORD;
 
-  if (!server || !user || password === undefined) {
+  if (!rawServer || !user || password === undefined) {
     throw new Error(
       'Missing LISTEC_SQL_SERVER / LISTEC_SQL_USER / LISTEC_SQL_PASSWORD environment variables.',
     );
   }
 
+  const { host, port } = splitServer(rawServer);
+
   return {
-    server,
+    server: host,
+    port,
     database,
     user,
     password,
@@ -148,4 +159,24 @@ export async function fetchWorksheetReports(f: WorksheetReportFilters): Promise<
     if (!set) return [];
     return [...set].map((row) => rowToReportRow(row as Record<string, unknown>));
   });
+}
+
+/**
+ * Drain every page for the given filter window. Walks pages of `pageSize`
+ * (defaults to 1000) until a partial page or a hard cap is reached. Use this
+ * when you need the full result set for aggregation.
+ */
+export async function fetchAllWorksheetReports(
+  filters: WorksheetReportFilters,
+  opts: { pageSize?: number; maxPages?: number } = {},
+): Promise<WorksheetReportRow[]> {
+  const pageSize = Math.min(Math.max(opts.pageSize ?? filters.pageSize ?? 1000, 1), 5000);
+  const maxPages = opts.maxPages ?? 100;
+  const out: WorksheetReportRow[] = [];
+  for (let page = 1; page <= maxPages; page++) {
+    const batch = await fetchWorksheetReports({ ...filters, page, pageSize });
+    out.push(...batch);
+    if (batch.length < pageSize) break;
+  }
+  return out;
 }
