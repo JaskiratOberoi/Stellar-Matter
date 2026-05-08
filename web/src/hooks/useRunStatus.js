@@ -1,0 +1,87 @@
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { apiFetch } from '../apiClient.js';
+
+/**
+ * Polls /api/run/status while a run is active. Returns the latest status
+ * object plus a `submit(body)` callback that POSTs /api/run and starts polling.
+ *
+ * `onIdle` fires once each time the server transitions back to idle after a
+ * run we kicked off (used by App.jsx to refresh tiles + history).
+ */
+export function useRunStatus({ onIdle } = {}) {
+    const [status, setStatus] = useState(null);
+    const [running, setRunning] = useState(false);
+    const [submitError, setSubmitError] = useState(null);
+    const pollTimer = useRef(null);
+    const wasRunningRef = useRef(false);
+
+    const stopPolling = useCallback(() => {
+        if (pollTimer.current) {
+            clearInterval(pollTimer.current);
+            pollTimer.current = null;
+        }
+    }, []);
+
+    const tick = useCallback(async () => {
+        try {
+            const r = await apiFetch('/api/run/status');
+            const j = await r.json();
+            setStatus(j);
+            const isRun = j && j.state === 'running';
+            setRunning(!!isRun);
+            if (!isRun) {
+                stopPolling();
+                if (wasRunningRef.current && typeof onIdle === 'function') {
+                    onIdle(j);
+                }
+                wasRunningRef.current = false;
+            } else {
+                wasRunningRef.current = true;
+            }
+        } catch {
+            /* swallow — next tick retries */
+        }
+    }, [onIdle, stopPolling]);
+
+    const startPolling = useCallback(() => {
+        if (pollTimer.current) return;
+        pollTimer.current = setInterval(tick, 1500);
+    }, [tick]);
+
+    useEffect(() => {
+        tick();
+        return stopPolling;
+    }, [tick, stopPolling]);
+
+    const submit = useCallback(
+        async (body) => {
+            setSubmitError(null);
+            try {
+                const r = await apiFetch('/api/run', {
+                    method: 'POST',
+                    body: JSON.stringify(body)
+                });
+                const j = await r.json().catch(() => ({}));
+                if (r.status === 409) {
+                    setSubmitError(j.error || 'Server busy');
+                    return { ok: false, busy: true, error: j.error };
+                }
+                if (!r.ok) {
+                    setSubmitError(j.error ? String(j.error) : `HTTP ${r.status}`);
+                    return { ok: false, error: j.error };
+                }
+                setRunning(true);
+                wasRunningRef.current = true;
+                await tick();
+                startPolling();
+                return { ok: true, response: j };
+            } catch (e) {
+                setSubmitError(String(e));
+                return { ok: false, error: String(e) };
+            }
+        },
+        [tick, startPolling]
+    );
+
+    return { status, running, submitError, submit, refresh: tick };
+}

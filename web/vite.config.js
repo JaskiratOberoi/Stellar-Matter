@@ -8,7 +8,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.join(__dirname, '..');
 
 function buildApiProxy(env) {
-    const port = String(env.MATTER_APP_PORT || env.PORT || env.VITE_API_PORT || '4378').trim() || '4378';
+    // Phase 2 still proxies to the legacy CommonJS server (default :4377). Once
+    // Phase 4 lands, the Docker app container exposes :4378 and we read
+    // MATTER_APP_PORT instead — that override path is honoured here.
+    const port = String(env.MATTER_APP_PORT || env.LIS_UI_PORT || env.PORT || env.VITE_API_PORT || '4377').trim() || '4377';
     const target = `http://127.0.0.1:${port}`;
     return {
         '/api': {

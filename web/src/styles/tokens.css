@@ -63,3 +63,18 @@ body {
     text-align: center;
     color: rgb(var(--nx-ink-3));
 }
+
+.user-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.18rem 0.5rem;
+    border-radius: 999px;
+    background: rgb(var(--nx-surface-2));
+    border: 1px solid rgb(var(--nx-rule-soft));
+    color: rgb(var(--nx-ink));
+}
+
+.user-logout {
+    padding: 0.12rem 0.5rem;
+}
