@@ -1,0 +1,20 @@
+node_modules
+web/node_modules
+server/node_modules
+scripts/lis-nav-bot/node_modules
+
+# Vite output is rebuilt inside the web-build stage
+web/dist
+web/.vite
+
+# Local secrets + run artifacts (bind-mounted at runtime)
+.env
+.env.*
+out
+
+# Misc
+.git
+.cursor
+*.log
+.DS_Store
+release

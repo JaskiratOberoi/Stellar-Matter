@@ -1,0 +1,21 @@
+# SPA history fallback for React Router (Hostinger / Apache).
+# Files in web/public/ are copied verbatim into web/dist/ by Vite, so this
+# ships to the document root of matter.stellarinfomatica.com.
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /
+  RewriteRule ^index\.html$ - [L]
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteCond %{REQUEST_FILENAME} !-d
+  RewriteRule . /index.html [L]
+</IfModule>
+
+# Long-cache hashed Vite assets; never cache the entry HTML.
+<IfModule mod_headers.c>
+  <FilesMatch "\.(?:js|css|woff2?|ttf|otf|eot|svg|png|jpg|jpeg|gif|webp|ico)$">
+    Header set Cache-Control "public, max-age=31536000, immutable"
+  </FilesMatch>
+  <FilesMatch "\.html$">
+    Header set Cache-Control "no-store"
+  </FilesMatch>
+</IfModule>

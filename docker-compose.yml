@@ -1,0 +1,71 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${MATTER_DB_USER:-matter}
+      POSTGRES_PASSWORD: ${MATTER_DB_PASSWORD:-matter}
+      POSTGRES_DB: ${MATTER_DB_NAME:-matter}
+    ports:
+      # Host can reach Postgres at localhost:${MATTER_DB_PORT:-5434} for
+      # local `npm run dev` against the container DB. Defaults to 5434 to
+      # avoid colliding with Stellar-Shark on 5433.
+      - "${MATTER_DB_PORT:-5434}:5432"
+    volumes:
+      - stellar_matter_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${MATTER_DB_USER:-matter} -d ${MATTER_DB_NAME:-matter}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build: .
+    restart: unless-stopped
+    ports:
+      # Container listens on 4378; Caddyfile (Z:/Ares-CRM/server/Caddyfile)
+      # reverse-proxies api-matter.stellarinfomatica.com -> localhost:4378.
+      - "${MATTER_APP_PORT:-4378}:4378"
+    volumes:
+      # Run artifacts (out/run-*.json) live on the host so they survive
+      # `docker compose down -v` and the React tile wall keeps reading them.
+      - ./out:/app/out
+      # Pages-per-package map is hot-edited; bind read-only so a typo here
+      # can't trash it from inside the container.
+      - ./scripts/lis-nav-bot/data/package-pages.json:/app/scripts/lis-nav-bot/data/package-pages.json:ro
+    environment:
+      NODE_ENV: production
+      MATTER_APP_PORT: "4378"
+      LIS_UI_PORT: "4378"
+      LIS_UI_HOST: 0.0.0.0
+      DATABASE_URL: postgresql://${MATTER_DB_USER:-matter}:${MATTER_DB_PASSWORD:-matter}@db:5432/${MATTER_DB_NAME:-matter}
+      JWT_SECRET: ${JWT_SECRET:-stellar-matter-dev-jwt-change-me}
+      SUPER_ADMIN_USERNAME: ${SUPER_ADMIN_USERNAME:-admin}
+      SUPER_ADMIN_PASSWORD: ${SUPER_ADMIN_PASSWORD:-changeme-set-in-env}
+      SUPER_ADMIN_DISPLAY_NAME: ${SUPER_ADMIN_DISPLAY_NAME:-Super Admin}
+      # Listec API base. host.docker.internal so the container can reach the
+      # Listec service running on the host (Linux host overrides via
+      # extra_hosts below).
+      LISTEC_API_BASE_URL: ${LISTEC_API_BASE_URL:-http://host.docker.internal:3100}
+      CORS_ORIGINS: ${CORS_ORIGINS:-https://matter.stellarinfomatica.com}
+      TZ: ${TZ:-Asia/Kolkata}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "require('http').get('http://127.0.0.1:4378/api/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 45s
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  stellar_matter_pgdata:
