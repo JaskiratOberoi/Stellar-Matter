@@ -1,0 +1,26 @@
+{
+  "name": "stellar-matter",
+  "private": true,
+  "version": "0.2.0",
+  "description": "Stellar Matter — editorial Letter Heads / Envelopes dashboard for the Listec LIS, with multi-BU SQL fan-out, JWT-gated admin, and Docker-friendly deploy",
+  "type": "module",
+  "workspaces": [
+    "web",
+    "server"
+  ],
+  "scripts": {
+    "dev": "concurrently -k -n server,web -c cyan,magenta \"npm run dev -w server\" \"npm run dev -w web\"",
+    "dev:server": "npm run dev -w server",
+    "dev:web": "npm run dev -w web",
+    "build": "npm run build -w web",
+    "start": "node server/index.js",
+    "migrate": "node server/db/migrate.js",
+    "cli": "node scripts/lis-nav-bot/lis-nav-bot.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  }
+}

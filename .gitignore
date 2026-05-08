@@ -1,4 +1,16 @@
 node_modules/
 .env
+.env.local
 *.log
 .DS_Store
+
+# Vite build output
+web/dist/
+web/.vite/
+
+# Run artifacts (top-level, used by Docker bind mount in Phase 4)
+out/
+
+# Docker / pg data
+pgdata/
+

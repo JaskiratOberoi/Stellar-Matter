@@ -1,0 +1,65 @@
+/* Editorial design tokens — lifted verbatim from scripts/lis-nav-bot/public/styles.css :root.
+   Space-separated RGB triples so we can do `rgb(var(--nx-accent) / 0.4)` for translucent UI. */
+
+* {
+    box-sizing: border-box;
+}
+
+:root {
+    --sidebar-w: 320px;
+    --sidebar-w-collapsed: 52px;
+    --topbar-h: 52px;
+
+    /* Nexus editorial palette */
+    --nx-bg: 10 10 10;
+    --nx-surface: 20 20 20;
+    --nx-surface-2: 31 31 31;
+    --nx-ink: 250 250 247;
+    --nx-ink-2: 184 184 184;
+    --nx-ink-3: 115 115 115;
+    --nx-rule: 250 250 247;
+    --nx-rule-soft: 38 38 38;
+    --nx-accent: 212 255 58;
+    --nx-accent-ink: 10 10 10;
+    --nx-signal-warning: 255 196 60;
+    --nx-signal-danger: 255 92 87;
+
+    /* Legacy aliases — anchors against the editorial palette so existing
+       CSS lifted from scripts/lis-nav-bot/public/styles.css keeps working
+       inside web/src/styles/app.css after the Phase 2 React port. */
+    --accent: rgb(var(--nx-accent));
+    --accent-2: rgb(var(--nx-ink-2));
+    --bg: rgb(var(--nx-bg));
+    --bg-elev-1: rgb(var(--nx-surface));
+    --bg-elev-2: rgb(var(--nx-surface-2));
+    --border: rgb(var(--nx-rule-soft));
+    --text: rgb(var(--nx-ink));
+    --muted: rgb(var(--nx-ink-2));
+    --accent-border: rgb(var(--nx-accent) / 0.45);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.001ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.001ms !important;
+        scroll-behavior: auto !important;
+    }
+}
+
+html,
+body {
+    background: rgb(var(--nx-bg));
+    color: rgb(var(--nx-ink));
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+}
+
+.role-gate-loading {
+    padding: 2rem;
+    text-align: center;
+    color: rgb(var(--nx-ink-3));
+}
