@@ -436,6 +436,18 @@ kbd {
     box-shadow: 0 0 0 1px rgba(88, 166, 255, 0.08);
 }
 
+.kpi-card-primary-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.65rem;
+}
+
+.kpi-card-primary-head .kpi-label {
+    flex: 1;
+    min-width: 0;
+}
+
 .kpi-label {
     font-size: 0.72rem;
     font-weight: 600;
@@ -466,9 +478,8 @@ kbd {
 }
 
 .estimated-chip {
-    position: absolute;
-    top: 0.5rem;
-    right: 0.55rem;
+    flex-shrink: 0;
+    align-self: flex-start;
     font-size: 0.6rem;
     font-weight: 700;
     text-transform: uppercase;
@@ -478,6 +489,9 @@ kbd {
     background: rgba(210, 153, 34, 0.16);
     border: 1px solid rgba(210, 153, 34, 0.45);
     color: #e3b341;
+    line-height: 1.2;
+    max-width: 11rem;
+    text-align: right;
 }
 
 .hero-callout {
