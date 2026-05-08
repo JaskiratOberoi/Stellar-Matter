@@ -15,7 +15,7 @@ Backend in Docker on a self-hosted server, frontend deployed to Hostinger at
 web/                       React + Vite SPA (deployed to Hostinger)
 server/                    Express auth/admin layer (loads the legacy server)
 scripts/lis-nav-bot/       Original CLI + scrape engine + run artefacts (out/)
-scripts/hostinger-dns.js   One-off: upsert matter / api-matter DNS records
+scripts/hostinger-dns.cjs  One-off: upsert matter / api-matter DNS records
 Dockerfile                 Multi-stage: Vite build + Node 20 + Chromium
 docker-compose.yml         Postgres 16 + app, ports 4378 / 5434
 .env.example               Every env var the stack reads
@@ -101,18 +101,29 @@ API. Paste `HOSTINGER_API_KEY` into `.env`, then:
 
 ```bash
 # Frontend subdomain — points at Hostinger's web hosting IP.
-node scripts/hostinger-dns.js \
+node scripts/hostinger-dns.cjs \
   --domain stellarinfomatica.com \
   --record matter \
   --type A \
   --value <HOSTINGER_WEB_IP>
 
 # API subdomain — points at your home server's public IP.
-node scripts/hostinger-dns.js \
+node scripts/hostinger-dns.cjs \
   --domain stellarinfomatica.com \
   --record api-matter \
   --type A \
   --value <HOME_SERVER_PUBLIC_IP>
+
+# Apex (bare-domain) record — gated behind --allow-apex --force.
+# Without --force the script refuses to overwrite an existing apex
+# record AND refuses to create one if none exists, because either way
+# we'd be repointing the entire zone.
+node scripts/hostinger-dns.cjs \
+  --domain stellarinfomatica.com \
+  --record @ \
+  --type A \
+  --value <HOSTINGER_WEB_IP> \
+  --allow-apex --force
 ```
 
 The script is idempotent (no-ops when the existing record already matches) and

@@ -10,19 +10,30 @@
  * subdomains point at this server.
  *
  * Usage:
- *   node scripts/hostinger-dns.js \
+ *   node scripts/hostinger-dns.cjs \
  *     --domain stellarinfomatica.com \
  *     --record matter,api-matter \
  *     --type A \
  *     --value 203.0.113.42
  *
- *   node scripts/hostinger-dns.js \
+ *   node scripts/hostinger-dns.cjs \
  *     --domain stellarinfomatica.com \
  *     --record api-matter \
  *     --type CNAME \
  *     --value matter.stellarinfomatica.com.
  *
- * Phase 12 (out of scope here) extends this with --allow-apex / --force.
+ *   # Apex (@) records require BOTH flags. Without --force we refuse to
+ *   # overwrite an existing apex record because that's how an entire domain
+ *   # gets parked accidentally.
+ *   node scripts/hostinger-dns.cjs \
+ *     --domain stellarinfomatica.com \
+ *     --record @ \
+ *     --type A \
+ *     --value 203.0.113.42 \
+ *     --allow-apex --force
+ *
+ * The .cjs extension keeps Node treating this as CommonJS even though the
+ * root package.json sets "type": "module" for the SPA tooling.
  *
  * Shape of the Hostinger v2 DNS API:
  *   GET  /api/dns/v1/zones/{domain}/records          -> list
@@ -61,7 +72,21 @@ function loadEnv() {
 }
 
 function parseArgs(argv) {
-    const out = { domain: null, record: null, type: 'A', value: null, ttl: 300, dryRun: false };
+    const out = {
+        domain: null,
+        record: null,
+        type: 'A',
+        value: null,
+        ttl: 300,
+        dryRun: false,
+        // Apex (@) records are gated behind two flags. --allow-apex opts in
+        // to the apex code path at all; --force is *additionally* required
+        // to overwrite an existing apex record. Both flags default off so a
+        // typo like --record @,api-matter can never accidentally repoint
+        // the bare domain to a new IP.
+        allowApex: false,
+        force: false
+    };
     for (let i = 0; i < argv.length; i++) {
         const a = argv[i];
         const next = () => argv[++i];
@@ -71,6 +96,8 @@ function parseArgs(argv) {
         else if (a === '--value' || a === '--target') out.value = next();
         else if (a === '--ttl') out.ttl = Number(next());
         else if (a === '--dry-run') out.dryRun = true;
+        else if (a === '--allow-apex') out.allowApex = true;
+        else if (a === '--force') out.force = true;
         else if (a === '--help' || a === '-h') {
             printUsage();
             process.exit(0);
@@ -82,12 +109,28 @@ function parseArgs(argv) {
 function printUsage() {
     console.log(`Hostinger DNS upsert
 Usage:
-  node scripts/hostinger-dns.js \\
+  node scripts/hostinger-dns.cjs \\
     --domain stellarinfomatica.com \\
     --record matter,api-matter \\
     --type A \\
     --value 203.0.113.42 \\
     [--ttl 300] [--dry-run]
+
+  # Apex (bare-domain) records:
+  node scripts/hostinger-dns.cjs \\
+    --domain stellarinfomatica.com \\
+    --record @ \\
+    --type A \\
+    --value 203.0.113.42 \\
+    --allow-apex --force
+
+Flags:
+  --allow-apex   opt in to apex (@) record handling at all
+  --force        required to overwrite an existing apex record (no-op
+                 noops still pass without --force; create-from-empty
+                 is also blocked without --force as a belt-and-braces
+                 guard against accidentally repointing the whole zone)
+  --dry-run      print intended action without calling the API
 
 Environment:
   HOSTINGER_API_KEY    required — Developer API token from hostinger.com
@@ -142,18 +185,78 @@ async function listRecords(token, domain) {
     }));
 }
 
-async function upsertRecord(token, domain, record, type, value, ttl, dryRun) {
+/**
+ * Hostinger represents the apex record as either '@' or the bare domain in
+ * `name`. We normalise both shapes when matching so a record stored as
+ * "stellarinfomatica.com" still gets recognised when the user passes "@".
+ */
+function isApexName(record) {
+    return record === '@' || record === '';
+}
+
+function recordMatches(row, record, domain) {
+    if (row.type !== undefined) {
+        // case-handled separately by caller
+    }
+    if (isApexName(record)) {
+        return row.name === '@' || row.name === '' || row.name === domain;
+    }
+    return row.name === record;
+}
+
+async function upsertRecord(token, domain, record, type, value, ttl, dryRun, opts = {}) {
+    const apex = isApexName(record);
+    const allowApex = !!opts.allowApex;
+    const force = !!opts.force;
+
+    if (apex && !allowApex) {
+        const e = new Error(
+            `apex (@) record requires --allow-apex (refusing to touch the bare domain by default)`
+        );
+        e.code = 'APEX_NOT_ALLOWED';
+        throw e;
+    }
+
     const existing = await listRecords(token, domain);
-    const match = existing.find((r) => r.name === record && r.type === type);
+    const match = existing.find((r) => recordMatches(r, record, domain) && r.type === type);
+
     if (match && match.value === value && (ttl == null || match.ttl === ttl)) {
         return { action: 'noop', record: match };
     }
-    const payload = { name: record, type, value, ttl };
+
+    // Belt-and-braces guard for apex records. We refuse without --force when:
+    //  * an existing apex record's value would change (overwrite), OR
+    //  * no apex record exists yet (create-from-empty — usually means the
+    //    user typo'd '@' instead of a subdomain). Either way the operator
+    //    has to explicitly opt in to changing the bare domain.
+    if (apex && !force) {
+        if (match) {
+            const e = new Error(
+                `apex (@) ${type} for ${domain} already points to ${JSON.stringify(match.value)}; ` +
+                    `refuse to overwrite without --force`
+            );
+            e.code = 'APEX_OVERWRITE_REFUSED';
+            e.existing = match;
+            throw e;
+        }
+        const e = new Error(
+            `no apex (@) ${type} record exists for ${domain}; refuse to create without --force`
+        );
+        e.code = 'APEX_CREATE_REFUSED';
+        throw e;
+    }
+
+    const payload = { name: apex ? '@' : record, type, value, ttl };
     if (dryRun) {
         return { action: match ? 'update (dry-run)' : 'create (dry-run)', record: match || payload, payload };
     }
     if (match) {
-        const updated = await api(token, 'PUT', `/zones/${encodeURIComponent(domain)}/records/${encodeURIComponent(match.id)}`, payload);
+        const updated = await api(
+            token,
+            'PUT',
+            `/zones/${encodeURIComponent(domain)}/records/${encodeURIComponent(match.id)}`,
+            payload
+        );
         return { action: 'update', record: updated };
     }
     const created = await api(token, 'POST', `/zones/${encodeURIComponent(domain)}/records`, payload);
@@ -181,19 +284,34 @@ async function main() {
         .map((s) => s.trim())
         .filter(Boolean);
 
-    if (records.includes('@')) {
-        console.error('Error: apex (@) record support requires --allow-apex --force (Phase 12, not enabled here).');
-        process.exit(2);
+    const hasApex = records.some((r) => r === '@' || r === '');
+    if (hasApex && args.allowApex) {
+        // Loud-on-purpose banner so the operator notices what they're about
+        // to do — apex changes can take an entire domain offline.
+        const guard = args.force ? '--force' : 'NOT --force (no-op + dry-run only)';
+        console.warn(
+            `[warn] apex (@) record handling enabled for ${args.domain} ` +
+                `(allow-apex, ${guard}). This affects the bare domain.`
+        );
     }
 
     for (const rec of records) {
         try {
-            const r = await upsertRecord(token, args.domain, rec, args.type, args.value, args.ttl, args.dryRun);
-            console.log(
-                `[${r.action}] ${rec}.${args.domain} ${args.type} -> ${args.value} (ttl ${args.ttl})`
+            const r = await upsertRecord(
+                token,
+                args.domain,
+                rec,
+                args.type,
+                args.value,
+                args.ttl,
+                args.dryRun,
+                { allowApex: args.allowApex, force: args.force }
             );
+            const label = rec === '@' ? args.domain : `${rec}.${args.domain}`;
+            console.log(`[${r.action}] ${label} ${args.type} -> ${args.value} (ttl ${args.ttl})`);
         } catch (err) {
-            console.error(`[error] ${rec}.${args.domain}: ${err.message || err}`);
+            const label = rec === '@' ? args.domain : `${rec}.${args.domain}`;
+            console.error(`[error] ${label}: ${err.message || err}`);
             process.exitCode = 1;
         }
     }
