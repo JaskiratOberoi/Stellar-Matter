@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext.jsx';
 
@@ -7,9 +8,10 @@ export function Topbar({
     statusPill,
     lastUpdated,
     sidebarCollapsed,
-    onToggleSidebar
+    onToggleSidebar,
+    onOrgSwitched
 }) {
-    const { user, authRequired, logout } = useAuth();
+    const { user, orgs, authRequired, logout, switchOrg } = useAuth();
     const tabs = [
         { id: 'letterheads', label: 'Letter Heads' },
         { id: 'envelopes', label: 'Envelopes' },
@@ -58,10 +60,22 @@ export function Topbar({
                 )}
                 {authRequired && user && (
                     <span className="user-chip muted small">
+                        <OrgSwitcher
+                            user={user}
+                            orgs={orgs}
+                            onSwitch={async (orgId) => {
+                                const r = await switchOrg(orgId);
+                                if (r.ok && typeof onOrgSwitched === 'function') onOrgSwitched(orgId);
+                                else if (!r.ok) window.alert(r.error || 'Org switch failed');
+                            }}
+                        />
                         {user.role === 'super_admin' && (
                             <>
                                 <Link to="/admin/users" className="chip chip-tool admin-nav-link">
                                     Users
+                                </Link>
+                                <Link to="/admin/orgs" className="chip chip-tool admin-nav-link">
+                                    Orgs
                                 </Link>
                                 <Link to="/admin/audit-log" className="chip chip-tool admin-nav-link">
                                     Audit log
@@ -79,5 +93,58 @@ export function Topbar({
                 )}
             </div>
         </header>
+    );
+}
+
+function OrgSwitcher({ user, orgs, onSwitch }) {
+    const [open, setOpen] = useState(false);
+    if (!orgs || orgs.length === 0) return null;
+    const active = orgs.find((o) => o.id === user.active_org_id) || null;
+    const activeLabel = active ? active.name : '— no org —';
+    // For users with exactly one assignment we still show the chip (read-only)
+    // so it's obvious which tenant they're acting on. super_admin always gets
+    // the dropdown because they may need to switch even with one assignment if
+    // more orgs become available later.
+    const canSwitch = orgs.length > 1 || user.role === 'super_admin';
+    if (!canSwitch) {
+        return (
+            <span className="chip chip-tool org-chip-static" title={`Active org: ${activeLabel}`}>
+                Org · {activeLabel}
+            </span>
+        );
+    }
+    return (
+        <span className="org-switcher">
+            <button
+                type="button"
+                className="chip chip-tool org-chip-trigger"
+                aria-haspopup="listbox"
+                aria-expanded={open ? 'true' : 'false'}
+                onClick={() => setOpen((v) => !v)}
+                title={`Active org: ${activeLabel}`}
+            >
+                Org · {activeLabel} {open ? '▲' : '▼'}
+            </button>
+            {open && (
+                <div className="org-switcher-menu" role="listbox">
+                    {orgs.map((o) => (
+                        <button
+                            key={o.id}
+                            type="button"
+                            role="option"
+                            aria-selected={o.id === user.active_org_id ? 'true' : 'false'}
+                            className={`org-switcher-item${o.id === user.active_org_id ? ' active' : ''}`}
+                            onClick={() => {
+                                setOpen(false);
+                                if (o.id !== user.active_org_id) onSwitch(o.id);
+                            }}
+                        >
+                            <span className="org-switcher-name">{o.name}</span>
+                            <span className="muted small">{o.slug}</span>
+                        </button>
+                    ))}
+                </div>
+            )}
+        </span>
     );
 }

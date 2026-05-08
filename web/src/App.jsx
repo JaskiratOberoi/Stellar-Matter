@@ -9,6 +9,7 @@ import { RoleGate } from './components/RoleGate.jsx';
 import { LoginPage } from './pages/LoginPage.jsx';
 import { AdminUsersPage } from './pages/AdminUsersPage.jsx';
 import { AdminAuditLogPage } from './pages/AdminAuditLogPage.jsx';
+import { AdminOrgsPage } from './pages/AdminOrgsPage.jsx';
 import { useAuth } from './contexts/AuthContext.jsx';
 import { useTiles } from './hooks/useTiles.js';
 import { useBuOptions } from './hooks/useBuOptions.js';
@@ -141,6 +142,10 @@ export function App() {
                 lastUpdated={loadedAt}
                 sidebarCollapsed={sidebarCollapsed}
                 onToggleSidebar={() => setSidebarCollapsed((c) => !c)}
+                onOrgSwitched={() => {
+                    // Switching org changes which tiles the server returns; refetch.
+                    reloadTiles();
+                }}
             />
             <div className={`app-shell${sidebarCollapsed ? ' sidebar-collapsed' : ''}`}>
                 <RunSidebar
@@ -254,6 +259,14 @@ export function App() {
                 element={
                     <RoleGate roles={['super_admin']}>
                         <AdminAuditLogPage />
+                    </RoleGate>
+                }
+            />
+            <Route
+                path="/admin/orgs"
+                element={
+                    <RoleGate roles={['super_admin']}>
+                        <AdminOrgsPage />
                     </RoleGate>
                 }
             />

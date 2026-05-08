@@ -44,6 +44,9 @@ export function AdminUsersPage() {
                     <Link to="/" className="chip chip-tool">
                         ← Back to dashboard
                     </Link>
+                    <Link to="/admin/orgs" className="chip chip-tool">
+                        Orgs
+                    </Link>
                     <Link to="/admin/audit-log" className="chip chip-tool">
                         Audit log
                     </Link>

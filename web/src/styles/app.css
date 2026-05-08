@@ -1506,6 +1506,113 @@ table.packages td.envelope-cell {
     text-align: center;
 }
 
+/* -- Org switcher chip ------------------------------------------------- */
+
+.org-switcher {
+    position: relative;
+    display: inline-block;
+}
+
+.org-chip-trigger,
+.org-chip-static {
+    background: rgba(0, 0, 0, 0.25);
+    color: rgb(var(--ink));
+    border: 1px solid rgb(var(--border));
+}
+
+.org-switcher-menu {
+    position: absolute;
+    right: 0;
+    top: calc(100% + 4px);
+    min-width: 220px;
+    background: rgb(var(--surface));
+    border: 1px solid rgb(var(--border));
+    border-radius: 8px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    z-index: 50;
+    padding: 4px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.org-switcher-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 12px;
+    background: transparent;
+    color: rgb(var(--ink));
+    border: 0;
+    border-radius: 6px;
+    cursor: pointer;
+    text-align: left;
+    font: inherit;
+}
+
+.org-switcher-item:hover {
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.org-switcher-item.active {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.org-switcher-name {
+    font-weight: 500;
+}
+
+/* -- Org members panel (AdminOrgsPage) -------------------------------- */
+
+.org-members-panel {
+    display: grid;
+    gap: 12px;
+}
+
+.org-members-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 6px;
+}
+
+.org-members-list li {
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    gap: 10px;
+    align-items: center;
+    padding: 6px 8px;
+    border: 1px solid rgb(var(--border));
+    border-radius: 6px;
+    background: rgba(0, 0, 0, 0.15);
+}
+
+.org-members-add {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 12px;
+    padding-top: 8px;
+    border-top: 1px dashed rgb(var(--border));
+}
+
+.org-members-add label {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 200px;
+}
+
+.org-members-add select {
+    background: rgb(var(--surface));
+    color: rgb(var(--ink));
+    border: 1px solid rgb(var(--border));
+    border-radius: 6px;
+    padding: 6px 8px;
+}
+
 /* Urine-container test-code lock chip in the run sidebar. Visually a chip,
  * non-interactive — communicates "this filter is pinned by the active tab".
  */
