@@ -228,6 +228,241 @@ router.delete('/users/:id', adminWriteLimiter, async (req, res) => {
     }
 });
 
+// -- Organizations CRUD ----------------------------------------------------
+//
+// Phase 10. super_admin only. The default 'org-default' row is seeded by
+// migrate.js so the topbar switcher always has at least one entry; deleting
+// or deactivating it is rejected here to keep that invariant.
+
+router.get('/orgs', async (_req, res) => {
+    try {
+        if (!useDatabase()) return res.status(503).json({ error: 'Database not configured' });
+        const pool = getPool();
+        const r = await pool.query(
+            `SELECT o.id, o.slug, o.name, o.active, o.created_at,
+                    (SELECT COUNT(*) FROM user_org_assignments a WHERE a.org_id = o.id) AS member_count
+             FROM organizations o
+             ORDER BY o.name`
+        );
+        res.json({ orgs: r.rows });
+    } catch (err) {
+        res.status(500).json({ error: err.message || String(err) });
+    }
+});
+
+router.post('/orgs', adminWriteLimiter, async (req, res) => {
+    try {
+        if (!useDatabase()) return res.status(503).json({ error: 'Database not configured' });
+        const slug = req.body && req.body.slug != null ? String(req.body.slug).trim().toLowerCase() : '';
+        const name = req.body && req.body.name != null ? String(req.body.name).trim() : '';
+        if (!slug || !name) {
+            return res.status(400).json({ error: 'slug and name required' });
+        }
+        if (!/^[a-z0-9][a-z0-9-]*$/.test(slug)) {
+            return res.status(400).json({
+                error: 'slug must be lowercase alphanumeric with hyphens (no leading hyphen)'
+            });
+        }
+        const pool = getPool();
+        const id = `org-${crypto.randomBytes(6).toString('hex')}`;
+        try {
+            await pool.query(
+                `INSERT INTO organizations (id, slug, name, active) VALUES ($1, $2, $3, true)`,
+                [id, slug, name]
+            );
+        } catch (err) {
+            if (err && err.code === '23505') {
+                await logAudit(req, {
+                    action: 'admin.org.create',
+                    outcome: 'failure',
+                    metadata: { reason: 'duplicate_slug', slug }
+                });
+                return res.status(409).json({ error: `Slug "${slug}" already exists` });
+            }
+            throw err;
+        }
+        const r = await pool.query(
+            `SELECT id, slug, name, active, created_at FROM organizations WHERE id = $1`,
+            [id]
+        );
+        await logAudit(req, {
+            action: 'admin.org.create',
+            outcome: 'success',
+            targetType: 'org',
+            targetId: id,
+            before: null,
+            after: { slug, name, active: true }
+        });
+        res.json({ org: r.rows[0] });
+    } catch (err) {
+        res.status(500).json({ error: err.message || String(err) });
+    }
+});
+
+router.patch('/orgs/:id', adminWriteLimiter, async (req, res) => {
+    try {
+        if (!useDatabase()) return res.status(503).json({ error: 'Database not configured' });
+        const { id } = req.params;
+        const pool = getPool();
+        const before = await pool.query(
+            `SELECT id, slug, name, active FROM organizations WHERE id = $1`,
+            [id]
+        );
+        if (!before.rows.length) return res.status(404).json({ error: 'Not found' });
+        const beforeRow = before.rows[0];
+        const body = req.body || {};
+        const changedFields = [];
+        if (body.name != null) {
+            const name = String(body.name).trim();
+            if (!name) return res.status(400).json({ error: 'name cannot be empty' });
+            await pool.query(`UPDATE organizations SET name = $1 WHERE id = $2`, [name, id]);
+            changedFields.push('name');
+        }
+        if (typeof body.active === 'boolean') {
+            if (id === 'org-default' && body.active === false) {
+                return res.status(409).json({ error: 'org-default cannot be deactivated' });
+            }
+            await pool.query(`UPDATE organizations SET active = $1 WHERE id = $2`, [body.active, id]);
+            changedFields.push('active');
+        }
+        const after = await pool.query(
+            `SELECT id, slug, name, active, created_at FROM organizations WHERE id = $1`,
+            [id]
+        );
+        await logAudit(req, {
+            action: 'admin.org.update',
+            outcome: 'success',
+            targetType: 'org',
+            targetId: id,
+            before: { slug: beforeRow.slug, name: beforeRow.name, active: beforeRow.active },
+            after: { slug: after.rows[0].slug, name: after.rows[0].name, active: after.rows[0].active },
+            metadata: { changed_fields: changedFields }
+        });
+        res.json({ org: after.rows[0] });
+    } catch (err) {
+        res.status(500).json({ error: err.message || String(err) });
+    }
+});
+
+router.delete('/orgs/:id', adminWriteLimiter, async (req, res) => {
+    try {
+        if (!useDatabase()) return res.status(503).json({ error: 'Database not configured' });
+        const { id } = req.params;
+        if (id === 'org-default') {
+            return res.status(409).json({ error: 'org-default cannot be deleted' });
+        }
+        const pool = getPool();
+        const before = await pool.query(
+            `SELECT id, slug, name, active FROM organizations WHERE id = $1`,
+            [id]
+        );
+        if (!before.rows.length) return res.status(404).json({ error: 'Not found' });
+        // Refuse to delete an org that still has members. Caller must reassign
+        // them first — keeps the audit trail honest.
+        const members = await pool.query(
+            `SELECT COUNT(*)::int AS c FROM user_org_assignments WHERE org_id = $1`,
+            [id]
+        );
+        if (members.rows[0].c > 0) {
+            return res.status(409).json({
+                error: `Cannot delete: ${members.rows[0].c} user(s) still assigned. Reassign first.`
+            });
+        }
+        await pool.query(`DELETE FROM organizations WHERE id = $1`, [id]);
+        await logAudit(req, {
+            action: 'admin.org.delete',
+            outcome: 'success',
+            targetType: 'org',
+            targetId: id,
+            before: { slug: before.rows[0].slug, name: before.rows[0].name },
+            after: null
+        });
+        res.json({ ok: true });
+    } catch (err) {
+        res.status(500).json({ error: err.message || String(err) });
+    }
+});
+
+// -- Per-user org assignments ---------------------------------------------
+
+router.get('/users/:id/orgs', async (req, res) => {
+    try {
+        if (!useDatabase()) return res.status(503).json({ error: 'Database not configured' });
+        const pool = getPool();
+        const r = await pool.query(
+            `SELECT a.org_id, a.role AS membership_role, o.slug, o.name, o.active
+             FROM user_org_assignments a
+             JOIN organizations o ON o.id = a.org_id
+             WHERE a.user_id = $1
+             ORDER BY o.name`,
+            [req.params.id]
+        );
+        res.json({ assignments: r.rows });
+    } catch (err) {
+        res.status(500).json({ error: err.message || String(err) });
+    }
+});
+
+router.post('/users/:id/orgs', adminWriteLimiter, async (req, res) => {
+    try {
+        if (!useDatabase()) return res.status(503).json({ error: 'Database not configured' });
+        const userId = req.params.id;
+        const orgId = req.body && req.body.org_id != null ? String(req.body.org_id) : '';
+        const role = req.body && req.body.role != null ? String(req.body.role) : 'member';
+        if (!orgId) return res.status(400).json({ error: 'org_id required' });
+        if (!['member', 'org_admin'].includes(role)) {
+            return res.status(400).json({ error: "role must be 'member' or 'org_admin'" });
+        }
+        const pool = getPool();
+        // Validate target user + org exist before INSERT so we get a clean 404
+        // instead of an opaque FK violation.
+        const u = await pool.query(`SELECT 1 FROM users WHERE id = $1`, [userId]);
+        if (!u.rows.length) return res.status(404).json({ error: 'User not found' });
+        const o = await pool.query(`SELECT 1 FROM organizations WHERE id = $1`, [orgId]);
+        if (!o.rows.length) return res.status(404).json({ error: 'Org not found' });
+        await pool.query(
+            `INSERT INTO user_org_assignments (user_id, org_id, role)
+             VALUES ($1, $2, $3)
+             ON CONFLICT (user_id, org_id) DO UPDATE SET role = EXCLUDED.role`,
+            [userId, orgId, role]
+        );
+        await logAudit(req, {
+            action: 'admin.user.org_assign',
+            outcome: 'success',
+            targetType: 'user',
+            targetId: userId,
+            after: { org_id: orgId, role }
+        });
+        res.json({ ok: true });
+    } catch (err) {
+        res.status(500).json({ error: err.message || String(err) });
+    }
+});
+
+router.delete('/users/:id/orgs/:orgId', adminWriteLimiter, async (req, res) => {
+    try {
+        if (!useDatabase()) return res.status(503).json({ error: 'Database not configured' });
+        const { id: userId, orgId } = req.params;
+        const pool = getPool();
+        const r = await pool.query(
+            `DELETE FROM user_org_assignments WHERE user_id = $1 AND org_id = $2 RETURNING role`,
+            [userId, orgId]
+        );
+        if (!r.rows.length) return res.status(404).json({ error: 'Assignment not found' });
+        await logAudit(req, {
+            action: 'admin.user.org_unassign',
+            outcome: 'success',
+            targetType: 'user',
+            targetId: userId,
+            before: { org_id: orgId, role: r.rows[0].role },
+            after: null
+        });
+        res.json({ ok: true });
+    } catch (err) {
+        res.status(500).json({ error: err.message || String(err) });
+    }
+});
+
 // Audit log read endpoint. Paginated with simple filters: action prefix
 // (e.g. 'auth.', 'admin.user.', 'run.'), actor id, target id, outcome.
 // Limit caps at 200 to keep one response within reason; the SPA paginates

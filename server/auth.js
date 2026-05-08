@@ -3,6 +3,9 @@
 // Lifted from Stellar-Shark/server/auth.js. Roles changed to the Stellar
 // Matter set (super_admin / operator / viewer). JWT_SECRET must be set in
 // production — falls back to an obvious dev secret only when NODE_ENV !== 'production'.
+//
+// Phase 10 adds active_org_id to the JWT plus loadOrgsForUser /
+// pickInitialActiveOrg helpers consumed by authApi.
 
 const jwt = require('jsonwebtoken');
 const { useDatabase } = require('./db/pool');
@@ -50,7 +53,11 @@ function requireAuth(req, res, next) {
             id: decoded.sub,
             username: decoded.username,
             role: decoded.role,
-            displayName: decoded.displayName
+            displayName: decoded.displayName,
+            // active_org_id is stamped at login (and re-stamped by /switch-org).
+            // Old tokens minted before Phase 10 lack it; downstream code falls
+            // back to 'org-default' so existing dashboards keep working.
+            activeOrgId: decoded.active_org_id || decoded.activeOrgId || null
         };
         return next();
     } catch {
@@ -75,6 +82,53 @@ async function loadUserById(client, id) {
     return r.rows[0] || null;
 }
 
+/**
+ * Returns the orgs a user can act on. super_admin sees every active org so
+ * the topbar switcher works; everyone else sees only their assignments.
+ */
+async function loadOrgsForUser(client, user) {
+    if (!user) return [];
+    if (user.role === 'super_admin') {
+        const r = await client.query(
+            `SELECT o.id, o.slug, o.name, o.active,
+                    COALESCE(a.role, 'org_admin') AS membership_role
+             FROM organizations o
+             LEFT JOIN user_org_assignments a
+               ON a.org_id = o.id AND a.user_id = $1
+             WHERE o.active = true
+             ORDER BY o.name`,
+            [user.id]
+        );
+        return r.rows;
+    }
+    const r = await client.query(
+        `SELECT o.id, o.slug, o.name, o.active, a.role AS membership_role
+         FROM user_org_assignments a
+         JOIN organizations o ON o.id = a.org_id
+         WHERE a.user_id = $1 AND o.active = true
+         ORDER BY o.name`,
+        [user.id]
+    );
+    return r.rows;
+}
+
+/**
+ * Picks the active org for a fresh login. Prefers an existing assignment
+ * (alphabetical by name); for a super_admin with zero assignments it falls
+ * back to any active org, then to 'org-default' as a last resort.
+ */
+async function pickInitialActiveOrg(client, user) {
+    const orgs = await loadOrgsForUser(client, user);
+    if (orgs.length > 0) return orgs[0].id;
+    if (user && user.role === 'super_admin') {
+        const r = await client.query(
+            `SELECT id FROM organizations WHERE active = true ORDER BY name LIMIT 1`
+        );
+        if (r.rows.length) return r.rows[0].id;
+    }
+    return 'org-default';
+}
+
 module.exports = {
     getJwtSecret,
     signToken,
@@ -82,5 +136,7 @@ module.exports = {
     extractBearer,
     requireAuth,
     requireRole,
-    loadUserById
+    loadUserById,
+    loadOrgsForUser,
+    pickInitialActiveOrg
 };
