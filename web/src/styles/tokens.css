@@ -78,3 +78,113 @@ body {
 .user-logout {
     padding: 0.12rem 0.5rem;
 }
+
+.admin-nav-link {
+    text-decoration: none;
+}
+
+/* Login + admin pages */
+.login-shell {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    padding: 2rem;
+}
+
+.login-card {
+    width: 100%;
+    max-width: 420px;
+    padding: 2rem;
+}
+
+.login-title {
+    margin: 0.4rem 0 0.2rem;
+    font-size: 1.6rem;
+}
+
+.login-sub {
+    margin: 0 0 1.4rem;
+}
+
+.login-form {
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+}
+
+.login-form label {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    font-size: 0.85rem;
+    color: rgb(var(--nx-ink-2));
+}
+
+.login-form input {
+    background: rgb(var(--nx-surface-2));
+    color: rgb(var(--nx-ink));
+    border: 1px solid rgb(var(--nx-rule-soft));
+    padding: 0.6rem 0.7rem;
+    border-radius: 6px;
+    font-size: 0.95rem;
+}
+
+.login-form input:focus {
+    outline: none;
+    border-color: rgb(var(--nx-accent));
+}
+
+.login-err {
+    color: rgb(var(--nx-signal-danger));
+    margin: 0;
+    font-size: 0.85rem;
+}
+
+.admin-shell {
+    padding: 2rem;
+    max-width: 1100px;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+}
+
+.admin-header {
+    align-items: flex-start;
+    gap: 1rem;
+}
+
+.admin-actions {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+}
+
+.admin-create {
+    padding: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+}
+
+.admin-users-table .admin-row-actions {
+    display: flex;
+    gap: 0.4rem;
+    justify-content: flex-end;
+}
+
+.admin-pw-form {
+    display: flex;
+    gap: 0.5rem;
+    padding: 0.5rem 0;
+}
+
+.admin-pw-form input {
+    flex: 1;
+    background: rgb(var(--nx-surface-2));
+    color: rgb(var(--nx-ink));
+    border: 1px solid rgb(var(--nx-rule-soft));
+    padding: 0.4rem 0.6rem;
+    border-radius: 6px;
+}

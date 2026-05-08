@@ -1,9 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Navigate, Route, Routes } from 'react-router-dom';
 import { Topbar } from './components/Topbar.jsx';
 import { RunSidebar } from './components/RunSidebar.jsx';
 import { TileWall } from './components/TileWall.jsx';
 import { RunModal } from './components/RunModal.jsx';
 import { RunProgress } from './components/RunProgress.jsx';
+import { RoleGate } from './components/RoleGate.jsx';
+import { LoginPage } from './pages/LoginPage.jsx';
+import { AdminUsersPage } from './pages/AdminUsersPage.jsx';
 import { useAuth } from './contexts/AuthContext.jsx';
 import { useTiles } from './hooks/useTiles.js';
 import { useBuOptions } from './hooks/useBuOptions.js';
@@ -111,20 +115,17 @@ export function App() {
         return <div className="role-gate-loading muted small">Checking access…</div>;
     }
     if (authRequired && !user) {
-        // Auth wired but user not signed in — login page lands in admin-page todo.
         return (
-            <main style={{ padding: '2rem', maxWidth: 480, margin: '0 auto' }}>
-                <h1 className="wordmark" style={{ marginTop: '3rem' }}>
-                    Stellar Matter
-                </h1>
-                <p className="muted">Sign-in screen ships in the admin-panel phase.</p>
-            </main>
+            <Routes>
+                <Route path="/login" element={<LoginPage />} />
+                <Route path="*" element={<Navigate to="/login" replace />} />
+            </Routes>
         );
     }
 
     const indexFor = (tile) => visibleTiles.findIndex((t) => String(t.id) === String(tile.id)) + 1;
 
-    return (
+    const dashboard = (
         <>
             <Topbar
                 currentTab={tab}
@@ -211,5 +212,21 @@ export function App() {
                 />
             )}
         </>
+    );
+
+    return (
+        <Routes>
+            <Route path="/login" element={<LoginPage />} />
+            <Route
+                path="/admin/users"
+                element={
+                    <RoleGate roles={['super_admin']}>
+                        <AdminUsersPage />
+                    </RoleGate>
+                }
+            />
+            <Route path="/" element={dashboard} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
     );
 }

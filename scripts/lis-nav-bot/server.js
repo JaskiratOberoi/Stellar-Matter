@@ -323,6 +323,53 @@ let jobState = {
 
 app.use(express.json({ limit: '64kb' }));
 
+// ---------------------------------------------------------------------------
+// Phase 3 auth wedge: when the server/ workspace is installed (bcryptjs, pg,
+// jsonwebtoken resolvable at the workspace root) and DATABASE_URL is set,
+// gate every /api/* route except the public whitelist below. When auth deps
+// are absent (legacy single-user mode), this whole block silently no-ops so
+// the dashboard keeps working without Postgres.
+// ---------------------------------------------------------------------------
+let auth = null;
+let authApi = null;
+let adminApi = null;
+let runMigrate = null;
+try {
+    const serverDir = path.resolve(__dirname, '..', '..', 'server');
+    auth = require(path.join(serverDir, 'auth'));
+    authApi = require(path.join(serverDir, 'routes', 'authApi'));
+    adminApi = require(path.join(serverDir, 'routes', 'adminApi'));
+    runMigrate = require(path.join(serverDir, 'db', 'migrate')).migrate;
+} catch (e) {
+    // Auth deps not installed yet — fall through and serve the legacy open dashboard.
+    if (process.env.DATABASE_URL) {
+        console.warn('[stellar-matter] DATABASE_URL set but auth modules failed to load:', e.message);
+    }
+}
+
+if (authApi) app.use('/api/auth', authApi);
+if (adminApi) app.use('/api/admin', adminApi);
+
+if (auth) {
+    // Public whitelist: health + auth login. Everything else under /api requires a token
+    // when DATABASE_URL is set (auth.requireAuth gracefully no-ops when it isn't).
+    app.use((req, res, next) => {
+        if (!req.path.startsWith('/api/')) return next();
+        if (req.path === '/api/health') return next();
+        if (req.path.startsWith('/api/auth/')) return next();
+        if (req.path.startsWith('/api/admin/')) return next(); // adminApi installs its own gates
+        return auth.requireAuth(req, res, next);
+    });
+}
+
+if (runMigrate) {
+    Promise.resolve()
+        .then(() => runMigrate())
+        .catch((err) => console.error('[stellar-matter] migration failed:', err));
+}
+
+const requireSuperAdmin = auth ? auth.requireRole('super_admin') : (_req, _res, next) => next();
+
 app.get('/api/health', (_req, res) => {
     res.json({ ok: true });
 });
@@ -418,7 +465,7 @@ app.get('/api/runs/tiles', (_req, res) => {
     }
 });
 
-app.post('/api/run', async (req, res) => {
+app.post('/api/run', requireSuperAdmin, async (req, res) => {
     if (jobState.state === 'running') {
         return res.status(409).json({ error: 'A run is already in progress.' });
     }

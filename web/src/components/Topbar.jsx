@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext.jsx';
 
 export function Topbar({
@@ -56,8 +57,15 @@ export function Topbar({
                 )}
                 {authRequired && user && (
                     <span className="user-chip muted small">
-                        {user.display_name || user.username}
-                        {user.role === 'super_admin' && ' \u00b7 admin'}
+                        {user.role === 'super_admin' && (
+                            <Link to="/admin/users" className="chip chip-tool admin-nav-link">
+                                Admin
+                            </Link>
+                        )}
+                        <span>
+                            {user.display_name || user.username}
+                            {user.role === 'super_admin' && ' \u00b7 admin'}
+                        </span>
                         <button type="button" className="chip chip-tool user-logout" onClick={logout}>
                             Log out
                         </button>
