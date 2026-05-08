@@ -5,13 +5,17 @@ function metricFor(kind, tile, clientPagesByNorm) {
     if (kind === 'envelopes') {
         const env = tileEnvelopes(tile, clientPagesByNorm);
         return {
-            num: env.total,
-            label: (
+            num: (
                 <>
-                    {env.big.toLocaleString('en-US')} BIG <span className="muted small">/</span>{' '}
-                    {env.small.toLocaleString('en-US')} SMALL
+                    {env.big.toLocaleString('en-US')}
+                    {'\u2009BIG\u2009'}
+                    <span className="muted">/</span>
+                    {'\u2009'}
+                    {env.small.toLocaleString('en-US')}
+                    {'\u2009SMALL'}
                 </>
             ),
+            label: `${env.total.toLocaleString('en-US')} total`,
             estimated: env.estimated,
             estimatedLabel: 'estimated envelopes'
         };
@@ -21,7 +25,7 @@ function metricFor(kind, tile, clientPagesByNorm) {
     const agg = aggregatePages(rows, pinned, clientPagesByNorm);
     const top = topLabelFromTile(tile);
     return {
-        num: agg.knownSum,
+        num: agg.knownSum.toLocaleString('en-US'),
         label: top ? (
             <>
                 {String(top.label).toUpperCase()}
@@ -55,7 +59,7 @@ export function Tile({ tile, kind, indexFromOne, clientPagesByNorm, onOpen }) {
             <h3 className="tile-title">{buLabel}</h3>
             <p className="tile-sub">{dateRange}</p>
             <div className="tile-metric-row">
-                <span className="tile-metric-num">{m.num.toLocaleString('en-US')}</span>
+                <span className="tile-metric-num">{m.num}</span>
                 <span className="tile-metric-label">{m.label}</span>
             </div>
             <p className="tile-stats">{stats.join(' \u00b7 ')}</p>
