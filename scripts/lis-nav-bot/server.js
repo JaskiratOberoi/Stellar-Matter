@@ -11,6 +11,13 @@ const { runLisNavBot } = require('./lib/run');
 
 const app = express();
 const PORT = Number(process.env.LIS_UI_PORT || 4377);
+
+// Behind Caddy on the host, the request reaches Express via the docker bridge
+// (source IP = gateway), not the real client. Trust one proxy hop so req.ip
+// reflects X-Forwarded-For — required for express-rate-limit's IP-based keying
+// on POST /api/auth/login. '1' (not 'true') because true would let any caller
+// spoof X-Forwarded-For when there is no proxy in front.
+app.set('trust proxy', 1);
 const HOST = process.env.LIS_UI_HOST || '127.0.0.1';
 
 function listecApiBase() {

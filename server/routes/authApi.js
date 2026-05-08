@@ -8,10 +8,11 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const { getPool, useDatabase } = require('../db/pool');
 const { signToken, requireAuth, loadUserById } = require('../auth');
+const { loginLimiter } = require('../rateLimit');
 
 const router = express.Router();
 
-router.post('/login', async (req, res) => {
+router.post('/login', loginLimiter, async (req, res) => {
     try {
         if (!useDatabase()) {
             return res.status(503).json({ error: 'Database not configured. Set DATABASE_URL.' });

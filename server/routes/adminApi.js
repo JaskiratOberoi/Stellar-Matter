@@ -9,6 +9,7 @@ const bcrypt = require('bcryptjs');
 const express = require('express');
 const { getPool, useDatabase } = require('../db/pool');
 const { requireAuth, requireRole } = require('../auth');
+const { adminWriteLimiter } = require('../rateLimit');
 
 const router = express.Router();
 
@@ -38,7 +39,7 @@ router.get('/users', async (_req, res) => {
     }
 });
 
-router.post('/users', async (req, res) => {
+router.post('/users', adminWriteLimiter, async (req, res) => {
     try {
         if (!useDatabase()) {
             return res.status(503).json({ error: 'Database not configured' });
@@ -77,7 +78,7 @@ router.post('/users', async (req, res) => {
     }
 });
 
-router.patch('/users/:id', async (req, res) => {
+router.patch('/users/:id', adminWriteLimiter, async (req, res) => {
     try {
         if (!useDatabase()) {
             return res.status(503).json({ error: 'Database not configured' });
@@ -131,7 +132,7 @@ router.patch('/users/:id', async (req, res) => {
     }
 });
 
-router.delete('/users/:id', async (req, res) => {
+router.delete('/users/:id', adminWriteLimiter, async (req, res) => {
     try {
         if (!useDatabase()) {
             return res.status(503).json({ error: 'Database not configured' });
