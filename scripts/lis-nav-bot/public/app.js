@@ -235,7 +235,8 @@
     function normalizePackageLabel(s) {
         return String(s || '')
             .replace(/\s+/g, ' ')
-            .trim();
+            .trim()
+            .toUpperCase();
     }
 
     /** @type {Record<string, number>} */

@@ -24,7 +24,8 @@ const PACKAGE_PAGES_PATH = path.join(__dirname, 'data', 'package-pages.json');
 function normalizePackageLabel(label) {
     return String(label || '')
         .replace(/\s+/g, ' ')
-        .trim();
+        .trim()
+        .toUpperCase();
 }
 
 /** Read mapping from disk (call on each /api/package-pages hit so edits apply without restart). */
