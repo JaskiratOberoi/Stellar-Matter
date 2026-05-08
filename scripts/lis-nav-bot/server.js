@@ -273,6 +273,14 @@ function buildTileFromRunFiles(outDir, packagesFileName) {
         mode === 'urine_containers'
             ? (main && main.urineContainers) || (pkg.urineContainers && typeof pkg.urineContainers === 'object' ? pkg.urineContainers : null)
             : null;
+    // org_id was added in Phase 10. Files written before that have neither key
+    // — we treat them as belonging to 'org-default' so single-tenant deploys
+    // never lose history when this code lands.
+    const orgId = String(
+        (main && main.org_id != null && main.org_id) ||
+            (pkg.org_id != null && pkg.org_id) ||
+            'org-default'
+    );
     return {
         id,
         startedAt,
@@ -280,6 +288,7 @@ function buildTileFromRunFiles(outDir, packagesFileName) {
         source,
         mode,
         urineContainers,
+        orgId,
         bu,
         fromDate: filter.fromDate != null ? String(filter.fromDate) : req.fromDate != null ? String(req.fromDate) : null,
         toDate: filter.toDate != null ? String(filter.toDate) : req.toDate != null ? String(req.toDate) : null,
@@ -454,15 +463,23 @@ app.get('/api/bu', async (_req, res) => {
     res.json(data);
 });
 
-app.get('/api/runs/tiles', (_req, res) => {
+app.get('/api/runs/tiles', (req, res) => {
     const outDir = resolveOutDir();
     /** @type {object[]} */
     const tiles = [];
     /** @type {object[]} */
     const errors = [];
+    // Org scoping: caller's active_org_id from JWT, with 'org-default' as the
+    // single-tenant fallback. super_admin can pass ?all_orgs=1 to inspect every
+    // org's data (e.g. to verify a multi-tenant migration). DB-less / open mode
+    // sees everything because there's no user.
+    const allOrgs = String(req.query.all_orgs || '') === '1';
+    const isSuperAdmin = !!(req.user && req.user.role === 'super_admin');
+    const activeOrgId = (req.user && req.user.activeOrgId) || (req.user ? 'org-default' : null);
+    const filterOrgId = req.user && !(allOrgs && isSuperAdmin) ? activeOrgId : null;
     try {
         if (!fs.existsSync(outDir)) {
-            return res.json({ tiles: [], errors: [], outDir });
+            return res.json({ tiles: [], errors: [], outDir, orgId: filterOrgId, allOrgs: !filterOrgId });
         }
         const names = fs.readdirSync(outDir);
         for (const name of names) {
@@ -472,9 +489,9 @@ app.get('/api/runs/tiles', (_req, res) => {
                 const full = path.join(outDir, name);
                 const st = fs.statSync(full);
                 const t = buildTileFromRunFiles(outDir, name);
-                if (t) {
-                    tiles.push({ ...t, _mtime: st.mtimeMs });
-                }
+                if (!t) continue;
+                if (filterOrgId && t.orgId !== filterOrgId) continue;
+                tiles.push({ ...t, _mtime: st.mtimeMs });
             } catch (e) {
                 errors.push({ file: name, error: String(e && e.message ? e.message : e) });
             }
@@ -486,7 +503,7 @@ app.get('/api/runs/tiles', (_req, res) => {
             return (b._mtime || 0) - (a._mtime || 0);
         });
         const cleaned = tiles.map(({ _mtime, ...rest }) => rest);
-        res.json({ tiles: cleaned, errors, outDir });
+        res.json({ tiles: cleaned, errors, outDir, orgId: filterOrgId, allOrgs: !filterOrgId });
     } catch (e) {
         res.status(500).json({ error: String(e && e.message ? e.message : e) });
     }
@@ -539,6 +556,10 @@ app.post('/api/run', requireSuperAdmin, async (req, res) => {
         lastFanOut: null
     };
 
+    // org_id resolution: caller's active org from JWT, or 'org-default' for
+    // single-tenant deploys / legacy tokens minted before Phase 10.
+    const orgId = (req.user && req.user.activeOrgId) || 'org-default';
+
     if (auditLog) {
         // Fire-and-forget: audit insert doesn't gate the run kicking off.
         auditLog(req, {
@@ -549,6 +570,7 @@ app.post('/api/run', requireSuperAdmin, async (req, res) => {
             metadata: {
                 source,
                 mode,
+                org_id: orgId,
                 test_codes: mode === 'urine_containers' ? ['cp004', 'mb034'] : null,
                 business_units: businessUnits.length ? businessUnits : (body && body.bu ? [body.bu] : []),
                 from_date: body && body.fromDate ? String(body.fromDate) : null,
@@ -559,7 +581,7 @@ app.post('/api/run', requireSuperAdmin, async (req, res) => {
     }
 
     /** @type {Record<string, unknown>} */
-    const bodySansUnits = { ...body };
+    const bodySansUnits = { ...body, orgId };
     delete bodySansUnits.businessUnits;
 
     setImmediate(() => {
@@ -661,7 +683,7 @@ app.post('/api/run', requireSuperAdmin, async (req, res) => {
 
         const runSingle = async () => {
             try {
-                const r = await runLisNavBot({ ...body, mode, startedAt });
+                const r = await runLisNavBot({ ...body, mode, orgId, startedAt });
                 jobState = {
                     state: 'idle',
                     runId,

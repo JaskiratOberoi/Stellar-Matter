@@ -3,6 +3,16 @@
 const fs = require('fs');
 const path = require('path');
 
+// Stamp org_id on every run artefact so /api/runs/tiles can scope to the
+// caller's active org. Pre-org files are read as 'org-default' (Phase 10).
+function writeRunFile(filePath, payload, orgId) {
+    const stamped =
+        payload && typeof payload === 'object' && !Array.isArray(payload)
+            ? Object.assign({ org_id: orgId || 'org-default' }, payload)
+            : payload;
+    fs.writeFileSync(filePath, JSON.stringify(stamped, null, 2), 'utf8');
+}
+
 const { delay } = require('./dom');
 const { launchBrowser } = require('./launch');
 const { loginAndOpenWorksheet } = require('./login');
@@ -152,6 +162,9 @@ async function runLisNavBot(programOpts) {
     const outDirRaw = opts.outDir != null ? opts.outDir : process.env.LIS_OUT_DIR || './out';
     const outDir = path.isAbsolute(String(outDirRaw)) ? String(outDirRaw) : path.resolve(process.cwd(), String(outDirRaw));
     const screenshotsDir = path.join(outDir, 'screenshots');
+
+    // org_id from caller (server passes req.user.activeOrgId), env, or fallback.
+    const orgId = opts.orgId != null ? String(opts.orgId) : process.env.LIS_ORG_ID || 'org-default';
     const takeShots = !opts.noScreenshots && String(process.env.LIS_SCREENSHOTS || '1') !== '0';
 
     const filters = {
@@ -394,7 +407,7 @@ async function runLisNavBot(programOpts) {
 
                         try {
                             if (pagesScanned > 0 && pagesScanned % 10 === 0) {
-                                fs.writeFileSync(pkgFile, JSON.stringify(scrapePayloadPartial(), null, 2), 'utf8');
+                                writeRunFile(pkgFile, scrapePayloadPartial(), orgId);
                                 outPackagesPath = pkgFile;
                                 result.scrapePackages.packagesJsonPath = pkgFile;
                             }
@@ -465,7 +478,7 @@ async function runLisNavBot(programOpts) {
                     lastCompletedPagerPage
                 };
 
-                fs.writeFileSync(pkgFile, JSON.stringify(packagesPayload, null, 2), 'utf8');
+                writeRunFile(pkgFile, packagesPayload, orgId);
                 outPackagesPath = pkgFile;
                 result.scrapePackages.packagesJsonPath = pkgFile;
                 console.log(`Wrote ${pkgFile}`);
@@ -511,7 +524,7 @@ async function runLisNavBot(programOpts) {
 
         fs.mkdirSync(outDir, { recursive: true });
         const outFile = path.join(outDir, `run-${startedAt.replace(/[:.]/g, '-')}.json`);
-        fs.writeFileSync(outFile, JSON.stringify(result, null, 2), 'utf8');
+        writeRunFile(outFile, result, orgId);
         outMainPath = outFile;
         console.log(`Wrote ${outFile}`);
         console.log(`SIDs (page 1, ${result.sidsFoundOnPage1.length}): ${JSON.stringify(result.sidsFoundOnPage1)}`);
@@ -522,7 +535,7 @@ async function runLisNavBot(programOpts) {
         try {
             fs.mkdirSync(outDir, { recursive: true });
             const outFile = path.join(outDir, `run-${startedAt.replace(/[:.]/g, '-')}-error.json`);
-            fs.writeFileSync(outFile, JSON.stringify(result, null, 2), 'utf8');
+            writeRunFile(outFile, result, orgId);
             outMainPath = outFile;
         } catch (_) {}
     } finally {

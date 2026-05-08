@@ -219,6 +219,7 @@ async function runViaSql(programOpts) {
         String(process.env.LIS_DRY_RUN || '').trim() === '1' ||
         String(process.env.LIS_DRY_RUN || '').toLowerCase() === 'true';
 
+    const orgId = opts.orgId != null ? String(opts.orgId) : process.env.LIS_ORG_ID || 'org-default';
     const outDirRaw = opts.outDir != null ? opts.outDir : process.env.LIS_OUT_DIR || './out';
     const outDir = path.isAbsolute(String(outDirRaw))
         ? String(outDirRaw)
@@ -275,7 +276,7 @@ async function runViaSql(programOpts) {
         try {
             fs.mkdirSync(outDir, { recursive: true });
             outMainPath = path.join(outDir, `run-${stamp}.json`);
-            fs.writeFileSync(outMainPath, JSON.stringify(result, null, 2), 'utf8');
+            fs.writeFileSync(outMainPath, JSON.stringify(Object.assign({ org_id: orgId }, result), null, 2), 'utf8');
             console.log(`[sql] dry-run wrote ${outMainPath}`);
         } catch (e) {
             result.errors.push(`dry-run write: ${e.message}`);
@@ -315,7 +316,7 @@ async function runViaSql(programOpts) {
         try {
             fs.mkdirSync(outDir, { recursive: true });
             outMainPath = path.join(outDir, `run-${stamp}-error.json`);
-            fs.writeFileSync(outMainPath, JSON.stringify(result, null, 2), 'utf8');
+            fs.writeFileSync(outMainPath, JSON.stringify(Object.assign({ org_id: orgId }, result), null, 2), 'utf8');
         } catch (_) {}
         return { result, outMainPath, outPackagesPath, exitCode };
     }
@@ -417,13 +418,13 @@ async function runViaSql(programOpts) {
             lastCompletedPagerPage: 1,
             partial: false,
         };
-        fs.writeFileSync(pkgFile, JSON.stringify(packagesPayload, null, 2), 'utf8');
+        fs.writeFileSync(pkgFile, JSON.stringify(Object.assign({ org_id: orgId }, packagesPayload), null, 2), 'utf8');
         outPackagesPath = pkgFile;
         result.scrapePackages.packagesJsonPath = pkgFile;
         console.log(`[sql] wrote ${pkgFile}`);
 
         const outFile = path.join(outDir, `run-${stamp}.json`);
-        fs.writeFileSync(outFile, JSON.stringify(result, null, 2), 'utf8');
+        fs.writeFileSync(outFile, JSON.stringify(Object.assign({ org_id: orgId }, result), null, 2), 'utf8');
         outMainPath = outFile;
         console.log(`[sql] wrote ${outFile}`);
         const modeNote =
