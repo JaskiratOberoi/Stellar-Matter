@@ -68,25 +68,15 @@ function buildQueryString(filters, notes) {
 
     const buNum = toIntOrNull(filters.bu);
     if (buNum != null) params.set('businessUnitId', String(buNum));
-    else if (trimOrNull(filters.bu)) {
-        notes.push(
-            `SQL source: business unit "${trimOrNull(filters.bu)}" requires a numeric id; filter ignored. Pass --bu <id> or use clientCode.`
-        );
-    }
+    else if (trimOrNull(filters.bu)) params.set('businessUnit', trimOrNull(filters.bu));
 
     const statusNum = toIntOrNull(filters.status);
     if (statusNum != null) params.set('statusId', String(statusNum));
-    else if (trimOrNull(filters.status)) {
-        notes.push(
-            `SQL source: status "${trimOrNull(filters.status)}" requires a numeric id; filter ignored.`
-        );
-    }
+    else if (trimOrNull(filters.status)) params.set('status', trimOrNull(filters.status));
 
     const deptNum = toIntOrNull(filters.deptNo);
     if (deptNum != null) params.set('departmentId', String(deptNum));
-    else if (trimOrNull(filters.deptNo)) {
-        notes.push(`SQL source: dept "${trimOrNull(filters.deptNo)}" requires a numeric id; filter ignored.`);
-    }
+    else if (trimOrNull(filters.deptNo)) params.set('dept', trimOrNull(filters.deptNo));
 
     const testCode = trimOrNull(filters.testCode);
     if (testCode) params.set('testCode', testCode);
@@ -215,6 +205,21 @@ async function runViaSql(programOpts) {
             fs.writeFileSync(outMainPath, JSON.stringify(result, null, 2), 'utf8');
         } catch (_) {}
         return { result, outMainPath, outPackagesPath, exitCode };
+    }
+
+    if (payload.resolved && typeof payload.resolved === 'object') {
+        result.filtersApplied.resolved = payload.resolved;
+        for (const [key, info] of Object.entries(payload.resolved)) {
+            if (info && info.id == null) {
+                notes.push(`SQL source: ${key} "${info.input}" did not match any master row — filter ignored.`);
+            }
+        }
+    }
+    if (Array.isArray(payload.unresolved) && payload.unresolved.length) {
+        for (const msg of payload.unresolved) notes.push(`SQL source: ${msg}`);
+    }
+    if (payload.filters && typeof payload.filters === 'object') {
+        result.filtersApplied.spFilters = payload.filters;
     }
 
     const sids = Array.isArray(payload.sids) ? payload.sids : [];
