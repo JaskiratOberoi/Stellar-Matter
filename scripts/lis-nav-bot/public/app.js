@@ -15,18 +15,32 @@
     const runSidebar = document.getElementById('run-sidebar');
 
     const lastUpdatedEl = document.getElementById('last-updated');
-    const viewResults = document.getElementById('view-results');
+    const viewLetterheads = document.getElementById('view-letterheads');
+    const viewEnvelopes = document.getElementById('view-envelopes');
     const viewHistory = document.getElementById('view-history');
-    const tabResultsBtn = document.getElementById('tab-results');
+    const tabLetterheadsBtn = document.getElementById('tab-letterheads');
+    const tabEnvelopesBtn = document.getElementById('tab-envelopes');
     const tabHistoryBtn = document.getElementById('tab-history');
 
     const runProgressWrap = document.getElementById('run-progress-wrap');
     const runProgressStrip = document.getElementById('run-progress-strip');
     const resultsError = document.getElementById('results-error');
-    const tileEmpty = document.getElementById('tile-empty');
-    const tileGrid = document.getElementById('tile-grid');
-    const restoreHiddenWrap = document.getElementById('restore-hidden-wrap');
-    const restoreHiddenBtn = document.getElementById('restore-hidden-btn');
+
+    /** @type {Array<{ kind: 'letterheads'|'envelopes', section: HTMLElement, empty: HTMLElement, grid: HTMLElement, restoreWrap: HTMLElement|null, restoreBtn: HTMLButtonElement|null }>} */
+    const tileSections = [viewLetterheads, viewEnvelopes]
+        .filter((s) => s)
+        .map((section) => {
+            const kind = /** @type {'letterheads'|'envelopes'} */ (section.dataset.metricKind || 'letterheads');
+            return {
+                kind,
+                section,
+                empty: /** @type {HTMLElement} */ (section.querySelector('[data-tile-empty]')),
+                grid: /** @type {HTMLElement} */ (section.querySelector('[data-tile-grid]')),
+                restoreWrap: /** @type {HTMLElement|null} */ (section.querySelector('[data-restore-hidden-wrap]')),
+                restoreBtn: /** @type {HTMLButtonElement|null} */ (section.querySelector('[data-restore-hidden-btn]'))
+            };
+        });
+    const sectionByKind = Object.fromEntries(tileSections.map((s) => [s.kind, s]));
 
     const dateChipRow = document.getElementById('date-quick-chips');
     const buChipGrid = document.getElementById('bu-chip-grid');
@@ -48,6 +62,8 @@
     const modalPackagesShown = document.getElementById('modal-packages-shown');
     const runModalTotalPages = document.getElementById('run-modal-total-pages');
     const runModalEstChip = document.getElementById('run-modal-est-chip');
+    const runModalTotalLabel = document.getElementById('run-modal-total-label');
+    const runModalTotalSub = document.getElementById('run-modal-total-sub');
 
     const historyTable = /** @type {HTMLTableSectionElement|null} */ (document.querySelector('#history-table tbody'));
     const historyPath = document.getElementById('history-path');
@@ -70,9 +86,18 @@
     /** @type {any[]} */
     let visibleTiles = [];
 
-    /** @type {'results'|'history'} */
-    let currentView =
-        typeof localStorage !== 'undefined' && localStorage.getItem(LS_VIEW) === 'history' ? 'history' : 'results';
+    /** @type {'letterheads'|'envelopes'|'history'} */
+    let currentView = (() => {
+        let raw = '';
+        try {
+            raw = localStorage.getItem(LS_VIEW) || '';
+        } catch {
+            raw = '';
+        }
+        if (raw === 'history' || raw === 'letterheads' || raw === 'envelopes') return raw;
+        if (raw === 'results') return 'letterheads';
+        return 'letterheads';
+    })();
 
     function escapeHtml(s) {
         return String(s)
@@ -114,20 +139,26 @@
     syncOpenSidDisabled();
 
     function setView(which) {
-        currentView = which === 'history' ? 'history' : 'results';
+        currentView = which === 'history' || which === 'envelopes' ? which : 'letterheads';
         try {
             localStorage.setItem(LS_VIEW, currentView);
         } catch {
             /**/
         }
 
-        const isResults = currentView === 'results';
-        if (tabResultsBtn) tabResultsBtn.setAttribute('aria-selected', isResults ? 'true' : 'false');
-        if (tabHistoryBtn) tabHistoryBtn.setAttribute('aria-selected', isResults ? 'false' : 'true');
-        tabResultsBtn?.classList.toggle('active', isResults);
-        tabHistoryBtn?.classList.toggle('active', !isResults);
-        if (viewResults) viewResults.hidden = !isResults;
-        if (viewHistory) viewHistory.hidden = isResults;
+        const map = [
+            { btn: tabLetterheadsBtn, view: viewLetterheads, key: 'letterheads' },
+            { btn: tabEnvelopesBtn, view: viewEnvelopes, key: 'envelopes' },
+            { btn: tabHistoryBtn, view: viewHistory, key: 'history' }
+        ];
+        for (const { btn, view, key } of map) {
+            const sel = currentView === key;
+            if (btn) {
+                btn.setAttribute('aria-selected', sel ? 'true' : 'false');
+                btn.classList.toggle('active', sel);
+            }
+            if (view) view.hidden = !sel;
+        }
     }
 
     function getSidebarCollapsedStored() {
@@ -160,7 +191,8 @@
     }
 
     setSidebarCollapsed(getSidebarCollapsedStored());
-    tabResultsBtn?.addEventListener('click', () => setView('results'));
+    tabLetterheadsBtn?.addEventListener('click', () => setView('letterheads'));
+    tabEnvelopesBtn?.addEventListener('click', () => setView('envelopes'));
     tabHistoryBtn?.addEventListener('click', () => setView('history'));
     setView(currentView);
 
@@ -213,12 +245,13 @@
                     return;
                 }
                 if (!awaitingSecond) return;
-                if (ch !== 'r' && ch !== 'h') return;
+                if (ch !== 'r' && ch !== 'l' && ch !== 'e' && ch !== 'h') return;
                 e.preventDefault();
                 awaitingSecond = false;
                 if (clearT) clearTimeout(clearT);
                 clearT = null;
-                setView(ch === 'r' ? 'results' : 'history');
+                const next = ch === 'h' ? 'history' : ch === 'e' ? 'envelopes' : 'letterheads';
+                setView(next);
             },
             true
         );
@@ -293,6 +326,35 @@
         return { knownSum, unknownLabels };
     }
 
+    function resolveEnvelopeKind(row) {
+        if (row.envelopeKind === 'big' || row.envelopeKind === 'small') return row.envelopeKind;
+        if (row.isOther) return 'small';
+        const ppr = resolvePagesPerReport(row);
+        if (ppr == null) return 'small';
+        return ppr > 10 ? 'big' : 'small';
+    }
+
+    function resolveEnvelopeEstimated(row) {
+        if (typeof row.envelopeEstimated === 'boolean') return row.envelopeEstimated;
+        if (row.isOther) return false;
+        return resolvePagesPerReport(row) == null;
+    }
+
+    function aggregateEnvelopesFromRows(bodyRows, pinnedRow) {
+        let big = 0;
+        let small = 0;
+        let unknown = 0;
+        const add = (row) => {
+            const c = Number(row.count) || 0;
+            if (resolveEnvelopeEstimated(row)) unknown += c;
+            if (resolveEnvelopeKind(row) === 'big') big += c;
+            else small += c;
+        };
+        if (pinnedRow && Number(pinnedRow.count) > 0) add(pinnedRow);
+        (bodyRows || []).forEach(add);
+        return { big, small, total: big + small, unknown, estimated: unknown > 0 };
+    }
+
     /* ------------------------------------------------------------------ */
     /* Reusable per-package sortable/filterable table                      */
     /* ------------------------------------------------------------------ */
@@ -314,7 +376,8 @@
             sortKey: 'count',
             sortDir: 'desc',
             filter: '',
-            onCount: null
+            onCount: null,
+            mode: 'pages'
         });
 
         function filtered() {
@@ -333,9 +396,23 @@
                     const vb = pb != null ? pb : ascend ? Number.POSITIVE_INFINITY : Number.NEGATIVE_INFINITY;
                     return dir * (va - vb);
                 }
+                if (k === 'envelope') {
+                    const ka = resolveEnvelopeKind(a);
+                    const kb = resolveEnvelopeKind(b);
+                    if (ka === kb) return dir * (a.count - b.count);
+                    return dir * (ka === 'big' ? -1 : 1);
+                }
                 return 0;
             });
             return rs;
+        }
+
+        function envelopeCell(row) {
+            const kind = resolveEnvelopeKind(row);
+            const est = resolveEnvelopeEstimated(row);
+            const klass = kind === 'big' ? 'env-chip env-big' : 'env-chip env-small';
+            const estTag = est ? ' <span class="muted small">est.</span>' : '';
+            return `<td class="envelope-cell"><span class="${klass}">${kind.toUpperCase()}</span>${estTag}</td>`;
         }
 
         function header(key, label, extraClass) {
@@ -371,64 +448,79 @@
                     ? sortedBodyRows[0]
                     : null;
 
+            const isEnvelopes = state.mode === 'envelopes';
+            const lastColKey = isEnvelopes ? 'envelope' : 'pages';
+            const lastColLabel = isEnvelopes ? 'Envelope' : 'Total Pages';
+            const lastColExtra = isEnvelopes ? 'envelope' : 'pages';
+
             let html =
                 '<table class="packages"><thead><tr>' +
                 '<th>#</th>' +
                 header('label', 'Package label') +
                 header('count', 'Count', 'count') +
-                header('pages', 'Total Pages', 'pages') +
+                header(lastColKey, lastColLabel, lastColExtra) +
                 '</tr></thead><tbody>';
 
+            const lastCellFor = (row) => {
+                if (isEnvelopes) return envelopeCell(row);
+                const totalPagesProduct = resolveTotalPagesProduct(row);
+                return totalPagesProduct != null
+                    ? `<td class="pages-num">${escapeHtml(totalPagesProduct.toLocaleString('en-US'))}</td>`
+                    : '<td class="pages-cell"><span class="unknown-chip">unknown</span></td>';
+            };
+
             if (pinnedRow) {
-                const totalPagesProduct = resolveTotalPagesProduct(pinnedRow);
-                const pagesCell =
-                    totalPagesProduct != null
-                        ? `<td class="pages-num">${escapeHtml(totalPagesProduct.toLocaleString('en-US'))}</td>`
-                        : '<td class="pages-cell"><span class="unknown-chip">unknown</span></td>';
                 html +=
                     '<tr class="pinned-row">' +
                     '<td class="rank rank-pinned">—</td>' +
                     `<td class="label">${escapeHtml(pinnedRow.label)}</td>` +
                     `<td class="count">${escapeHtml(String(pinnedRow.count))}</td>` +
-                    pagesCell +
+                    lastCellFor(pinnedRow) +
                     '</tr>';
             }
 
             sortedBodyRows.forEach((row, i) => {
                 const trClass = rank1Candidate && row === rank1Candidate ? 'rank-1' : '';
-                const totalPagesProduct = resolveTotalPagesProduct(row);
-                const pagesCell =
-                    totalPagesProduct != null
-                        ? `<td class="pages-num">${escapeHtml(totalPagesProduct.toLocaleString('en-US'))}</td>`
-                        : '<td class="pages-cell"><span class="unknown-chip">unknown</span></td>';
                 html +=
                     `<tr class="${trClass}">` +
                     `<td class="rank">${i + 1}</td>` +
                     `<td class="label">${escapeHtml(row.label)}</td>` +
                     `<td class="count">${escapeHtml(String(row.count))}</td>` +
-                    pagesCell +
+                    lastCellFor(row) +
                     '</tr>';
             });
 
-            const { knownSum, unknownLabels } = aggregateWholeScanPrintedPagesFromRows(
-                state.rows,
-                hasPinned ? pinnedRow : null
-            );
-            const totalPagesCellNum = knownSum.toLocaleString('en-US');
-            const totalPagesCellBody =
-                unknownLabels === 0
-                    ? escapeHtml(totalPagesCellNum)
-                    : `${escapeHtml(totalPagesCellNum)} <span class="muted">${escapeHtml(
-                          ` (${unknownLabels} label${unknownLabels === 1 ? '' : 's'} unmapped — minimum)`
-                      )}</span>`;
-            const tfootPagesCls = `pages-num packages-tfoot-pages${unknownLabels > 0 ? ' estimated-sum' : ''}`;
+            let footerLabel;
+            let footerCellHtml;
+            let footerCls;
+            if (isEnvelopes) {
+                const env = aggregateEnvelopesFromRows(state.rows, hasPinned ? pinnedRow : null);
+                footerLabel = 'Total envelopes · whole scan';
+                const splitChip = `<span class="muted small env-split">${env.big.toLocaleString('en-US')} BIG · ${env.small.toLocaleString('en-US')} SMALL</span>`;
+                footerCellHtml = `${escapeHtml(env.total.toLocaleString('en-US'))} ${splitChip}${
+                    env.estimated ? ' <span class="muted estimated-chip-inline">estimated</span>' : ''
+                }`;
+                footerCls = `pages-num packages-tfoot-pages${env.estimated ? ' estimated-sum' : ''}`;
+            } else {
+                const { knownSum, unknownLabels } = aggregateWholeScanPrintedPagesFromRows(
+                    state.rows,
+                    hasPinned ? pinnedRow : null
+                );
+                const totalPagesCellNum = knownSum.toLocaleString('en-US');
+                footerCellHtml =
+                    unknownLabels === 0
+                        ? escapeHtml(totalPagesCellNum)
+                        : `${escapeHtml(totalPagesCellNum)} <span class="muted">${escapeHtml(
+                              ` (${unknownLabels} label${unknownLabels === 1 ? '' : 's'} unmapped — minimum)`
+                          )}</span>${unknownLabels > 0 ? ' <span class="muted estimated-chip-inline">estimated</span>' : ''}`;
+                footerLabel = 'Total printed pages · whole scan';
+                footerCls = `pages-num packages-tfoot-pages${unknownLabels > 0 ? ' estimated-sum' : ''}`;
+            }
 
             html +=
                 '</tbody><tfoot><tr class="packages-tfoot-row">' +
-                `<td colspan="3" class="packages-tfoot-label">${escapeHtml('Total printed pages · whole scan')}</td>` +
-                `<td class="${tfootPagesCls}">${totalPagesCellBody}${
-                    unknownLabels > 0 ? ' <span class="muted estimated-chip-inline">estimated</span>' : ''
-                }</td>` +
+                `<td colspan="3" class="packages-tfoot-label">${escapeHtml(footerLabel)}</td>` +
+                `<td class="${footerCls}">${footerCellHtml}</td>` +
                 '</tr></tfoot></table>';
 
             host.innerHTML = html;
@@ -451,9 +543,14 @@
                 state.rows = (rows || []).slice();
                 state.pinned = opts.pinned && opts.pinned.isOther && Number(opts.pinned.count) > 0 ? opts.pinned : null;
                 state.onCount = opts.onCount || null;
+                state.mode = opts.mode === 'envelopes' ? 'envelopes' : 'pages';
                 state.sortKey = 'count';
                 state.sortDir = 'desc';
                 state.rows.sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+                render();
+            },
+            setMode(mode) {
+                state.mode = mode === 'envelopes' ? 'envelopes' : 'pages';
                 render();
             },
             setFilter(q) {
@@ -468,6 +565,9 @@
             },
             getAggregates() {
                 return aggregateWholeScanPrintedPagesFromRows(state.rows, state.pinned);
+            },
+            getEnvelopeAggregates() {
+                return aggregateEnvelopesFromRows(state.rows, state.pinned);
             },
             redraw() {
                 render();
@@ -750,6 +850,20 @@
     /* Tile wall                                                           */
     /* ------------------------------------------------------------------ */
 
+    function tileEnvelopes(tile) {
+        if (tile && tile.totals && tile.totals.envelopes && typeof tile.totals.envelopes.total === 'number') {
+            return {
+                big: Number(tile.totals.envelopes.big) || 0,
+                small: Number(tile.totals.envelopes.small) || 0,
+                total: Number(tile.totals.envelopes.total) || 0,
+                estimated: !!tile.totals.envelopes.estimated
+            };
+        }
+        const rows = Array.isArray(tile.labelRows) ? tile.labelRows : [];
+        const pinned = makeOtherTestsPinned(tile.totals && tile.totals.otherTestsRowCount);
+        return aggregateEnvelopesFromRows(rows, pinned);
+    }
+
     function tileEyebrow(tile, indexFromOne) {
         const idx = String(indexFromOne).padStart(2, '0');
         const src = String(tile.source || 'scrape').toUpperCase();
@@ -788,54 +902,66 @@
         return best;
     }
 
-    function renderTileEmpty(hiddenCount) {
-        if (tileEmpty) tileEmpty.hidden = false;
-        if (tileGrid) {
-            tileGrid.hidden = true;
-            tileGrid.innerHTML = '';
-        }
-        if (restoreHiddenWrap && restoreHiddenBtn) {
-            if (hiddenCount > 0) {
-                restoreHiddenWrap.hidden = false;
-                restoreHiddenBtn.textContent = `Restore ${hiddenCount} hidden run${hiddenCount === 1 ? '' : 's'}`;
-            } else {
-                restoreHiddenWrap.hidden = true;
-                restoreHiddenBtn.textContent = '';
-            }
+    function renderRestoreHidden(section, hiddenCount) {
+        if (!section.restoreWrap || !section.restoreBtn) return;
+        if (hiddenCount > 0) {
+            section.restoreWrap.hidden = false;
+            section.restoreBtn.textContent = `Restore ${hiddenCount} hidden run${hiddenCount === 1 ? '' : 's'}`;
+        } else {
+            section.restoreWrap.hidden = true;
+            section.restoreBtn.textContent = '';
         }
     }
 
-    function renderTileGrid(tiles) {
-        visibleTiles = tiles.slice();
-        if (!tileGrid) return;
+    function metricForTile(kind, tile) {
+        if (kind === 'envelopes') {
+            const env = tileEnvelopes(tile);
+            return {
+                kind,
+                num: env.total,
+                label: `${env.big.toLocaleString('en-US')} BIG <span class="muted small">/</span> ${env.small.toLocaleString('en-US')} SMALL`,
+                estimated: env.estimated
+            };
+        }
+        const rows = Array.isArray(tile.labelRows) ? tile.labelRows : [];
+        const pinned = makeOtherTestsPinned(tile.totals && tile.totals.otherTestsRowCount);
+        const agg = aggregateWholeScanPrintedPagesFromRows(rows, pinned);
+        const top = topLabelFromTile(tile);
+        const topLabel = top
+            ? `${escapeHtml(String(top.label).toUpperCase())}${
+                  top.count != null ? ` <span class="muted small">\u00d7 ${escapeHtml(String(top.count))}</span>` : ''
+              }`
+            : '<span class="muted small">no labels</span>';
+        return {
+            kind: 'letterheads',
+            num: agg.knownSum,
+            label: topLabel,
+            estimated: agg.unknownLabels > 0
+        };
+    }
+
+    function renderTilesIntoSection(section, tiles) {
+        const grid = section.grid;
+        const empty = section.empty;
+        if (!grid || !empty) return;
         if (!tiles.length) {
-            const hidden = readHiddenSet();
-            renderTileEmpty(hidden.size);
+            empty.hidden = false;
+            grid.hidden = true;
+            grid.innerHTML = '';
+            renderRestoreHidden(section, readHiddenSet().size);
             return;
         }
-        if (tileEmpty) tileEmpty.hidden = true;
-        tileGrid.hidden = false;
+        empty.hidden = true;
+        grid.hidden = false;
+        renderRestoreHidden(section, readHiddenSet().size);
 
-        const totalsRecomputed = tiles.map((t) => {
-            const rows = Array.isArray(t.labelRows) ? t.labelRows : [];
-            const pinned = makeOtherTestsPinned(t.totals && t.totals.otherTestsRowCount);
-            const agg = aggregateWholeScanPrintedPagesFromRows(rows, pinned);
-            return { knownSum: agg.knownSum, estimated: agg.unknownLabels > 0 };
-        });
-
-        tileGrid.innerHTML = tiles
+        grid.innerHTML = tiles
             .map((t, i) => {
                 const eyebrow = tileEyebrow(t, i + 1);
                 const buLabel = String(t.bu || '\u2014');
                 const dateRange = fmtRange(t.fromDate, t.toDate);
-                const top = topLabelFromTile(t);
-                const totals = totalsRecomputed[i];
-                const totalNum = totals.knownSum.toLocaleString('en-US');
-                const topLabel = top
-                    ? `${escapeHtml(String(top.label).toUpperCase())}${
-                          top.count != null ? ` <span class="muted small">\u00d7 ${escapeHtml(String(top.count))}</span>` : ''
-                      }`
-                    : '<span class="muted small">no labels</span>';
+                const metric = metricForTile(section.kind, t);
+                const totalNum = metric.num.toLocaleString('en-US');
                 const sids = (t.totals && t.totals.sids) || 0;
                 const occ = (t.totals && t.totals.occurrences) || 0;
                 const uniq = (t.totals && t.totals.uniqueLabels) || 0;
@@ -846,15 +972,16 @@
                     `${occ.toLocaleString('en-US')} occ.`
                 ];
                 if (errors > 0) stats.push(`${errors} errors`);
-                const estChip = totals.estimated ? '<span class="tile-est">estimated minimum</span>' : '<span></span>';
+                const estLabel = section.kind === 'envelopes' ? 'estimated envelopes' : 'estimated minimum';
+                const estChip = metric.estimated ? `<span class="tile-est">${estLabel}</span>` : '<span></span>';
                 return (
-                    `<button type="button" class="tile" data-tile-id="${escapeHtml(t.id)}">` +
+                    `<button type="button" class="tile tile-${section.kind}" data-tile-id="${escapeHtml(t.id)}" data-tile-kind="${section.kind}">` +
                     `<span class="tile-eyebrow">${escapeHtml(eyebrow)}</span>` +
                     `<h3 class="tile-title">${escapeHtml(buLabel)}</h3>` +
                     `<p class="tile-sub">${escapeHtml(dateRange)}</p>` +
                     `<div class="tile-metric-row">` +
                     `<span class="tile-metric-num">${escapeHtml(totalNum)}</span>` +
-                    `<span class="tile-metric-label">${topLabel}</span>` +
+                    `<span class="tile-metric-label">${metric.label}</span>` +
                     `</div>` +
                     `<p class="tile-stats">${stats.map(escapeHtml).join(' \u00b7 ')}</p>` +
                     `<div class="tile-footer">` +
@@ -866,13 +993,18 @@
             })
             .join('');
 
-        tileGrid.querySelectorAll('button.tile[data-tile-id]').forEach((btn) => {
+        grid.querySelectorAll('button.tile[data-tile-id]').forEach((btn) => {
             btn.addEventListener('click', () => {
                 const id = btn.getAttribute('data-tile-id');
                 const tile = visibleTiles.find((t) => String(t.id) === String(id));
-                if (tile) openRunModal(tile);
+                if (tile) openRunModal(tile, section.kind);
             });
         });
+    }
+
+    function renderAllTileSections(tiles) {
+        visibleTiles = tiles.slice();
+        for (const section of tileSections) renderTilesIntoSection(section, tiles);
     }
 
     function loadTiles() {
@@ -893,7 +1025,7 @@
                         resultsError.textContent = '';
                     }
                 }
-                renderTileGrid(visible);
+                renderAllTileSections(visible);
                 bumpLastUpdated();
             })
             .catch((e) => {
@@ -904,14 +1036,16 @@
             });
     }
 
-    restoreHiddenBtn?.addEventListener('click', () => {
-        try {
-            localStorage.removeItem(LS_HIDDEN);
-        } catch {
-            /**/
-        }
-        loadTiles();
-    });
+    for (const section of tileSections) {
+        section.restoreBtn?.addEventListener('click', () => {
+            try {
+                localStorage.removeItem(LS_HIDDEN);
+            } catch {
+                /**/
+            }
+            loadTiles();
+        });
+    }
 
     /* ------------------------------------------------------------------ */
     /* Run progress strip (multi-BU fan-out)                               */
@@ -950,11 +1084,13 @@
     /* Modal                                                               */
     /* ------------------------------------------------------------------ */
 
-    function openRunModal(tile) {
+    function openRunModal(tile, metricKind) {
         if (!runModal || !modalPackagesTable) return;
+        const kind = metricKind === 'envelopes' ? 'envelopes' : 'letterheads';
         const idx = visibleTiles.findIndex((t) => String(t.id) === String(tile.id));
-        const eyebrow = tileEyebrow(tile, idx >= 0 ? idx + 1 : 1);
-        if (runModalEyebrow) runModalEyebrow.textContent = eyebrow;
+        const baseEyebrow = tileEyebrow(tile, idx >= 0 ? idx + 1 : 1);
+        const kindBadge = kind === 'envelopes' ? 'ENVELOPES' : 'LETTER HEADS';
+        if (runModalEyebrow) runModalEyebrow.textContent = `${baseEyebrow} \u00b7 ${kindBadge}`;
         if (runModalTitle) runModalTitle.textContent = String(tile.bu || '\u2014');
         if (runModalSub) {
             const range = fmtRange(tile.fromDate, tile.toDate);
@@ -975,6 +1111,7 @@
         const pinned = makeOtherTestsPinned(tile.totals && tile.totals.otherTestsRowCount);
         modalPackagesTable.setRows(rows, {
             pinned,
+            mode: kind === 'envelopes' ? 'envelopes' : 'pages',
             onCount: (visible, total) => {
                 if (modalPackagesShown) {
                     modalPackagesShown.textContent =
@@ -986,9 +1123,31 @@
             modalPackagesSearch.value = '';
             modalPackagesTable.setFilter('');
         }
-        const agg = modalPackagesTable.getAggregates();
-        if (runModalTotalPages) runModalTotalPages.textContent = agg.knownSum.toLocaleString('en-US');
-        if (runModalEstChip) runModalEstChip.hidden = agg.unknownLabels === 0;
+        if (kind === 'envelopes') {
+            const env = modalPackagesTable.getEnvelopeAggregates();
+            if (runModalTotalLabel) runModalTotalLabel.textContent = 'Total envelopes (big + small)';
+            if (runModalTotalPages) runModalTotalPages.textContent = env.total.toLocaleString('en-US');
+            if (runModalTotalSub) {
+                runModalTotalSub.hidden = false;
+                runModalTotalSub.textContent = `${env.big.toLocaleString('en-US')} BIG · ${env.small.toLocaleString('en-US')} SMALL`;
+            }
+            if (runModalEstChip) {
+                runModalEstChip.hidden = !env.estimated;
+                runModalEstChip.textContent = 'estimated envelopes';
+            }
+        } else {
+            const agg = modalPackagesTable.getAggregates();
+            if (runModalTotalLabel) runModalTotalLabel.textContent = 'Total printed pages';
+            if (runModalTotalPages) runModalTotalPages.textContent = agg.knownSum.toLocaleString('en-US');
+            if (runModalTotalSub) {
+                runModalTotalSub.hidden = true;
+                runModalTotalSub.textContent = '';
+            }
+            if (runModalEstChip) {
+                runModalEstChip.hidden = agg.unknownLabels === 0;
+                runModalEstChip.textContent = 'estimated minimum';
+            }
+        }
 
         if (typeof runModal.showModal === 'function') {
             try {

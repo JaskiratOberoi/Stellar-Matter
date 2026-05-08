@@ -208,15 +208,31 @@ function buildTileFromRunFiles(outDir, packagesFileName) {
         .map(([label, count]) => {
             const norm = normalizePackageLabel(label);
             const ppr = normalizedMap[norm];
+            const pprNum = ppr != null && Number.isFinite(Number(ppr)) ? Number(ppr) : null;
             return {
                 label,
                 count: Number(count) || 0,
-                pagesPerReport: ppr != null && Number.isFinite(Number(ppr)) ? Number(ppr) : null
+                pagesPerReport: pprNum,
+                envelopeKind: pprNum == null ? 'small' : pprNum > 10 ? 'big' : 'small',
+                envelopeEstimated: pprNum == null
             };
         })
         .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
     const { knownSum, unknownLabels } = computePrintedTotals(occ, otherN, normalizedMap);
     const pinned = makeOtherTestsPinned(otherN);
+    const envelopes = { big: 0, small: 0, total: 0, unknown: 0 };
+    for (const r of labelRows) {
+        if (r.pagesPerReport == null) {
+            envelopes.unknown += r.count;
+            envelopes.small += r.count;
+        } else if (r.pagesPerReport > 10) {
+            envelopes.big += r.count;
+        } else {
+            envelopes.small += r.count;
+        }
+    }
+    if (pinned) envelopes.small += pinned.count;
+    envelopes.total = envelopes.big + envelopes.small;
     const occSum = Object.values(occ).reduce((s, v) => s + (Number(v) || 0), 0);
     const occurrences = occSum + (pinned ? pinned.count : 0);
     const uniqueLabels =
@@ -251,7 +267,13 @@ function buildTileFromRunFiles(outDir, packagesFileName) {
             occurrences,
             uniqueLabels,
             otherTestsRowCount: otherN,
-            errors: errors.length
+            errors: errors.length,
+            envelopes: {
+                big: envelopes.big,
+                small: envelopes.small,
+                total: envelopes.total,
+                estimated: envelopes.unknown > 0
+            }
         },
         paths: {
             mainJson: fs.existsSync(mainPath) ? mainPath : null,

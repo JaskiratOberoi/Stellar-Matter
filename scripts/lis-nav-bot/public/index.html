@@ -17,7 +17,8 @@
                 <p class="muted topbar-tagline eyebrow-lite"><code>.env</code> on server only · read-only</p>
             </div>
             <nav class="tablist" role="tablist" aria-label="Main sections">
-                <button type="button" id="tab-results" role="tab" aria-selected="true" aria-controls="view-results">Results</button>
+                <button type="button" id="tab-letterheads" role="tab" aria-selected="true" aria-controls="view-letterheads">Letter Heads</button>
+                <button type="button" id="tab-envelopes" role="tab" aria-selected="false" aria-controls="view-envelopes">Envelopes</button>
                 <button type="button" id="tab-history" role="tab" aria-selected="false" aria-controls="view-history">History</button>
             </nav>
         </div>
@@ -108,21 +109,35 @@
         </aside>
 
         <main class="main-pane tile-wall-outer">
-            <section id="view-results" class="tabpanel" role="tabpanel" aria-labelledby="tab-results">
-                <div id="run-progress-wrap" class="run-progress-wrap" hidden>
-                    <div class="run-progress-bar" aria-hidden="true"></div>
-                    <div id="run-progress-strip" class="run-progress-strip eyebrow-lite" aria-live="polite"></div>
-                </div>
-                <div id="results-error" class="results-error nexus-card" hidden></div>
-                <div id="tile-wall" class="tile-wall">
-                    <div id="tile-empty" class="tile-empty nexus-card">
-                        <p class="tile-empty-lead">No runs in view. Start a <strong>SQL</strong> or <strong>package scrape</strong> run — each completed job becomes a tile here.</p>
-                        <p class="muted small">Tiles are rebuilt from <code>out/run-*</code> on every load. <kbd>Ctrl</kbd>+<kbd>Enter</kbd> submits the form.</p>
-                        <p id="restore-hidden-wrap" class="restore-hidden-wrap" hidden>
-                            <button type="button" id="restore-hidden-btn" class="chip chip-tool"></button>
+            <div id="run-progress-wrap" class="run-progress-wrap" hidden>
+                <div class="run-progress-bar" aria-hidden="true"></div>
+                <div id="run-progress-strip" class="run-progress-strip eyebrow-lite" aria-live="polite"></div>
+            </div>
+            <div id="results-error" class="results-error nexus-card" hidden></div>
+
+            <section id="view-letterheads" class="tabpanel" role="tabpanel" aria-labelledby="tab-letterheads" data-metric-kind="letterheads">
+                <div class="tile-wall">
+                    <div class="tile-empty nexus-card" data-tile-empty>
+                        <p class="tile-empty-lead">No runs in view. Start a <strong>SQL</strong> or <strong>package scrape</strong> run — each completed job becomes a Letter Head tile here.</p>
+                        <p class="muted small">Tiles are rebuilt from <code>out/run-*</code> on every load. Tile big number = total printed pages across all packages.</p>
+                        <p class="restore-hidden-wrap" data-restore-hidden-wrap hidden>
+                            <button type="button" class="chip chip-tool" data-restore-hidden-btn></button>
                         </p>
                     </div>
-                    <div id="tile-grid" class="tile-grid" hidden></div>
+                    <div class="tile-grid" data-tile-grid hidden></div>
+                </div>
+            </section>
+
+            <section id="view-envelopes" class="tabpanel" role="tabpanel" aria-labelledby="tab-envelopes" data-metric-kind="envelopes" hidden>
+                <div class="tile-wall">
+                    <div class="tile-empty nexus-card" data-tile-empty>
+                        <p class="tile-empty-lead">No runs in view. <strong>Envelopes</strong> count one per package occurrence — <em>big</em> when pages-per-report &gt; 10, <em>small</em> otherwise.</p>
+                        <p class="muted small">Same source data as Letter Heads, different lens. Click any tile for the per-package envelope breakdown.</p>
+                        <p class="restore-hidden-wrap" data-restore-hidden-wrap hidden>
+                            <button type="button" class="chip chip-tool" data-restore-hidden-btn></button>
+                        </p>
+                    </div>
+                    <div class="tile-grid" data-tile-grid hidden></div>
                 </div>
             </section>
 
@@ -182,9 +197,10 @@
             </div>
             <div id="modal-packages-wrap" class="packages-table-host-modal table-wrap"></div>
             <footer class="run-modal-footer row-between">
-                <span class="eyebrow-lite">Total printed pages</span>
+                <span id="run-modal-total-label" class="eyebrow-lite">Total printed pages</span>
                 <div>
                     <span id="run-modal-total-pages" class="display-num">—</span>
+                    <span id="run-modal-total-sub" class="muted small modal-total-sub" hidden></span>
                     <span id="run-modal-est-chip" class="estimated-chip-inline" hidden>estimated minimum</span>
                 </div>
             </footer>

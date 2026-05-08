@@ -1172,6 +1172,18 @@ tbody tr.selected {
     color: rgb(var(--nx-signal-warning));
 }
 
+.run-modal-inner .env-chip.env-big {
+    background: rgb(var(--nx-accent) / 0.16);
+    color: rgb(var(--nx-accent));
+    border-color: rgb(var(--nx-accent) / 0.45);
+}
+
+.run-modal-inner .env-chip.env-small {
+    background: rgb(var(--nx-rule-soft) / 0.6);
+    color: rgb(var(--nx-ink));
+    border-color: rgb(var(--nx-rule-soft));
+}
+
 .run-modal-header {
     align-items: flex-start;
     gap: 0.75rem;
@@ -1320,6 +1332,51 @@ table.packages td.pages-num {
     background: rgba(210, 153, 34, 0.14);
     color: #e3b341;
     border: 1px solid rgba(210, 153, 34, 0.4);
+}
+
+table.packages td.envelope-cell {
+    width: 1%;
+    white-space: nowrap;
+    text-align: right;
+}
+
+.env-chip {
+    display: inline-block;
+    font-size: 0.62rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 0.18rem 0.5rem;
+    border-radius: 999px;
+    border: 1px solid transparent;
+    line-height: 1;
+}
+
+.env-chip.env-big {
+    background: rgba(88, 166, 255, 0.14);
+    color: rgb(var(--nx-accent, 88 166 255));
+    border-color: rgba(88, 166, 255, 0.4);
+}
+
+.env-chip.env-small {
+    background: rgba(180, 180, 180, 0.12);
+    color: rgb(var(--nx-ink, 230 237 243));
+    border-color: rgba(180, 180, 180, 0.32);
+}
+
+.env-split {
+    margin-left: 0.5rem;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.04em;
+}
+
+.modal-total-sub {
+    margin-left: 0.6rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.tile.tile-envelopes .tile-metric-num {
+    color: rgb(var(--nx-accent, 88 166 255));
 }
 
 .detail-table-wrap {
