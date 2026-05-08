@@ -1505,3 +1505,54 @@ table.packages td.envelope-cell {
     margin-top: 16px;
     text-align: center;
 }
+
+/* Urine-container test-code lock chip in the run sidebar. Visually a chip,
+ * non-interactive — communicates "this filter is pinned by the active tab".
+ */
+.urine-pin-chip {
+    cursor: default;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-size: 11px;
+    background: rgba(var(--accent-rgb, 245 211 86), 0.12);
+    border-color: rgba(var(--accent-rgb, 245 211 86), 0.5);
+    color: rgb(var(--text));
+}
+
+.urine-pin-banner {
+    margin: 6px 0 4px 0;
+}
+
+/* Urine-container modal breakdown table. Shares typography with .packages
+ * but lays out as a small fixed 3-row summary (cp004 / mb034 / union footer)
+ * instead of the long sortable label list.
+ */
+.urine-breakdown {
+    width: 100%;
+    border-collapse: collapse;
+    color: rgb(var(--text));
+    margin-top: 4px;
+}
+.urine-breakdown th,
+.urine-breakdown td {
+    padding: 10px 12px;
+    border-bottom: 1px solid rgb(var(--border));
+    text-align: left;
+    font-variant-numeric: tabular-nums;
+}
+.urine-breakdown thead th {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: rgb(var(--muted));
+    font-weight: 600;
+}
+.urine-breakdown td.num {
+    text-align: right;
+}
+.urine-breakdown tfoot td {
+    border-bottom: none;
+    font-weight: 700;
+    color: rgb(var(--accent, 245 211 86));
+    border-top: 1px solid rgb(var(--border));
+}

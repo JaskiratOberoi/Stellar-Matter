@@ -28,7 +28,13 @@ import './styles/app.css';
 
 function loadInitialView() {
     const raw = readString(LS_VIEW, 'letterheads');
-    if (raw === 'history' || raw === 'envelopes' || raw === 'letterheads') return raw;
+    if (
+        raw === 'history' ||
+        raw === 'envelopes' ||
+        raw === 'letterheads' ||
+        raw === 'urine_containers'
+    )
+        return raw;
     if (raw === 'results') return 'letterheads';
     return 'letterheads';
 }
@@ -143,6 +149,7 @@ export function App() {
                     buSelected={buSelected}
                     buActions={{ toggle, selectAll, clear: clearBu }}
                     busy={running}
+                    mode={tab === 'urine_containers' ? 'urine_containers' : 'general'}
                     onSubmit={handleSubmit}
                     onClearLedger={handleClearLedger}
                 />
@@ -183,6 +190,22 @@ export function App() {
                                 onOpen={(t) => {
                                     setOpenTile(t);
                                     setOpenTileKind('envelopes');
+                                }}
+                            />
+                        </section>
+                    )}
+
+                    {tab === 'urine_containers' && (
+                        <section className="tabpanel" data-metric-kind="urine_containers">
+                            <TileWall
+                                tiles={visibleTiles}
+                                kind="urine_containers"
+                                hiddenCount={hiddenCount}
+                                clientPagesByNorm={clientPagesByNorm}
+                                onRestoreHidden={restoreHidden}
+                                onOpen={(t) => {
+                                    setOpenTile(t);
+                                    setOpenTileKind('urine_containers');
                                 }}
                             />
                         </section>

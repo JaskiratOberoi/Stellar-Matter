@@ -2,6 +2,33 @@ import { aggregatePages, makeOtherTestsPinned, tileEnvelopes, topLabelFromTile }
 import { fmtDateRange, tileEyebrow } from '../lib/format.js';
 
 function metricFor(kind, tile, clientPagesByNorm) {
+    if (kind === 'urine_containers') {
+        // Tile data shape comes from buildTileFromRunFiles in server.js: a
+        // urine-container artefact carries tile.urineContainers = { sidsTotal,
+        // testCodes, byTestCode: { cp004: { sids, rows }, mb034: { sids, rows } } }.
+        // Headline number = sidsTotal (= unique containers needed). Subline =
+        // per-code breakdown so the lab can see which assay drove the count.
+        const uc = tile.urineContainers || {};
+        const cp = (uc.byTestCode && uc.byTestCode.cp004) || { sids: 0, rows: 0 };
+        const mb = (uc.byTestCode && uc.byTestCode.mb034) || { sids: 0, rows: 0 };
+        const totalRows = (cp.rows || 0) + (mb.rows || 0);
+        return {
+            num: (uc.sidsTotal || 0).toLocaleString('en-US'),
+            label: (
+                <>
+                    {cp.sids.toLocaleString('en-US')}
+                    {'\u2009CP004\u2009'}
+                    <span className="muted">+</span>
+                    {'\u2009'}
+                    {mb.sids.toLocaleString('en-US')}
+                    {'\u2009MB034\u2009'}
+                    <span className="muted small">{`(${totalRows.toLocaleString('en-US')} tests)`}</span>
+                </>
+            ),
+            estimated: false,
+            estimatedLabel: null
+        };
+    }
     if (kind === 'envelopes') {
         const env = tileEnvelopes(tile, clientPagesByNorm);
         return {

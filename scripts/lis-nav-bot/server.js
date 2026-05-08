@@ -260,11 +260,26 @@ function buildTileFromRunFiles(outDir, packagesFileName) {
     const errors = (main && Array.isArray(main.errors) ? main.errors : []) || [];
     const startedAt = (main && main.startedAt) || pkg.startedAt || null;
     const top50 = labelRows.slice(0, 50);
+    // mode + urineContainers come from the run artefact when it was an
+    // urine-container run; fall back to 'general' for the 100+ pre-existing
+    // run files on disk that predate this feature. The TileWall uses mode to
+    // strict-filter which tab a tile belongs to (Letter Heads/Envelopes vs
+    // Urine Containers).
+    const mode =
+        (main && main.mode === 'urine_containers' && 'urine_containers') ||
+        (pkg.mode === 'urine_containers' && 'urine_containers') ||
+        'general';
+    const urineContainers =
+        mode === 'urine_containers'
+            ? (main && main.urineContainers) || (pkg.urineContainers && typeof pkg.urineContainers === 'object' ? pkg.urineContainers : null)
+            : null;
     return {
         id,
         startedAt,
         finishedAt: null,
         source,
+        mode,
+        urineContainers,
         bu,
         fromDate: filter.fromDate != null ? String(filter.fromDate) : req.fromDate != null ? String(req.fromDate) : null,
         toDate: filter.toDate != null ? String(filter.toDate) : req.toDate != null ? String(req.toDate) : null,
@@ -495,6 +510,18 @@ app.post('/api/run', requireSuperAdmin, async (req, res) => {
         });
     }
 
+    // mode whitelist. urine_containers auto-pins testCode = cp004 OR mb034 in
+    // lib/sql-source.js by firing two parallel Listec calls and unioning SIDs;
+    // it requires the SQL source because the scrape path doesn't accept testCode
+    // multi-targeting and would silently fall back to whatever the LIS UI picks.
+    const modeRaw = body && body.mode != null ? String(body.mode) : 'general';
+    const mode = modeRaw === 'urine_containers' ? 'urine_containers' : 'general';
+    if (mode === 'urine_containers' && source !== 'sql') {
+        return res.status(400).json({
+            error: 'Urine container counting requires SQL source. Switch to "SQL (Listec)".'
+        });
+    }
+
     const startedAt = new Date().toISOString();
     const runId = startedAt.replace(/[:.]/g, '-');
 
@@ -521,6 +548,8 @@ app.post('/api/run', requireSuperAdmin, async (req, res) => {
             outcome: 'success',
             metadata: {
                 source,
+                mode,
+                test_codes: mode === 'urine_containers' ? ['cp004', 'mb034'] : null,
                 business_units: businessUnits.length ? businessUnits : (body && body.bu ? [body.bu] : []),
                 from_date: body && body.fromDate ? String(body.fromDate) : null,
                 to_date: body && body.toDate ? String(body.toDate) : null,
@@ -558,6 +587,7 @@ app.post('/api/run', requireSuperAdmin, async (req, res) => {
                     const r = await runLisNavBot({
                         ...bodySansUnits,
                         source: 'sql',
+                        mode,
                         bu,
                         startedAt: childStartedAt
                     });
@@ -631,7 +661,7 @@ app.post('/api/run', requireSuperAdmin, async (req, res) => {
 
         const runSingle = async () => {
             try {
-                const r = await runLisNavBot({ ...body, startedAt });
+                const r = await runLisNavBot({ ...body, mode, startedAt });
                 jobState = {
                     state: 'idle',
                     runId,

@@ -1,7 +1,18 @@
 import { Tile } from './Tile.jsx';
 
+// Strict tab scoping. Letter Heads + Envelopes show only general (mode='general'
+// or undefined for legacy artefacts) runs; Urine Containers shows only runs
+// produced by the urine-container mode (POST /api/run with mode=urine_containers,
+// which auto-pins testCode = cp004 OR mb034 in lib/sql-source.js).
+function tileMatchesTab(tile, kind) {
+    const mode = tile.mode || 'general';
+    if (kind === 'urine_containers') return mode === 'urine_containers';
+    return mode !== 'urine_containers';
+}
+
 export function TileWall({ tiles, kind, hiddenCount, onRestoreHidden, onOpen, clientPagesByNorm }) {
-    if (!tiles.length) {
+    const filtered = tiles.filter((t) => tileMatchesTab(t, kind));
+    if (!filtered.length) {
         return (
             <div className="tile-wall">
                 <div className="tile-empty nexus-card">
@@ -14,6 +25,17 @@ export function TileWall({ tiles, kind, hiddenCount, onRestoreHidden, onOpen, cl
                             <p className="muted small">
                                 Same source data as Letter Heads, different lens. Click any tile for the per-package
                                 envelope breakdown.
+                            </p>
+                        </>
+                    ) : kind === 'urine_containers' ? (
+                        <>
+                            <p className="tile-empty-lead">
+                                No <strong>urine container</strong> runs yet. Start one from the run panel — the run will
+                                auto-pin <code>testCode = cp004 OR mb034</code> and count one container per unique SID.
+                            </p>
+                            <p className="muted small">
+                                Two parallel Listec calls per BU, unioned by SID so a patient who ordered both tests
+                                still counts as one container.
                             </p>
                         </>
                     ) : (
@@ -42,7 +64,7 @@ export function TileWall({ tiles, kind, hiddenCount, onRestoreHidden, onOpen, cl
     return (
         <div className="tile-wall">
             <div className="tile-grid">
-                {tiles.map((tile, i) => (
+                {filtered.map((tile, i) => (
                     <Tile
                         key={tile.id}
                         tile={tile}

@@ -14,6 +14,89 @@ const path = require('path');
 
 const DEFAULT_API_BASE = 'http://127.0.0.1:3100';
 
+// Urine-container counting auto-pins these test codes. The Listec stored
+// procedure (Listec/sp/usp_listec_worksheet_report_json.sql) takes a single
+// @test_code, so to OR them together we make N parallel HTTP calls — one per
+// code — and union the SID sets in JS. A patient who ordered both tests still
+// counts as one container (one urine sample, two assays).
+const URINE_CONTAINER_TEST_CODES = ['cp004', 'mb034'];
+
+/**
+ * Merge N Listec /worksheet-reports/packages payloads into a single
+ * payload-equivalent so the rest of runViaSql doesn't need to care that we
+ * fired multiple calls. Used by urine-container mode.
+ *
+ * Merge rules:
+ *   sids                 — set union (a SID present in either call counts once)
+ *   labelOccurrences     — per-label SUM across calls; the same SID counted
+ *                          twice (once per testCode) is fine here because
+ *                          labels track package occurrences, not patients.
+ *   labelToSids          — per-label set union of SIDs
+ *   rowCount             — SUM (these are physical rows; not deduplicated)
+ *   otherTestsRowCount   — SUM
+ *   uniqueLabelCount     — recomputed from merged labelOccurrences
+ *   resolved/spFilters   — taken from the first non-empty payload
+ *   unresolved           — concatenated, deduplicated
+ *
+ * @param {object[]} payloads
+ * @returns {object}
+ */
+function mergePayloads(payloads) {
+    const sidUnion = new Set();
+    /** @type {Record<string, number>} */
+    const labelOccurrences = {};
+    /** @type {Record<string, Set<string>>} */
+    const labelToSidSets = {};
+    let rowCount = 0;
+    let otherTestsRowCount = 0;
+    let rowsWithBrackets = 0;
+    let resolved = null;
+    let spFilters = null;
+    const unresolved = new Set();
+
+    for (const p of payloads) {
+        if (!p || typeof p !== 'object') continue;
+
+        if (Array.isArray(p.sids)) for (const s of p.sids) sidUnion.add(String(s));
+
+        if (p.labelOccurrences && typeof p.labelOccurrences === 'object') {
+            for (const [label, n] of Object.entries(p.labelOccurrences)) {
+                labelOccurrences[label] = (labelOccurrences[label] || 0) + (Number(n) || 0);
+            }
+        }
+        if (p.labelToSids && typeof p.labelToSids === 'object') {
+            for (const [label, sids] of Object.entries(p.labelToSids)) {
+                if (!labelToSidSets[label]) labelToSidSets[label] = new Set();
+                if (Array.isArray(sids)) for (const s of sids) labelToSidSets[label].add(String(s));
+            }
+        }
+        rowCount += Number(p.rowCount) || 0;
+        otherTestsRowCount += Number(p.otherTestsRowCount) || 0;
+        rowsWithBrackets += Number(p.rowsWithBrackets) || 0;
+        if (resolved == null && p.resolved && typeof p.resolved === 'object') resolved = p.resolved;
+        if (spFilters == null && p.filters && typeof p.filters === 'object') spFilters = p.filters;
+        if (Array.isArray(p.unresolved)) for (const u of p.unresolved) unresolved.add(String(u));
+    }
+
+    const labelToSids = {};
+    for (const [label, set] of Object.entries(labelToSidSets)) {
+        labelToSids[label] = [...set];
+    }
+
+    return {
+        sids: [...sidUnion],
+        labelOccurrences,
+        labelToSids,
+        rowCount,
+        otherTestsRowCount,
+        rowsWithBrackets,
+        uniqueLabelCount: Object.keys(labelOccurrences).length,
+        resolved,
+        filters: spFilters,
+        unresolved: [...unresolved]
+    };
+}
+
 /** @param {string} v */
 function trimOrNull(v) {
     if (v == null) return null;
@@ -141,15 +224,32 @@ async function runViaSql(programOpts) {
         ? String(outDirRaw)
         : path.resolve(process.cwd(), String(outDirRaw));
 
+    // Mode resolution. 'urine_containers' auto-pins URINE_CONTAINER_TEST_CODES
+    // and unions SIDs across N parallel Listec calls; 'general' (default) keeps
+    // the existing single-call behaviour and respects the caller's testCode if
+    // any. Any other value falls back to general.
+    const mode = opts.mode === 'urine_containers' ? 'urine_containers' : 'general';
+    const testCodesToRun =
+        mode === 'urine_containers'
+            ? URINE_CONTAINER_TEST_CODES.slice()
+            : [filters.testCode || null]; // null = "no testCode filter at all"
+
     /** @type {string[]} */
     const notes = [];
-    const qs = buildQueryString(filters, notes);
+    // For the legacy single-call path qs is the literal query string we sent.
+    // For multi-call (urine) we keep an array so the artefact can show every URL.
+    const qsList = testCodesToRun.map((code) =>
+        buildQueryString({ ...filters, testCode: code != null ? code : filters.testCode }, notes)
+    );
+    const qs = qsList.length === 1 ? qsList[0] : qsList;
 
     /** @type {object} */
     const result = {
         startedAt,
         readOnly: true,
         source: 'sql',
+        mode,
+        testCodes: mode === 'urine_containers' ? URINE_CONTAINER_TEST_CODES.slice() : null,
         listecApiBase: apiBaseClean,
         primaryUrl: null,
         backupUrlUsed: false,
@@ -167,7 +267,11 @@ async function runViaSql(programOpts) {
     let exitCode = 0;
 
     if (dryRun) {
-        result.message = `dry-run: would call GET ${apiBaseClean}/api/worksheet-reports/packages?${qs}`;
+        const dryUrls = qsList.map((q) => `GET ${apiBaseClean}/api/worksheet-reports/packages?${q}`);
+        result.message =
+            qsList.length === 1
+                ? `dry-run: would call ${dryUrls[0]}`
+                : `dry-run: would call ${qsList.length} Listec endpoints (urine container OR-union):\n  ${dryUrls.join('\n  ')}`;
         try {
             fs.mkdirSync(outDir, { recursive: true });
             outMainPath = path.join(outDir, `run-${stamp}.json`);
@@ -180,21 +284,30 @@ async function runViaSql(programOpts) {
         return { result, outMainPath, outPackagesPath, exitCode };
     }
 
-    const url = `${apiBaseClean}/api/worksheet-reports/packages?${qs}`;
-    console.log(`[sql] GET ${url}`);
-
-    let payload;
+    // Fetch all codes in parallel. For mode=general this is just one call,
+    // matching the legacy behaviour. For urine_containers it's one per code.
+    /** @type {Array<{ code: string|null, payload: any, qs: string, url: string }>} */
+    let perCallResults;
     try {
-        const r = await fetch(url, { headers: { Accept: 'application/json' } });
-        const text = await r.text();
-        if (!r.ok) {
-            throw new Error(`Listec API ${r.status}: ${text.slice(0, 500)}`);
-        }
-        try {
-            payload = JSON.parse(text);
-        } catch (parseErr) {
-            throw new Error(`Listec API returned non-JSON: ${parseErr.message}`);
-        }
+        perCallResults = await Promise.all(
+            testCodesToRun.map(async (code, i) => {
+                const callQs = qsList[i];
+                const url = `${apiBaseClean}/api/worksheet-reports/packages?${callQs}`;
+                console.log(`[sql] GET ${url}`);
+                const r = await fetch(url, { headers: { Accept: 'application/json' } });
+                const text = await r.text();
+                if (!r.ok) {
+                    throw new Error(`Listec API ${r.status} for testCode=${code || '(none)'}: ${text.slice(0, 500)}`);
+                }
+                let p;
+                try {
+                    p = JSON.parse(text);
+                } catch (parseErr) {
+                    throw new Error(`Listec API returned non-JSON for testCode=${code || '(none)'}: ${parseErr.message}`);
+                }
+                return { code, payload: p, qs: callQs, url };
+            })
+        );
     } catch (e) {
         const msg = String(e && e.message ? e.message : e);
         result.errors.push(`Listec API call failed: ${msg}`);
@@ -206,6 +319,11 @@ async function runViaSql(programOpts) {
         } catch (_) {}
         return { result, outMainPath, outPackagesPath, exitCode };
     }
+
+    // Collapse per-call payloads into a single payload-equivalent for the
+    // existing artefact-write path. Single-call (general mode) is a pass-through.
+    const payload =
+        perCallResults.length === 1 ? perCallResults[0].payload : mergePayloads(perCallResults.map((r) => r.payload));
 
     if (payload.resolved && typeof payload.resolved === 'object') {
         result.filtersApplied.resolved = payload.resolved;
@@ -232,6 +350,24 @@ async function runViaSql(programOpts) {
     const rowCount = Number(payload.rowCount) || 0;
     const uniqueLabelCount = Number(payload.uniqueLabelCount) || Object.keys(labelOccurrences).length;
     const otherTestsRowCount = Number(payload.otherTestsRowCount) || 0;
+
+    // Stamp urine-container metrics onto the result for the tile/modal renderer.
+    // sidsTotal is the union count = unique containers needed (1 sample per patient).
+    if (mode === 'urine_containers') {
+        const byTestCode = {};
+        for (const { code, payload: p } of perCallResults) {
+            if (!code) continue;
+            byTestCode[code] = {
+                sids: Array.isArray(p.sids) ? p.sids.length : 0,
+                rows: Number(p.rowCount) || 0
+            };
+        }
+        result.urineContainers = {
+            sidsTotal: sids.length,
+            testCodes: URINE_CONTAINER_TEST_CODES.slice(),
+            byTestCode
+        };
+    }
 
     result.sidsFoundOnPage1 = sids;
     result.pager = { found: false, message: 'sql source — single batch, no grid pager' };
@@ -263,6 +399,8 @@ async function runViaSql(programOpts) {
         const packagesPayload = {
             startedAt,
             source: 'sql',
+            mode,
+            testCodes: mode === 'urine_containers' ? URINE_CONTAINER_TEST_CODES.slice() : null,
             listecApiBase: apiBaseClean,
             filter: { ...filters },
             filtersApplied: result.filtersApplied,
@@ -273,6 +411,7 @@ async function runViaSql(programOpts) {
             labelToSids,
             labelOccurrences,
             otherTestsRowCount,
+            urineContainers: result.urineContainers || null,
             recoveryEvents: [],
             completedPagerPages: [1],
             lastCompletedPagerPage: 1,
@@ -287,8 +426,12 @@ async function runViaSql(programOpts) {
         fs.writeFileSync(outFile, JSON.stringify(result, null, 2), 'utf8');
         outMainPath = outFile;
         console.log(`[sql] wrote ${outFile}`);
+        const modeNote =
+            mode === 'urine_containers'
+                ? ` [urine: ${result.urineContainers.sidsTotal} container(s) from ${URINE_CONTAINER_TEST_CODES.join('+')}]`
+                : '';
         console.log(
-            `[sql] ${rowCount} row(s), ${sids.length} SID(s), ${uniqueLabelCount} unique label(s), ${otherTestsRowCount} Other tests row(s).`
+            `[sql] ${rowCount} row(s), ${sids.length} SID(s), ${uniqueLabelCount} unique label(s), ${otherTestsRowCount} Other tests row(s).${modeNote}`
         );
     } catch (e) {
         result.errors.push(`SQL write: ${e.message}`);

@@ -63,7 +63,8 @@ export function RunModal({ tile, kind, indexFromOne, clientPagesByNorm, onClose 
     if (!tile) return null;
 
     const baseEyebrow = tileEyebrow(tile, indexFromOne);
-    const kindBadge = kind === 'envelopes' ? 'ENVELOPES' : 'LETTER HEADS';
+    const isUrine = kind === 'urine_containers';
+    const kindBadge = isUrine ? 'URINE CONTAINERS' : kind === 'envelopes' ? 'ENVELOPES' : 'LETTER HEADS';
     const range = fmtDateRange(tile.fromDate, tile.toDate);
     const errs = (tile.totals && tile.totals.errors) || 0;
     const status = errs > 0 ? `${errs} error${errs === 1 ? '' : 's'}` : 'success';
@@ -72,7 +73,14 @@ export function RunModal({ tile, kind, indexFromOne, clientPagesByNorm, onClose 
     let totalNum;
     let totalSub = null;
     let estChip = null;
-    if (kind === 'envelopes') {
+    if (isUrine) {
+        const uc = tile.urineContainers || {};
+        totalLabel = 'Containers needed (unique SIDs)';
+        totalNum = (uc.sidsTotal || 0).toLocaleString('en-US');
+        const cp = (uc.byTestCode && uc.byTestCode.cp004) || { sids: 0 };
+        const mb = (uc.byTestCode && uc.byTestCode.mb034) || { sids: 0 };
+        totalSub = `${cp.sids.toLocaleString('en-US')} CP004 \u00b7 ${mb.sids.toLocaleString('en-US')} MB034`;
+    } else if (kind === 'envelopes') {
         const env = aggregateEnvelopes(rows, pinned, clientPagesByNorm);
         totalLabel = 'Total envelopes (big + small)';
         totalNum = env.total.toLocaleString('en-US');
@@ -103,29 +111,37 @@ export function RunModal({ tile, kind, indexFromOne, clientPagesByNorm, onClose 
                     {tile.paths?.mainJson && tile.paths?.packagesJson && ' \u00b7 '}
                     {tile.paths?.packagesJson && <span>packages: {tile.paths.packagesJson}</span>}
                 </div>
-                <div className="packages-toolbar modal-packages-toolbar">
-                    <input
-                        type="search"
-                        placeholder="Filter labels…"
-                        autoComplete="off"
-                        value={filter}
-                        onChange={(e) => setFilter(e.target.value)}
-                    />
-                    <span className="muted small">
-                        {visibleCount === totalSlots
-                            ? `${totalSlots} label${totalSlots === 1 ? '' : 's'}`
-                            : `${visibleCount} of ${totalSlots} labels`}
-                    </span>
-                </div>
-                <div className="packages-table-host-modal table-wrap">
-                    <PackagesTable
-                        rows={rows}
-                        pinned={pinned}
-                        mode={kind === 'envelopes' ? 'envelopes' : 'pages'}
-                        filter={filter}
-                        clientPagesByNorm={clientPagesByNorm}
-                    />
-                </div>
+                {isUrine ? (
+                    <div className="packages-table-host-modal table-wrap">
+                        <UrineBreakdownTable urineContainers={tile.urineContainers} />
+                    </div>
+                ) : (
+                    <>
+                        <div className="packages-toolbar modal-packages-toolbar">
+                            <input
+                                type="search"
+                                placeholder="Filter labels…"
+                                autoComplete="off"
+                                value={filter}
+                                onChange={(e) => setFilter(e.target.value)}
+                            />
+                            <span className="muted small">
+                                {visibleCount === totalSlots
+                                    ? `${totalSlots} label${totalSlots === 1 ? '' : 's'}`
+                                    : `${visibleCount} of ${totalSlots} labels`}
+                            </span>
+                        </div>
+                        <div className="packages-table-host-modal table-wrap">
+                            <PackagesTable
+                                rows={rows}
+                                pinned={pinned}
+                                mode={kind === 'envelopes' ? 'envelopes' : 'pages'}
+                                filter={filter}
+                                clientPagesByNorm={clientPagesByNorm}
+                            />
+                        </div>
+                    </>
+                )}
                 <footer className="run-modal-footer row-between">
                     <span className="eyebrow-lite">{totalLabel}</span>
                     <div>
@@ -136,5 +152,47 @@ export function RunModal({ tile, kind, indexFromOne, clientPagesByNorm, onClose 
                 </footer>
             </div>
         </dialog>
+    );
+}
+
+/**
+ * 3-row breakdown for urine container runs: per-test SID/row counts plus a
+ * union footer (= containers needed). No filter or sort — only two test codes
+ * are ever in scope so the long sortable PackagesTable is overkill.
+ */
+function UrineBreakdownTable({ urineContainers }) {
+    const uc = urineContainers || {};
+    const cp = (uc.byTestCode && uc.byTestCode.cp004) || { sids: 0, rows: 0 };
+    const mb = (uc.byTestCode && uc.byTestCode.mb034) || { sids: 0, rows: 0 };
+    const total = uc.sidsTotal || 0;
+    return (
+        <table className="urine-breakdown">
+            <thead>
+                <tr>
+                    <th>Test code</th>
+                    <th className="num">SIDs (patients)</th>
+                    <th className="num">Rows (raw)</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>cp004</td>
+                    <td className="num">{cp.sids.toLocaleString('en-US')}</td>
+                    <td className="num">{(cp.rows || 0).toLocaleString('en-US')}</td>
+                </tr>
+                <tr>
+                    <td>mb034</td>
+                    <td className="num">{mb.sids.toLocaleString('en-US')}</td>
+                    <td className="num">{(mb.rows || 0).toLocaleString('en-US')}</td>
+                </tr>
+            </tbody>
+            <tfoot>
+                <tr>
+                    <td>Union (cp004 OR mb034) — containers needed</td>
+                    <td className="num">{total.toLocaleString('en-US')}</td>
+                    <td className="num">{((cp.rows || 0) + (mb.rows || 0)).toLocaleString('en-US')}</td>
+                </tr>
+            </tfoot>
+        </table>
     );
 }

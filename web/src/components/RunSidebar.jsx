@@ -26,12 +26,27 @@ const BLANK_FORM = {
     noScreenshots: false
 };
 
-export function RunSidebar({ collapsed, buOptions, buSelected, buActions, busy, onSubmit, onClearLedger }) {
-    const [form, setForm] = useState(() => ({ ...BLANK_FORM, source: readString(LS_SOURCE, 'scrape') === 'sql' ? 'sql' : 'scrape' }));
+export function RunSidebar({ collapsed, buOptions, buSelected, buActions, busy, mode, onSubmit, onClearLedger }) {
+    // Urine-container mode auto-pins testCode = cp004 OR mb034 (the union is
+    // executed server-side by lib/sql-source.js). When the user is on the
+    // Urine Containers tab we lock the source to SQL (the only source that
+    // can take a testCode) and replace the free-text Test code input with a
+    // read-only chip so it's clear which assays drive the count.
+    const isUrine = mode === 'urine_containers';
+    const [form, setForm] = useState(() => ({
+        ...BLANK_FORM,
+        source: isUrine ? 'sql' : readString(LS_SOURCE, 'scrape') === 'sql' ? 'sql' : 'scrape'
+    }));
 
     useEffect(() => {
-        writeString(LS_SOURCE, form.source);
-    }, [form.source]);
+        if (isUrine && form.source !== 'sql') {
+            setForm((prev) => ({ ...prev, source: 'sql' }));
+        }
+    }, [isUrine, form.source]);
+
+    useEffect(() => {
+        if (!isUrine) writeString(LS_SOURCE, form.source);
+    }, [form.source, isUrine]);
 
     function update(name, value) {
         setForm((prev) => ({ ...prev, [name]: value }));
@@ -50,7 +65,13 @@ export function RunSidebar({ collapsed, buOptions, buSelected, buActions, busy, 
         if (form.fromHour !== '') body.fromHour = Number(form.fromHour);
         if (form.toHour !== '') body.toHour = Number(form.toHour);
         body.source = form.source;
-        if (form.source === 'sql' && buSelected.size > 0) {
+        if (isUrine) {
+            body.mode = 'urine_containers';
+            body.source = 'sql';
+            // Strip any stale free-text testCode — server pins cp004+mb034 from the mode flag.
+            delete body.testCode;
+        }
+        if (body.source === 'sql' && buSelected.size > 0) {
             body.businessUnits = [...buSelected];
             if (body.businessUnits.length === 1 && !body.bu) body.bu = body.businessUnits[0];
         }
@@ -58,8 +79,10 @@ export function RunSidebar({ collapsed, buOptions, buSelected, buActions, busy, 
     }
 
     const wantSql = form.source === 'sql';
-    const showScrapeOnly = !wantSql;
-    const sourceHint = wantSql
+    const showScrapeOnly = !wantSql && !isUrine;
+    const sourceHint = isUrine
+        ? 'Urine container mode is locked to SQL. Each run fires two parallel Listec calls (cp004 + mb034) and unions the SIDs.'
+        : wantSql
         ? 'Calls the Listec service (LISTEC_API_BASE_URL, default http://127.0.0.1:3100) — multi-BU runs allowed.'
         : 'Drives the LIS web grid via headless Chromium. Multi-BU runs require SQL.';
 
@@ -79,6 +102,7 @@ export function RunSidebar({ collapsed, buOptions, buSelected, buActions, busy, 
                                     name="source"
                                     value="scrape"
                                     checked={form.source === 'scrape'}
+                                    disabled={isUrine}
                                     onChange={() => update('source', 'scrape')}
                                 />{' '}
                                 Web scrape
@@ -89,10 +113,16 @@ export function RunSidebar({ collapsed, buOptions, buSelected, buActions, busy, 
                                     name="source"
                                     value="sql"
                                     checked={form.source === 'sql'}
+                                    disabled={isUrine}
                                     onChange={() => update('source', 'sql')}
                                 />{' '}
                                 SQL (Listec)
                             </label>
+                            {isUrine && (
+                                <p className="muted small source-hint urine-pin-banner">
+                                    <span className="chip chip-tool urine-pin-chip">Pinned: cp004 OR mb034</span>
+                                </p>
+                            )}
                             <p className="muted small source-hint">{sourceHint}</p>
                         </fieldset>
 
@@ -180,7 +210,20 @@ export function RunSidebar({ collapsed, buOptions, buSelected, buActions, busy, 
                                 </label>
                                 <label>
                                     Test code{' '}
-                                    <input type="text" value={form.testCode} onChange={(e) => update('testCode', e.target.value)} />
+                                    {isUrine ? (
+                                        <span
+                                            className="chip chip-tool urine-pin-chip"
+                                            title="Locked by Urine Containers tab — server fires cp004 + mb034 in parallel"
+                                        >
+                                            cp004 OR mb034
+                                        </span>
+                                    ) : (
+                                        <input
+                                            type="text"
+                                            value={form.testCode}
+                                            onChange={(e) => update('testCode', e.target.value)}
+                                        />
+                                    )}
                                 </label>
                             </div>
                         </details>
@@ -281,7 +324,7 @@ export function RunSidebar({ collapsed, buOptions, buSelected, buActions, busy, 
                     </div>
                     <div className="form-actions">
                         <button type="submit" className="btn-primary" disabled={busy}>
-                            Run
+                            {isUrine ? 'Run urine container count' : 'Run'}
                         </button>
                         <button type="button" className="btn-secondary chip-like" onClick={onClearLedger}>
                             Clear ledger

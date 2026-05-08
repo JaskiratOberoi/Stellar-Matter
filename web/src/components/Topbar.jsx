@@ -13,6 +13,7 @@ export function Topbar({
     const tabs = [
         { id: 'letterheads', label: 'Letter Heads' },
         { id: 'envelopes', label: 'Envelopes' },
+        { id: 'urine_containers', label: 'Urine Containers' },
         { id: 'history', label: 'History' }
     ];
     return (
