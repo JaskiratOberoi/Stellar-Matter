@@ -6,13 +6,24 @@ import { PackagesTable } from './PackagesTable.jsx';
 export function RunModal({ tile, kind, indexFromOne, clientPagesByNorm, onClose }) {
     const dialogRef = useRef(null);
     const [filter, setFilter] = useState('');
-    const [shown, setShown] = useState({ visible: 0, total: 0 });
 
     const rows = useMemo(() => (Array.isArray(tile?.labelRows) ? tile.labelRows : []), [tile]);
     const pinned = useMemo(
         () => (tile ? makeOtherTestsPinned(tile.totals && tile.totals.otherTestsRowCount) : null),
         [tile]
     );
+
+    // Derive visible/total counts here instead of letting PackagesTable phone them
+    // back via an onCount callback. The previous setShown({...}) round-trip created
+    // a new object every render, defeating React's bail-out and producing an
+    // infinite re-render loop that froze the tab when the modal opened.
+    const hasPinned = !!(pinned && Number(pinned.count) > 0);
+    const totalSlots = rows.length + (hasPinned ? 1 : 0);
+    const visibleCount = useMemo(() => {
+        const q = filter.trim().toLowerCase();
+        const matched = q ? rows.filter((r) => r.label.toLowerCase().includes(q)).length : rows.length;
+        return matched + (hasPinned ? 1 : 0);
+    }, [rows, filter, hasPinned]);
 
     useEffect(() => {
         if (!tile) return;
@@ -101,9 +112,9 @@ export function RunModal({ tile, kind, indexFromOne, clientPagesByNorm, onClose 
                         onChange={(e) => setFilter(e.target.value)}
                     />
                     <span className="muted small">
-                        {shown.visible === shown.total
-                            ? `${shown.total} label${shown.total === 1 ? '' : 's'}`
-                            : `${shown.visible} of ${shown.total} labels`}
+                        {visibleCount === totalSlots
+                            ? `${totalSlots} label${totalSlots === 1 ? '' : 's'}`
+                            : `${visibleCount} of ${totalSlots} labels`}
                     </span>
                 </div>
                 <div className="packages-table-host-modal table-wrap">
@@ -113,7 +124,6 @@ export function RunModal({ tile, kind, indexFromOne, clientPagesByNorm, onClose 
                         mode={kind === 'envelopes' ? 'envelopes' : 'pages'}
                         filter={filter}
                         clientPagesByNorm={clientPagesByNorm}
-                        onCount={(visible, total) => setShown({ visible, total })}
                     />
                 </div>
                 <footer className="run-modal-footer row-between">

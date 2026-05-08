@@ -11,7 +11,7 @@ import {
  * Sortable + filterable per-package table. Mode flips between
  * 'pages' (Letter Heads) and 'envelopes'.
  */
-export function PackagesTable({ rows, pinned, mode = 'pages', filter = '', onCount, clientPagesByNorm }) {
+export function PackagesTable({ rows, pinned, mode = 'pages', filter = '', clientPagesByNorm }) {
     const isEnvelopes = mode === 'envelopes';
     const [sortKey, setSortKey] = useState('count');
     const [sortDir, setSortDir] = useState('desc');
@@ -43,14 +43,6 @@ export function PackagesTable({ rows, pinned, mode = 'pages', filter = '', onCou
     }, [rows, filter, sortKey, sortDir, clientPagesByNorm]);
 
     const hasPinned = !!(pinned && Number(pinned.count) > 0);
-    const visibleCount = sortedBody.length + (hasPinned ? 1 : 0);
-    const totalSlots = rows.length + (hasPinned ? 1 : 0);
-
-    // Surface the visible/total count for the modal toolbar.
-    if (typeof onCount === 'function') {
-        // Lazy effect via microtask — avoids triggering parent renders during this render.
-        queueMicrotask(() => onCount(visibleCount, totalSlots));
-    }
 
     if (!rows.length && !hasPinned) {
         return <div className="empty">No package labels in scrape results.</div>;

@@ -47,6 +47,12 @@ services:
       # Listec service running on the host (Linux host overrides via
       # extra_hosts below).
       LISTEC_API_BASE_URL: ${LISTEC_API_BASE_URL:-http://host.docker.internal:3100}
+      # Pin the run-artefact dir to the bind-mounted host folder so writes
+      # (lib/run.js -> cwd/out) and reads (server.js /api/runs/tiles) target
+      # the same path regardless of cwd or __dirname. Without this they drift:
+      # writes land in /app/out (cwd-relative), reads scan /app/scripts/lis-nav-bot/out
+      # (__dirname-relative) and the tile wall never sees new runs.
+      LIS_OUT_DIR: /app/out
       CORS_ORIGINS: ${CORS_ORIGINS:-https://matter.stellarinfomatica.com}
       TZ: ${TZ:-Asia/Kolkata}
     extra_hosts:
