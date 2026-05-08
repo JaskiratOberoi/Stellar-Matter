@@ -1,18 +1,18 @@
+'use strict';
+
 /**
  * Phase-2 scaffold shim — defers to the still-canonical legacy entrypoint
- * at scripts/lis-nav-bot/server.js. The next todo (`react-vite-port`)
- * splits the legacy file into server/routes/{run,tiles,lookups,auth,admin}Api.js
- * and this shim becomes a thin wire-up of those routers + middleware.
+ * at scripts/lis-nav-bot/server.js. The next iteration splits the legacy
+ * file into server/routes/{run,tiles,lookups,auth,admin}Api.js and this
+ * shim becomes a thin wire-up of those routers + middleware.
+ *
+ * CommonJS (no "type": "module" on this workspace) so the CJS auth/admin
+ * modules under server/ resolve naturally without .cjs renames.
  */
 
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { createRequire } from 'node:module';
+const path = require('node:path');
 
-const here = path.dirname(fileURLToPath(import.meta.url));
-const repoRoot = path.resolve(here, '..');
+const repoRoot = path.resolve(__dirname, '..');
 const legacyEntry = path.join(repoRoot, 'scripts', 'lis-nav-bot', 'server.js');
 
-// CommonJS legacy file — load via createRequire so we don't need to rewrite it yet.
-const require = createRequire(import.meta.url);
 require(legacyEntry);

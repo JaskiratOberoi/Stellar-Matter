@@ -18,7 +18,10 @@ function listecApiBase() {
 }
 
 function resolveOutDir() {
-    const raw = process.env.LIS_OUT_DIR || './out';
+    // Default to scripts/lis-nav-bot/out (next to this file) so the dashboard
+    // works whether started from the repo root (`npm run start`), inside Docker
+    // (cwd=/app), or the legacy `cd scripts/lis-nav-bot && npm run ui` path.
+    const raw = process.env.LIS_OUT_DIR || path.join(__dirname, 'out');
     return path.isAbsolute(raw) ? raw : path.resolve(process.cwd(), raw);
 }
 
