@@ -598,19 +598,23 @@ app.post('/api/run', requireRunStarter, async (req, res) => {
         });
     }
 
-    // mode whitelist. urine_containers auto-pins testCode = cp004 OR mb034 in
-    // lib/sql-source.js by firing two parallel Listec calls and unioning SIDs;
-    // it requires the SQL source because the scrape path doesn't accept testCode
-    // multi-targeting and would silently fall back to whatever the LIS UI picks.
-    const modeRaw = body && body.mode != null ? String(body.mode) : 'general';
-    const mode =
-        modeRaw === 'urine_containers'
-            ? 'urine_containers'
-            : modeRaw === 'edta_vials'
-              ? 'edta_vials'
-              : modeRaw === 'citrate_vials'
-                ? 'citrate_vials'
-                : 'general';
+    // mode whitelist. urine_containers / edta_vials / citrate_vials all auto-pin
+    // a fixed list of testCodes in lib/sql-source.js by firing N parallel Listec
+    // calls and unioning SIDs (OR semantics). They require the SQL source because
+    // the scrape path doesn't accept testCode multi-targeting and would silently
+    // fall back to whatever the LIS UI picks.
+    //
+    // Unknown modes are rejected (rather than silently downgraded to 'general')
+    // so a frontend/backend version mismatch surfaces immediately instead of
+    // landing a useless general-mode tile under an EDTA/Citrate/etc. slot.
+    const KNOWN_MODES = new Set(['general', 'urine_containers', 'edta_vials', 'citrate_vials']);
+    const modeRaw = body && body.mode != null ? String(body.mode).trim() : 'general';
+    const mode = modeRaw === '' ? 'general' : modeRaw;
+    if (!KNOWN_MODES.has(mode)) {
+        return res.status(400).json({
+            error: `Unknown mode "${mode}". Expected one of: ${[...KNOWN_MODES].join(', ')}. (If the dashboard sent this, the API server is older than the frontend — redeploy the api-matter container.)`
+        });
+    }
     if ((mode === 'urine_containers' || mode === 'edta_vials' || mode === 'citrate_vials') && source !== 'sql') {
         return res.status(400).json({
             error:
