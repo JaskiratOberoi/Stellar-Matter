@@ -84,7 +84,17 @@ export function RunModal({ tile, kind, indexFromOne, clientPagesByNorm, onClose 
 
     const baseEyebrow = tileEyebrow(tile, indexFromOne);
     const isUrine = kind === 'urine_containers';
-    const kindBadge = isUrine ? 'URINE CONTAINERS' : kind === 'envelopes' ? 'ENVELOPES' : 'LETTER HEADS';
+    const isEdta = kind === 'edta_vials';
+    const isCitrate = kind === 'citrate_vials';
+    const kindBadge = isUrine
+        ? 'URINE CONTAINERS'
+        : isEdta
+          ? 'EDTA VIALS'
+          : isCitrate
+            ? 'CITRATE VIALS'
+            : kind === 'envelopes'
+              ? 'ENVELOPES'
+              : 'LETTER HEADS';
     const range = fmtDateRange(tile.fromDate, tile.toDate);
     const errs = (tile.totals && tile.totals.errors) || 0;
     const status = errs > 0 ? `${errs} error${errs === 1 ? '' : 's'}` : 'success';
@@ -100,6 +110,34 @@ export function RunModal({ tile, kind, indexFromOne, clientPagesByNorm, onClose 
         const cp = (uc.byTestCode && uc.byTestCode.cp004) || { sids: 0 };
         const mb = (uc.byTestCode && uc.byTestCode.mb034) || { sids: 0 };
         totalSub = `${cp.sids.toLocaleString('en-US')} CP004 \u00b7 ${mb.sids.toLocaleString('en-US')} MB034`;
+    } else if (isEdta) {
+        const ev = tile.edtaVials || {};
+        totalLabel = 'Vials needed (unique SIDs)';
+        totalNum = (ev.sidsTotal || 0).toLocaleString('en-US');
+        const btc = ev.byTestCode && typeof ev.byTestCode === 'object' ? ev.byTestCode : {};
+        const codes = Object.keys(btc).sort();
+        totalSub = codes.length
+            ? codes
+                  .map((c) => {
+                      const row = btc[c] || { sids: 0 };
+                      return `${c}: ${(row.sids || 0).toLocaleString('en-US')}`;
+                  })
+                  .join(' \u00b7 ')
+            : null;
+    } else if (isCitrate) {
+        const cv = tile.citrateVials || {};
+        totalLabel = 'Vials needed (unique SIDs)';
+        totalNum = (cv.sidsTotal || 0).toLocaleString('en-US');
+        const btc = cv.byTestCode && typeof cv.byTestCode === 'object' ? cv.byTestCode : {};
+        const codes = Object.keys(btc).sort();
+        totalSub = codes.length
+            ? codes
+                  .map((c) => {
+                      const row = btc[c] || { sids: 0 };
+                      return `${c}: ${(row.sids || 0).toLocaleString('en-US')}`;
+                  })
+                  .join(' \u00b7 ')
+            : null;
     } else if (kind === 'envelopes') {
         const env = aggregateEnvelopes(rows, pinned, clientPagesByNorm);
         totalLabel = 'Total envelopes (big + small)';
@@ -134,6 +172,14 @@ export function RunModal({ tile, kind, indexFromOne, clientPagesByNorm, onClose 
                 {isUrine ? (
                     <div className="packages-table-host-modal table-wrap">
                         <UrineBreakdownTable urineContainers={tile.urineContainers} />
+                    </div>
+                ) : isEdta ? (
+                    <div className="packages-table-host-modal table-wrap">
+                        <EdtaBreakdownTable edtaVials={tile.edtaVials} />
+                    </div>
+                ) : isCitrate ? (
+                    <div className="packages-table-host-modal table-wrap">
+                        <CitrateBreakdownTable citrateVials={tile.citrateVials} />
                     </div>
                 ) : (
                     <>
@@ -174,6 +220,88 @@ export function RunModal({ tile, kind, indexFromOne, clientPagesByNorm, onClose 
         </dialog>
     );
     return createPortal(dialog, document.body);
+}
+
+/**
+ * Per-assay breakdown for EDTA vial runs (dynamic rows from byTestCode).
+ */
+function EdtaBreakdownTable({ edtaVials }) {
+    const ev = edtaVials || {};
+    const btc = ev.byTestCode && typeof ev.byTestCode === 'object' ? ev.byTestCode : {};
+    const codes = Object.keys(btc).sort();
+    const totalSids = ev.sidsTotal || 0;
+    const totalRows = codes.reduce((s, c) => s + (Number(btc[c] && btc[c].rows) || 0), 0);
+    return (
+        <table className="edta-breakdown urine-breakdown">
+            <thead>
+                <tr>
+                    <th>Test code</th>
+                    <th className="num">SIDs (patients)</th>
+                    <th className="num">Rows (raw)</th>
+                </tr>
+            </thead>
+            <tbody>
+                {codes.map((code) => {
+                    const row = btc[code] || { sids: 0, rows: 0 };
+                    return (
+                        <tr key={code}>
+                            <td>{code}</td>
+                            <td className="num">{(row.sids || 0).toLocaleString('en-US')}</td>
+                            <td className="num">{(row.rows || 0).toLocaleString('en-US')}</td>
+                        </tr>
+                    );
+                })}
+            </tbody>
+            <tfoot>
+                <tr>
+                    <td>Union (OR) — vials needed</td>
+                    <td className="num">{totalSids.toLocaleString('en-US')}</td>
+                    <td className="num">{totalRows.toLocaleString('en-US')}</td>
+                </tr>
+            </tfoot>
+        </table>
+    );
+}
+
+/**
+ * Per-assay breakdown for Citrate runs (dynamic rows from byTestCode).
+ */
+function CitrateBreakdownTable({ citrateVials }) {
+    const cv = citrateVials || {};
+    const btc = cv.byTestCode && typeof cv.byTestCode === 'object' ? cv.byTestCode : {};
+    const codes = Object.keys(btc).sort();
+    const totalSids = cv.sidsTotal || 0;
+    const totalRows = codes.reduce((s, c) => s + (Number(btc[c] && btc[c].rows) || 0), 0);
+    return (
+        <table className="citrate-breakdown urine-breakdown">
+            <thead>
+                <tr>
+                    <th>Test code</th>
+                    <th className="num">SIDs (patients)</th>
+                    <th className="num">Rows (raw)</th>
+                </tr>
+            </thead>
+            <tbody>
+                {codes.map((code) => {
+                    const row = btc[code] || { sids: 0, rows: 0 };
+                    return (
+                        <tr key={code}>
+                            <td>{code}</td>
+                            <td className="num">{(row.sids || 0).toLocaleString('en-US')}</td>
+                            <td className="num">{(row.rows || 0).toLocaleString('en-US')}</td>
+                        </tr>
+                    );
+                })}
+            </tbody>
+            <tfoot>
+                <tr>
+                    <td>Union (OR) — vials needed</td>
+                    <td className="num">{totalSids.toLocaleString('en-US')}</td>
+                    <td className="num">{totalRows.toLocaleString('en-US')}</td>
+                </tr>
+            </tfoot>
+        </table>
+    );
 }
 
 /**

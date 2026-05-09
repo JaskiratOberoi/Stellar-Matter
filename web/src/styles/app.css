@@ -1648,6 +1648,41 @@ table.packages td.envelope-cell {
     margin: 6px 0 4px 0;
 }
 
+/* EDTA vials — pinned test codes in run sidebar. */
+.edta-pin-chip {
+    cursor: default;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-size: 10px;
+    background: rgba(var(--accent-rgb, 245 211 86), 0.1);
+    border-color: rgba(var(--accent-rgb, 245 211 86), 0.45);
+    color: rgb(var(--text));
+    line-height: 1.25;
+    white-space: normal;
+    text-align: left;
+}
+
+.edta-pin-banner {
+    margin: 6px 0 4px 0;
+}
+
+.citrate-pin-chip {
+    cursor: default;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-size: 10px;
+    background: rgba(120, 200, 255, 0.08);
+    border-color: rgba(120, 200, 255, 0.45);
+    color: rgb(var(--text));
+    line-height: 1.25;
+    white-space: normal;
+    text-align: left;
+}
+
+.citrate-pin-banner {
+    margin: 6px 0 4px 0;
+}
+
 /* Urine-container modal breakdown table. Shares typography with .packages
  * but lays out as a small fixed 3-row summary (cp004 / mb034 / union footer)
  * instead of the long sortable label list.

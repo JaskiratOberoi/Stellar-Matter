@@ -1,13 +1,13 @@
 import { Tile } from './Tile.jsx';
 
-// Strict tab scoping. Letter Heads + Envelopes show only general (mode='general'
-// or undefined for legacy artefacts) runs; Urine Containers shows only runs
-// produced by the urine-container mode (POST /api/run with mode=urine_containers,
-// which auto-pins testCode = cp004 OR mb034 in lib/sql-source.js).
+// Strict tab scoping. Letter Heads + Envelopes show only general runs; Urine
+// and EDTA tabs show only their specialty mode tiles.
 function tileMatchesTab(tile, kind) {
     const mode = tile.mode || 'general';
     if (kind === 'urine_containers') return mode === 'urine_containers';
-    return mode !== 'urine_containers';
+    if (kind === 'edta_vials') return mode === 'edta_vials';
+    if (kind === 'citrate_vials') return mode === 'citrate_vials';
+    return mode !== 'urine_containers' && mode !== 'edta_vials' && mode !== 'citrate_vials';
 }
 
 export function TileWall({ tiles, kind, hiddenCount, onRestoreHidden, onOpen, clientPagesByNorm }) {
@@ -37,6 +37,25 @@ export function TileWall({ tiles, kind, hiddenCount, onRestoreHidden, onOpen, cl
                                 Two parallel Listec calls per BU, unioned by SID so a patient who ordered both tests
                                 still counts as one container.
                             </p>
+                        </>
+                    ) : kind === 'edta_vials' ? (
+                        <>
+                            <p className="tile-empty-lead">
+                                No <strong>EDTA vial</strong> runs yet. Start one from the run panel — the run will
+                                auto-pin <code>he011, he022, he006, he055, bi127</code> and count each SID once across
+                                all five assays.
+                            </p>
+                            <p className="muted small">
+                                Five parallel Listec calls per BU, unioned by SID.
+                            </p>
+                        </>
+                    ) : kind === 'citrate_vials' ? (
+                        <>
+                            <p className="tile-empty-lead">
+                                No <strong>Citrate</strong> runs yet. Start one from the run panel — the run will
+                                auto-pin <code>he030, he004, he016, hem001</code> and count each SID once.
+                            </p>
+                            <p className="muted small">Four parallel Listec calls per BU, unioned by SID.</p>
                         </>
                     ) : (
                         <>

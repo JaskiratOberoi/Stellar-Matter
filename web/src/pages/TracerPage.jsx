@@ -41,7 +41,7 @@ export function TracerPage({
     const viewerDisabled = Boolean(authRequired && user && user.role === 'viewer');
 
     const [bannerRows, setBannerRows] = useState(
-        /** @type {{ buKey: string, bu: string, fromDate: string, toDate: string, generalTile: object | null, urineTile: object | null }[]} */ ([])
+        /** @type {{ buKey: string, bu: string, fromDate: string, toDate: string, generalTile: object | null, urineTile: object | null, edtaTile: object | null, citrateTile: object | null }[]} */ ([])
     );
     const [localError, setLocalError] = useState( /** @type {string | null} */ (null));
     const [tracerBusy, setTracerBusy] = useState(false);
@@ -68,6 +68,8 @@ export function TracerPage({
                     bu: row.bu,
                     generalTile: row.generalTile,
                     urineTile: row.urineTile,
+                    edtaTile: row.edtaTile,
+                    citrateTile: row.citrateTile,
                     fromDate: p.from,
                     toDate: p.to
                 });
@@ -134,6 +136,18 @@ export function TracerPage({
                     return;
                 }
                 await waitForRunIdle(() => apiFetch('/api/run/status'));
+                const r3 = await submit(buildBody('edta_vials', snap));
+                if (!r3.ok) {
+                    setLocalError(String(r3.error || 'EDTA vials run failed'));
+                    return;
+                }
+                await waitForRunIdle(() => apiFetch('/api/run/status'));
+                const r4 = await submit(buildBody('citrate_vials', snap));
+                if (!r4.ok) {
+                    setLocalError(String(r4.error || 'Citrate run failed'));
+                    return;
+                }
+                await waitForRunIdle(() => apiFetch('/api/run/status'));
                 pendingBannerRef.current = { batchIso, from: snap.fromDate, to: snap.toDate, bus };
                 try {
                     await reloadTiles();
@@ -189,6 +203,8 @@ export function TracerPage({
                             toDate={row.toDate}
                             generalTile={row.generalTile}
                             urineTile={row.urineTile}
+                            edtaTile={row.edtaTile}
+                            citrateTile={row.citrateTile}
                             clientPagesByNorm={clientPagesByNorm}
                             isPrintTarget={printFocusKey === row.buKey}
                             onPrintSection={() => startPrintBu(row.buKey)}

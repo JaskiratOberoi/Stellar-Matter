@@ -43,6 +43,48 @@ export function projectUrineContainers(tile) {
     };
 }
 
+/** @param {object | null | undefined} tile */
+export function projectEdtaVials(tile) {
+    if (!tile) return { headline: '0', subline: '', sidsTotal: 0 };
+    const ev = tile.edtaVials || {};
+    const btc = ev.byTestCode && typeof ev.byTestCode === 'object' ? ev.byTestCode : {};
+    const codes = Object.keys(btc).sort();
+    const totalRows = codes.reduce((s, c) => s + (Number(btc[c] && btc[c].rows) || 0), 0);
+    const subParts = codes.map((code) => {
+        const row = btc[code] || { sids: 0, rows: 0 };
+        return `${(row.sids || 0).toLocaleString('en-US')} ${code}`;
+    });
+    const subline = subParts.length
+        ? `${subParts.join(' + ')} (${totalRows.toLocaleString('en-US')} tests)`
+        : 'No data';
+    return {
+        headline: (ev.sidsTotal || 0).toLocaleString('en-US'),
+        subline,
+        sidsTotal: ev.sidsTotal || 0
+    };
+}
+
+/** @param {object | null | undefined} tile */
+export function projectCitrateVials(tile) {
+    if (!tile) return { headline: '0', subline: '', sidsTotal: 0 };
+    const cv = tile.citrateVials || {};
+    const btc = cv.byTestCode && typeof cv.byTestCode === 'object' ? cv.byTestCode : {};
+    const codes = Object.keys(btc).sort();
+    const totalRows = codes.reduce((s, c) => s + (Number(btc[c] && btc[c].rows) || 0), 0);
+    const subParts = codes.map((code) => {
+        const row = btc[code] || { sids: 0, rows: 0 };
+        return `${(row.sids || 0).toLocaleString('en-US')} ${code}`;
+    });
+    const subline = subParts.length
+        ? `${subParts.join(' + ')} (${totalRows.toLocaleString('en-US')} tests)`
+        : 'No data';
+    return {
+        headline: (cv.sidsTotal || 0).toLocaleString('en-US'),
+        subline,
+        sidsTotal: cv.sidsTotal || 0
+    };
+}
+
 /** Normalized key for merging Tracer banners (case- and trim-insensitive). */
 export function tracerBuKey(bu) {
     return String(bu || '')
@@ -76,11 +118,17 @@ export function mapTilesToBanners(tiles, selectedBus, batchStartedIso, fromDate,
         return true;
     };
     /** @param {object} tile */
-    const modeOf = (tile) => (tile.mode === 'urine_containers' ? 'urine_containers' : 'general');
+    const modeOf = (tile) => {
+        const m = tile.mode;
+        if (m === 'urine_containers') return 'urine_containers';
+        if (m === 'edta_vials') return 'edta_vials';
+        if (m === 'citrate_vials') return 'citrate_vials';
+        return 'general';
+    };
 
     /** @param {string} bu */
-    const pick = (bu, mode) => {
-        const list = (tiles || []).filter((t) => buEq(t.bu, bu) && modeOf(t) === mode && inBatch(t));
+    const pick = (bu, modeKey) => {
+        const list = (tiles || []).filter((t) => buEq(t.bu, bu) && modeOf(t) === modeKey && inBatch(t));
         list.sort((a, b) => {
             const ta = Date.parse(a.startedAt) || 0;
             const tb = Date.parse(b.startedAt) || 0;
@@ -92,7 +140,9 @@ export function mapTilesToBanners(tiles, selectedBus, batchStartedIso, fromDate,
     return [...selectedBus].map((bu) => ({
         bu,
         generalTile: pick(bu, 'general'),
-        urineTile: pick(bu, 'urine_containers')
+        urineTile: pick(bu, 'urine_containers'),
+        edtaTile: pick(bu, 'edta_vials'),
+        citrateTile: pick(bu, 'citrate_vials')
     }));
 }
 

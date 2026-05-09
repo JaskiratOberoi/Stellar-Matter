@@ -34,7 +34,9 @@ function loadInitialView() {
         raw === 'history' ||
         raw === 'envelopes' ||
         raw === 'letterheads' ||
-        raw === 'urine_containers'
+        raw === 'urine_containers' ||
+        raw === 'edta_vials' ||
+        raw === 'citrate_vials'
     )
         return raw;
     if (raw === 'results') return 'letterheads';
@@ -188,7 +190,15 @@ export function App() {
                     buSelected={buSelected}
                     buActions={{ toggle, selectAll, clear: clearBu }}
                     busy={running}
-                    mode={tab === 'urine_containers' ? 'urine_containers' : 'general'}
+                    mode={
+                        tab === 'urine_containers'
+                            ? 'urine_containers'
+                            : tab === 'edta_vials'
+                              ? 'edta_vials'
+                              : tab === 'citrate_vials'
+                                ? 'citrate_vials'
+                                : 'general'
+                    }
                     sqlOnlyLocked={Boolean(authRequired && user && user.role === 'admin')}
                     onSubmit={handleSubmit}
                     onClearLedger={handleClearLedger}
@@ -246,6 +256,38 @@ export function App() {
                                 onOpen={(t) => {
                                     setOpenTile(t);
                                     setOpenTileKind('urine_containers');
+                                }}
+                            />
+                        </section>
+                    )}
+
+                    {tab === 'edta_vials' && (
+                        <section className="tabpanel" data-metric-kind="edta_vials">
+                            <TileWall
+                                tiles={visibleTiles}
+                                kind="edta_vials"
+                                hiddenCount={hiddenCount}
+                                clientPagesByNorm={clientPagesByNorm}
+                                onRestoreHidden={restoreHidden}
+                                onOpen={(t) => {
+                                    setOpenTile(t);
+                                    setOpenTileKind('edta_vials');
+                                }}
+                            />
+                        </section>
+                    )}
+
+                    {tab === 'citrate_vials' && (
+                        <section className="tabpanel" data-metric-kind="citrate_vials">
+                            <TileWall
+                                tiles={visibleTiles}
+                                kind="citrate_vials"
+                                hiddenCount={hiddenCount}
+                                clientPagesByNorm={clientPagesByNorm}
+                                onRestoreHidden={restoreHidden}
+                                onOpen={(t) => {
+                                    setOpenTile(t);
+                                    setOpenTileKind('citrate_vials');
                                 }}
                             />
                         </section>

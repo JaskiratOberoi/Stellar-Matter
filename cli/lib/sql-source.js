@@ -21,6 +21,12 @@ const DEFAULT_API_BASE = 'http://127.0.0.1:3100';
 // counts as one container (one urine sample, two assays).
 const URINE_CONTAINER_TEST_CODES = ['cp004', 'mb034'];
 
+// EDTA vial tallies — same N-parallel + SID union pattern as urine containers.
+const EDTA_VIAL_TEST_CODES = ['he011', 'he022', 'he006', 'he055', 'bi127'];
+
+// Citrate vials — same multi-call + SID union as EDTA.
+const CITRATE_VIAL_TEST_CODES = ['he030', 'he004', 'he016', 'hem001'];
+
 /**
  * Merge N Listec /worksheet-reports/packages payloads into a single
  * payload-equivalent so the rest of runViaSql doesn't need to care that we
@@ -225,15 +231,19 @@ async function runViaSql(programOpts) {
         ? String(outDirRaw)
         : path.resolve(process.cwd(), String(outDirRaw));
 
-    // Mode resolution. 'urine_containers' auto-pins URINE_CONTAINER_TEST_CODES
-    // and unions SIDs across N parallel Listec calls; 'general' (default) keeps
-    // the existing single-call behaviour and respects the caller's testCode if
-    // any. Any other value falls back to general.
-    const mode = opts.mode === 'urine_containers' ? 'urine_containers' : 'general';
-    const testCodesToRun =
-        mode === 'urine_containers'
-            ? URINE_CONTAINER_TEST_CODES.slice()
-            : [filters.testCode || null]; // null = "no testCode filter at all"
+    // Mode resolution: specialty modes pin N test codes and union SIDs; general
+    // uses a single call (optional testCode filter).
+    const rawMode = opts.mode != null ? String(opts.mode) : '';
+    let mode = 'general';
+    if (rawMode === 'urine_containers') mode = 'urine_containers';
+    else if (rawMode === 'edta_vials') mode = 'edta_vials';
+    else if (rawMode === 'citrate_vials') mode = 'citrate_vials';
+
+    let testCodesToRun;
+    if (mode === 'urine_containers') testCodesToRun = URINE_CONTAINER_TEST_CODES.slice();
+    else if (mode === 'edta_vials') testCodesToRun = EDTA_VIAL_TEST_CODES.slice();
+    else if (mode === 'citrate_vials') testCodesToRun = CITRATE_VIAL_TEST_CODES.slice();
+    else testCodesToRun = [filters.testCode || null]; // null = no testCode filter
 
     /** @type {string[]} */
     const notes = [];
@@ -245,12 +255,21 @@ async function runViaSql(programOpts) {
     const qs = qsList.length === 1 ? qsList[0] : qsList;
 
     /** @type {object} */
+    const pinnedCodes =
+        mode === 'urine_containers'
+            ? URINE_CONTAINER_TEST_CODES.slice()
+            : mode === 'edta_vials'
+              ? EDTA_VIAL_TEST_CODES.slice()
+              : mode === 'citrate_vials'
+                ? CITRATE_VIAL_TEST_CODES.slice()
+                : null;
+
     const result = {
         startedAt,
         readOnly: true,
         source: 'sql',
         mode,
-        testCodes: mode === 'urine_containers' ? URINE_CONTAINER_TEST_CODES.slice() : null,
+        testCodes: pinnedCodes,
         listecApiBase: apiBaseClean,
         primaryUrl: null,
         backupUrlUsed: false,
@@ -269,10 +288,18 @@ async function runViaSql(programOpts) {
 
     if (dryRun) {
         const dryUrls = qsList.map((q) => `GET ${apiBaseClean}/api/worksheet-reports/packages?${q}`);
+        const multiLabel =
+            mode === 'urine_containers'
+                ? 'urine container OR-union'
+                : mode === 'edta_vials'
+                  ? 'EDTA vial OR-union'
+                  : mode === 'citrate_vials'
+                    ? 'Citrate vial OR-union'
+                    : 'multi-code';
         result.message =
             qsList.length === 1
                 ? `dry-run: would call ${dryUrls[0]}`
-                : `dry-run: would call ${qsList.length} Listec endpoints (urine container OR-union):\n  ${dryUrls.join('\n  ')}`;
+                : `dry-run: would call ${qsList.length} Listec endpoints (${multiLabel}):\n  ${dryUrls.join('\n  ')}`;
         try {
             fs.mkdirSync(outDir, { recursive: true });
             outMainPath = path.join(outDir, `run-${stamp}.json`);
@@ -369,6 +396,36 @@ async function runViaSql(programOpts) {
             byTestCode
         };
     }
+    if (mode === 'edta_vials') {
+        const byTestCode = {};
+        for (const { code, payload: p } of perCallResults) {
+            if (!code) continue;
+            byTestCode[code] = {
+                sids: Array.isArray(p.sids) ? p.sids.length : 0,
+                rows: Number(p.rowCount) || 0
+            };
+        }
+        result.edtaVials = {
+            sidsTotal: sids.length,
+            testCodes: EDTA_VIAL_TEST_CODES.slice(),
+            byTestCode
+        };
+    }
+    if (mode === 'citrate_vials') {
+        const byTestCode = {};
+        for (const { code, payload: p } of perCallResults) {
+            if (!code) continue;
+            byTestCode[code] = {
+                sids: Array.isArray(p.sids) ? p.sids.length : 0,
+                rows: Number(p.rowCount) || 0
+            };
+        }
+        result.citrateVials = {
+            sidsTotal: sids.length,
+            testCodes: CITRATE_VIAL_TEST_CODES.slice(),
+            byTestCode
+        };
+    }
 
     result.sidsFoundOnPage1 = sids;
     result.pager = { found: false, message: 'sql source — single batch, no grid pager' };
@@ -401,7 +458,7 @@ async function runViaSql(programOpts) {
             startedAt,
             source: 'sql',
             mode,
-            testCodes: mode === 'urine_containers' ? URINE_CONTAINER_TEST_CODES.slice() : null,
+            testCodes: pinnedCodes,
             listecApiBase: apiBaseClean,
             filter: { ...filters },
             filtersApplied: result.filtersApplied,
@@ -413,6 +470,8 @@ async function runViaSql(programOpts) {
             labelOccurrences,
             otherTestsRowCount,
             urineContainers: result.urineContainers || null,
+            edtaVials: result.edtaVials || null,
+            citrateVials: result.citrateVials || null,
             recoveryEvents: [],
             completedPagerPages: [1],
             lastCompletedPagerPage: 1,
@@ -430,7 +489,11 @@ async function runViaSql(programOpts) {
         const modeNote =
             mode === 'urine_containers'
                 ? ` [urine: ${result.urineContainers.sidsTotal} container(s) from ${URINE_CONTAINER_TEST_CODES.join('+')}]`
-                : '';
+                : mode === 'edta_vials'
+                  ? ` [edta: ${result.edtaVials.sidsTotal} vial(s) from ${EDTA_VIAL_TEST_CODES.join('+')}]`
+                  : mode === 'citrate_vials'
+                    ? ` [citrate: ${result.citrateVials.sidsTotal} vial(s) from ${CITRATE_VIAL_TEST_CODES.join('+')}]`
+                    : '';
         console.log(
             `[sql] ${rowCount} row(s), ${sids.length} SID(s), ${uniqueLabelCount} unique label(s), ${otherTestsRowCount} Other tests row(s).${modeNote}`
         );

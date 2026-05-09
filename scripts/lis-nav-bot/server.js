@@ -272,10 +272,22 @@ function buildTileFromRunFiles(outDir, packagesFileName) {
     const mode =
         (main && main.mode === 'urine_containers' && 'urine_containers') ||
         (pkg.mode === 'urine_containers' && 'urine_containers') ||
+        (main && main.mode === 'edta_vials' && 'edta_vials') ||
+        (pkg.mode === 'edta_vials' && 'edta_vials') ||
+        (main && main.mode === 'citrate_vials' && 'citrate_vials') ||
+        (pkg.mode === 'citrate_vials' && 'citrate_vials') ||
         'general';
     const urineContainers =
         mode === 'urine_containers'
             ? (main && main.urineContainers) || (pkg.urineContainers && typeof pkg.urineContainers === 'object' ? pkg.urineContainers : null)
+            : null;
+    const edtaVials =
+        mode === 'edta_vials'
+            ? (main && main.edtaVials) || (pkg.edtaVials && typeof pkg.edtaVials === 'object' ? pkg.edtaVials : null)
+            : null;
+    const citrateVials =
+        mode === 'citrate_vials'
+            ? (main && main.citrateVials) || (pkg.citrateVials && typeof pkg.citrateVials === 'object' ? pkg.citrateVials : null)
             : null;
     // org_id was added in Phase 10. Files written before that have neither key
     // — we treat them as belonging to 'org-default' so single-tenant deploys
@@ -292,6 +304,8 @@ function buildTileFromRunFiles(outDir, packagesFileName) {
         source,
         mode,
         urineContainers,
+        edtaVials,
+        citrateVials,
         orgId,
         bu,
         fromDate: filter.fromDate != null ? String(filter.fromDate) : req.fromDate != null ? String(req.fromDate) : null,
@@ -589,10 +603,22 @@ app.post('/api/run', requireRunStarter, async (req, res) => {
     // it requires the SQL source because the scrape path doesn't accept testCode
     // multi-targeting and would silently fall back to whatever the LIS UI picks.
     const modeRaw = body && body.mode != null ? String(body.mode) : 'general';
-    const mode = modeRaw === 'urine_containers' ? 'urine_containers' : 'general';
-    if (mode === 'urine_containers' && source !== 'sql') {
+    const mode =
+        modeRaw === 'urine_containers'
+            ? 'urine_containers'
+            : modeRaw === 'edta_vials'
+              ? 'edta_vials'
+              : modeRaw === 'citrate_vials'
+                ? 'citrate_vials'
+                : 'general';
+    if ((mode === 'urine_containers' || mode === 'edta_vials' || mode === 'citrate_vials') && source !== 'sql') {
         return res.status(400).json({
-            error: 'Urine container counting requires SQL source. Switch to "SQL (Listec)".'
+            error:
+                mode === 'citrate_vials'
+                    ? 'Citrate vial counting requires SQL source. Switch to "SQL (Listec)".'
+                    : mode === 'edta_vials'
+                      ? 'EDTA vial counting requires SQL source. Switch to "SQL (Listec)".'
+                      : 'Urine container counting requires SQL source. Switch to "SQL (Listec)".'
         });
     }
 
@@ -628,7 +654,14 @@ app.post('/api/run', requireRunStarter, async (req, res) => {
                 source,
                 mode,
                 org_id: orgId,
-                test_codes: mode === 'urine_containers' ? ['cp004', 'mb034'] : null,
+                test_codes:
+                    mode === 'urine_containers'
+                        ? ['cp004', 'mb034']
+                        : mode === 'edta_vials'
+                          ? ['he011', 'he022', 'he006', 'he055', 'bi127']
+                          : mode === 'citrate_vials'
+                            ? ['he030', 'he004', 'he016', 'hem001']
+                            : null,
                 business_units: businessUnits.length ? businessUnits : (body && body.bu ? [body.bu] : []),
                 from_date: body && body.fromDate ? String(body.fromDate) : null,
                 to_date: body && body.toDate ? String(body.toDate) : null,

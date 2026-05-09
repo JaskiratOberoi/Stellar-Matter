@@ -18,6 +18,8 @@ export function Topbar({
         { id: 'letterheads', label: 'Letter Heads' },
         { id: 'envelopes', label: 'Envelopes' },
         { id: 'urine_containers', label: 'Urine Containers' },
+        { id: 'edta_vials', label: 'EDTA Vials' },
+        { id: 'citrate_vials', label: 'Citrate' },
         { id: 'history', label: 'History' }
     ];
     return (

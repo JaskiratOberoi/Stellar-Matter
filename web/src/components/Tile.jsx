@@ -2,6 +2,44 @@ import { aggregatePages, makeOtherTestsPinned, tileEnvelopes, topLabelFromTile }
 import { fmtDateRange, tileEyebrow } from '../lib/format.js';
 
 function metricFor(kind, tile, clientPagesByNorm) {
+    if (kind === 'citrate_vials') {
+        const cv = tile.citrateVials || {};
+        const btc = cv.byTestCode && typeof cv.byTestCode === 'object' ? cv.byTestCode : {};
+        const codes = Object.keys(btc).sort();
+        const totalRows = codes.reduce((s, c) => s + (Number(btc[c] && btc[c].rows) || 0), 0);
+        const subParts = codes.map((code) => {
+            const row = btc[code] || { sids: 0, rows: 0 };
+            return `${(row.sids || 0).toLocaleString('en-US')} ${code}`;
+        });
+        const subline = subParts.length
+            ? `${subParts.join(' + ')} (${totalRows.toLocaleString('en-US')} tests)`
+            : 'No assay breakdown';
+        return {
+            num: (cv.sidsTotal || 0).toLocaleString('en-US'),
+            label: subline,
+            estimated: false,
+            estimatedLabel: null
+        };
+    }
+    if (kind === 'edta_vials') {
+        const ev = tile.edtaVials || {};
+        const btc = ev.byTestCode && typeof ev.byTestCode === 'object' ? ev.byTestCode : {};
+        const codes = Object.keys(btc).sort();
+        const totalRows = codes.reduce((s, c) => s + (Number(btc[c] && btc[c].rows) || 0), 0);
+        const subParts = codes.map((code) => {
+            const row = btc[code] || { sids: 0, rows: 0 };
+            return `${(row.sids || 0).toLocaleString('en-US')} ${code}`;
+        });
+        const subline = subParts.length
+            ? `${subParts.join(' + ')} (${totalRows.toLocaleString('en-US')} tests)`
+            : 'No assay breakdown';
+        return {
+            num: (ev.sidsTotal || 0).toLocaleString('en-US'),
+            label: subline,
+            estimated: false,
+            estimatedLabel: null
+        };
+    }
     if (kind === 'urine_containers') {
         // Tile data shape comes from buildTileFromRunFiles in server.js: a
         // urine-container artefact carries tile.urineContainers = { sidsTotal,

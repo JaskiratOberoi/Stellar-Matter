@@ -2,16 +2,20 @@ import { fmtDateRange } from '../lib/format.js';
 import {
     projectLetterheads,
     projectEnvelopes,
-    projectUrineContainers
+    projectUrineContainers,
+    projectEdtaVials,
+    projectCitrateVials
 } from '../lib/tracer.js';
 
-/** @param {{ bu: string, fromDate: string, toDate: string, generalTile: object|null, urineTile: object|null, clientPagesByNorm: Record<string, number>, isPrintTarget?: boolean, onPrintSection?: () => void, onOpenDetail?: (tile: object | null, kind: string) => void }} props */
+/** @param {{ bu: string, fromDate: string, toDate: string, generalTile: object|null, urineTile: object|null, edtaTile: object|null, citrateTile: object|null, clientPagesByNorm: Record<string, number>, isPrintTarget?: boolean, onPrintSection?: () => void, onOpenDetail?: (tile: object | null, kind: string) => void }} props */
 export function TracerBanner({
     bu,
     fromDate,
     toDate,
     generalTile,
     urineTile,
+    edtaTile,
+    citrateTile,
     clientPagesByNorm,
     isPrintTarget,
     onPrintSection,
@@ -20,6 +24,8 @@ export function TracerBanner({
     const lh = generalTile ? projectLetterheads(generalTile, clientPagesByNorm) : { headline: '0', subline: 'No data', estimated: false };
     const env = generalTile ? projectEnvelopes(generalTile, clientPagesByNorm) : { headline: '0 BIG / 0 SMALL', subline: '0 total', estimated: false };
     const ur = urineTile ? projectUrineContainers(urineTile) : { headline: '0', subline: 'No data' };
+    const ed = edtaTile ? projectEdtaVials(edtaTile) : { headline: '0', subline: 'No data' };
+    const ct = citrateTile ? projectCitrateVials(citrateTile) : { headline: '0', subline: 'No data' };
     const rangeLabel = fmtDateRange(fromDate, toDate);
 
     const Card = ({ title, headline, subline, est, onOpen }) => (
@@ -70,6 +76,20 @@ export function TracerBanner({
                     subline={ur.subline}
                     est={false}
                     onOpen={urineTile && onOpenDetail ? () => onOpenDetail(urineTile, 'urine_containers') : undefined}
+                />
+                <Card
+                    title="EDTA Vials"
+                    headline={ed.headline}
+                    subline={ed.subline}
+                    est={false}
+                    onOpen={edtaTile && onOpenDetail ? () => onOpenDetail(edtaTile, 'edta_vials') : undefined}
+                />
+                <Card
+                    title="Citrate"
+                    headline={ct.headline}
+                    subline={ct.subline}
+                    est={false}
+                    onOpen={citrateTile && onOpenDetail ? () => onOpenDetail(citrateTile, 'citrate_vials') : undefined}
                 />
             </div>
         </section>

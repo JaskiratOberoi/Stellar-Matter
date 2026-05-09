@@ -230,6 +230,8 @@ async function migrate() {
             `CREATE INDEX IF NOT EXISTS runs_started_idx
              ON runs (started_at DESC);`
         );
+        await client.query(`ALTER TABLE runs ADD COLUMN IF NOT EXISTS edta_vials JSONB`);
+        await client.query(`ALTER TABLE runs ADD COLUMN IF NOT EXISTS citrate_vials JSONB`);
 
         // run_packages: one row per (run_id, label). position preserves the
         // count-desc ordering buildTileFromRunFiles() computes so the

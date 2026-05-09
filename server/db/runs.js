@@ -129,11 +129,23 @@ function projectRun(id, { main, pkg, mainPath, pkgPath }, normalizedMap) {
     const mode =
         (main && main.mode === 'urine_containers' && 'urine_containers') ||
         (pkg && pkg.mode === 'urine_containers' && 'urine_containers') ||
+        (main && main.mode === 'edta_vials' && 'edta_vials') ||
+        (pkg && pkg.mode === 'edta_vials' && 'edta_vials') ||
+        (main && main.mode === 'citrate_vials' && 'citrate_vials') ||
+        (pkg && pkg.mode === 'citrate_vials' && 'citrate_vials') ||
         'general';
     const urineContainers =
         mode === 'urine_containers'
             ? (main && main.urineContainers) ||
               (pkg && pkg.urineContainers && typeof pkg.urineContainers === 'object' ? pkg.urineContainers : null)
+            : null;
+    const edtaVials =
+        mode === 'edta_vials'
+            ? (main && main.edtaVials) || (pkg && pkg.edtaVials && typeof pkg.edtaVials === 'object' ? pkg.edtaVials : null)
+            : null;
+    const citrateVials =
+        mode === 'citrate_vials'
+            ? (main && main.citrateVials) || (pkg && pkg.citrateVials && typeof pkg.citrateVials === 'object' ? pkg.citrateVials : null)
             : null;
     const orgId = String(
         (main && main.org_id != null && main.org_id) ||
@@ -174,6 +186,8 @@ function projectRun(id, { main, pkg, mainPath, pkgPath }, normalizedMap) {
         envelopesSmall: envelopes.small,
         envelopesUnknown: envelopes.unknown,
         urineContainers,
+        edtaVials,
+        citrateVials,
         filter,
         filtersApplied,
         filtersRequested: req,
@@ -231,7 +245,7 @@ async function ingestRun(client, outDir, id, opts = {}) {
             from_date, to_date, from_hour, to_hour, dry_run, exit_code,
             errors_count, sids_count, unique_label_count, other_tests_row_count,
             total_printed_pages, envelopes_big, envelopes_small, envelopes_unknown,
-            urine_containers, filter, filters_applied, filters_requested, paths,
+            urine_containers, edta_vials, citrate_vials, filter, filters_applied, filters_requested, paths,
             source_file_mtime
          )
          VALUES (
@@ -239,8 +253,8 @@ async function ingestRun(client, outDir, id, opts = {}) {
             $8, $9, $10, $11, $12, $13,
             $14, $15, $16, $17,
             $18, $19, $20, $21,
-            $22, $23, $24, $25, $26,
-            $27
+            $22, $23, $24, $25, $26, $27, $28,
+            $29
          )
          ON CONFLICT (id) DO UPDATE SET
             org_id = EXCLUDED.org_id,
@@ -264,6 +278,8 @@ async function ingestRun(client, outDir, id, opts = {}) {
             envelopes_small = EXCLUDED.envelopes_small,
             envelopes_unknown = EXCLUDED.envelopes_unknown,
             urine_containers = EXCLUDED.urine_containers,
+            edta_vials = EXCLUDED.edta_vials,
+            citrate_vials = EXCLUDED.citrate_vials,
             filter = EXCLUDED.filter,
             filters_applied = EXCLUDED.filters_applied,
             filters_requested = EXCLUDED.filters_requested,
@@ -292,6 +308,8 @@ async function ingestRun(client, outDir, id, opts = {}) {
             projected.envelopesSmall,
             projected.envelopesUnknown,
             projected.urineContainers ? JSON.stringify(projected.urineContainers) : null,
+            projected.edtaVials ? JSON.stringify(projected.edtaVials) : null,
+            projected.citrateVials ? JSON.stringify(projected.citrateVials) : null,
             JSON.stringify(projected.filter || {}),
             projected.filtersApplied ? JSON.stringify(projected.filtersApplied) : null,
             JSON.stringify(projected.filtersRequested || {}),
@@ -455,6 +473,8 @@ function tileFromRow(r, labelRows) {
         source: r.source,
         mode: r.mode,
         urineContainers: r.urine_containers || null,
+        edtaVials: r.edta_vials || null,
+        citrateVials: r.citrate_vials || null,
         orgId: r.org_id,
         bu: r.bu || '—',
         fromDate: r.from_date,

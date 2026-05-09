@@ -46,11 +46,14 @@ export function RunSidebar({
     // sqlOnlyLocked: users with app role 'admin' — Data source radios are
     // hidden; SQL is the only allowed source (enforced on POST /api/run too).
     const isUrine = mode === 'urine_containers';
+    const isEdta = mode === 'edta_vials';
+    const isCitrate = mode === 'citrate_vials';
+    const pinMultiCode = isUrine || isEdta || isCitrate;
     const lockedSql = !!sqlOnlyLocked;
     const [form, setForm] = useState(() => ({
         ...BLANK_FORM,
         source:
-            isUrine || lockedSql
+            pinMultiCode || lockedSql
                 ? 'sql'
                 : readString(LS_SOURCE, 'scrape') === 'sql'
                   ? 'sql'
@@ -58,14 +61,14 @@ export function RunSidebar({
     }));
 
     useEffect(() => {
-        if ((isUrine || lockedSql) && form.source !== 'sql') {
+        if ((pinMultiCode || lockedSql) && form.source !== 'sql') {
             setForm((prev) => ({ ...prev, source: 'sql' }));
         }
-    }, [isUrine, lockedSql, form.source]);
+    }, [pinMultiCode, lockedSql, form.source]);
 
     useEffect(() => {
-        if (!isUrine && !lockedSql) writeString(LS_SOURCE, form.source);
-    }, [form.source, isUrine, lockedSql]);
+        if (!isUrine && !isEdta && !isCitrate && !lockedSql) writeString(LS_SOURCE, form.source);
+    }, [form.source, isUrine, isEdta, isCitrate, lockedSql]);
 
     function update(name, value) {
         setForm((prev) => ({ ...prev, [name]: value }));
@@ -89,6 +92,14 @@ export function RunSidebar({
             body.source = 'sql';
             // Strip any stale free-text testCode — server pins cp004+mb034 from the mode flag.
             delete body.testCode;
+        } else if (isEdta) {
+            body.mode = 'edta_vials';
+            body.source = 'sql';
+            delete body.testCode;
+        } else if (isCitrate) {
+            body.mode = 'citrate_vials';
+            body.source = 'sql';
+            delete body.testCode;
         } else if (lockedSql) {
             body.source = 'sql';
         }
@@ -100,12 +111,16 @@ export function RunSidebar({
     }
 
     const wantSql = form.source === 'sql';
-    const showScrapeOnly = !wantSql && !isUrine && !lockedSql;
+    const showScrapeOnly = !wantSql && !isUrine && !isEdta && !isCitrate && !lockedSql;
     const sourceHint = isUrine
         ? 'Urine container mode is locked to SQL. Each run fires two parallel Listec calls (cp004 + mb034) and unions the SIDs.'
-        : wantSql
-        ? 'Calls the Listec service (LISTEC_API_BASE_URL, default http://127.0.0.1:3100) — multi-BU runs allowed.'
-        : 'Drives the LIS web grid via headless Chromium. Multi-BU runs require SQL.';
+        : isEdta
+          ? 'EDTA vials mode is locked to SQL. Each run fires five parallel Listec calls and unions SIDs so each patient counts once.'
+          : isCitrate
+            ? 'Citrate mode is locked to SQL. Each run fires four parallel Listec calls and unions SIDs so each patient counts once.'
+            : wantSql
+          ? 'Calls the Listec service (LISTEC_API_BASE_URL, default http://127.0.0.1:3100) — multi-BU runs allowed.'
+          : 'Drives the LIS web grid via headless Chromium. Multi-BU runs require SQL.';
 
     return (
         <aside className={`run-sidebar${collapsed ? ' collapsed-visual' : ''}`} aria-labelledby="sidebar-title">
@@ -127,6 +142,20 @@ export function RunSidebar({
                                             <span className="chip chip-tool urine-pin-chip">Pinned: cp004 OR mb034</span>
                                         </p>
                                     )}
+                                    {isEdta && (
+                                        <p className="muted small source-hint edta-pin-banner">
+                                            <span className="chip chip-tool edta-pin-chip">
+                                                Pinned: he011 OR he022 OR he006 OR he055 OR bi127
+                                            </span>
+                                        </p>
+                                    )}
+                                    {isCitrate && (
+                                        <p className="muted small source-hint citrate-pin-banner">
+                                            <span className="chip chip-tool citrate-pin-chip">
+                                                Pinned: he030 OR he004 OR he016 OR hem001
+                                            </span>
+                                        </p>
+                                    )}
                                     <p className="muted small source-hint">{sourceHint}</p>
                                 </>
                             ) : (
@@ -137,7 +166,7 @@ export function RunSidebar({
                                             name="source"
                                             value="scrape"
                                             checked={form.source === 'scrape'}
-                                            disabled={isUrine}
+                                            disabled={pinMultiCode}
                                             onChange={() => update('source', 'scrape')}
                                         />{' '}
                                         Web scrape
@@ -148,7 +177,7 @@ export function RunSidebar({
                                             name="source"
                                             value="sql"
                                             checked={form.source === 'sql'}
-                                            disabled={isUrine}
+                                            disabled={pinMultiCode}
                                             onChange={() => update('source', 'sql')}
                                         />{' '}
                                         SQL (Listec)
@@ -156,6 +185,20 @@ export function RunSidebar({
                                     {isUrine && (
                                         <p className="muted small source-hint urine-pin-banner">
                                             <span className="chip chip-tool urine-pin-chip">Pinned: cp004 OR mb034</span>
+                                        </p>
+                                    )}
+                                    {isEdta && (
+                                        <p className="muted small source-hint edta-pin-banner">
+                                            <span className="chip chip-tool edta-pin-chip">
+                                                Pinned: he011 OR he022 OR he006 OR he055 OR bi127
+                                            </span>
+                                        </p>
+                                    )}
+                                    {isCitrate && (
+                                        <p className="muted small source-hint citrate-pin-banner">
+                                            <span className="chip chip-tool citrate-pin-chip">
+                                                Pinned: he030 OR he004 OR he016 OR hem001
+                                            </span>
                                         </p>
                                     )}
                                     <p className="muted small source-hint">{sourceHint}</p>
@@ -253,6 +296,20 @@ export function RunSidebar({
                                             title="Locked by Urine Containers tab — server fires cp004 + mb034 in parallel"
                                         >
                                             cp004 OR mb034
+                                        </span>
+                                    ) : isEdta ? (
+                                        <span
+                                            className="chip chip-tool edta-pin-chip"
+                                            title="Locked by EDTA Vials tab — server fires five test codes in parallel"
+                                        >
+                                            he011 OR he022 OR he006 OR he055 OR bi127
+                                        </span>
+                                    ) : isCitrate ? (
+                                        <span
+                                            className="chip chip-tool citrate-pin-chip"
+                                            title="Locked by Citrate tab — server fires four test codes in parallel"
+                                        >
+                                            he030 OR he004 OR he016 OR hem001
                                         </span>
                                     ) : (
                                         <input
@@ -361,7 +418,7 @@ export function RunSidebar({
                     </div>
                     <div className="form-actions">
                         <button type="submit" className="btn-primary" disabled={busy}>
-                            {isUrine ? 'Run urine container count' : 'Run'}
+                            {isUrine ? 'Run urine container count' : isEdta ? 'Run EDTA vials count' : isCitrate ? 'Run Citrate count' : 'Run'}
                         </button>
                         <button type="button" className="btn-secondary chip-like" onClick={onClearLedger}>
                             Clear ledger
