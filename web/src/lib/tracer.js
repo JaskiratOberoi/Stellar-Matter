@@ -166,16 +166,31 @@ export function mapTilesToBanners(tiles, selectedBus, batchStartedIso, fromDate,
 
 /**
  * Poll until server is not running a job.
+ *
+ * Default budget is 20 minutes per step. The Tracer chains six sequential
+ * runs (general -> urine -> EDTA -> citrate -> S.Heparin -> L.Heparin) and
+ * each can fan out across N business units * M test codes; for a multi-BU
+ * full-month range the EDTA step alone can run several minutes against
+ * Listec. The previous 3-minute cap caused the frontend to give up while
+ * the server was still happily processing, leaving the run pill spinning
+ * and the user staring at a misleading "timed out" error.
+ *
+ * If the budget is genuinely exceeded the thrown error makes it explicit
+ * that the server may still be running so the user knows to refresh
+ * rather than re-trigger and risk a queued duplicate.
+ *
  * @param {() => Promise<Response>} fetchStatus
  */
-export async function waitForRunIdle(fetchStatus, { maxWaitMs = 180000, intervalMs = 1500 } = {}) {
+export async function waitForRunIdle(fetchStatus, { maxWaitMs = 1200000, intervalMs = 2000 } = {}) {
     const start = Date.now();
     for (;;) {
         const r = await fetchStatus();
         const j = await r.json().catch(() => ({}));
         if (j && j.state !== 'running') return j;
         if (Date.now() - start > maxWaitMs) {
-            throw new Error('Run timed out waiting for server to go idle.');
+            throw new Error(
+                `Run still in progress after ${Math.round(maxWaitMs / 60000)} minutes. The server is likely still processing — wait for the topbar pill to clear, then refresh the page to see results before starting another run.`
+            );
         }
         await new Promise((res) => setTimeout(res, intervalMs));
     }
