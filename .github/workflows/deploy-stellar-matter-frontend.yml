@@ -18,7 +18,7 @@ concurrency:
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -52,10 +52,17 @@ jobs:
       # Hostinger shared hosting decouples FTP and SSH passwords on this account, so
       # we deploy over SSH (key auth). rsync --delete keeps Vite's hashed bundles
       # drift-free between releases.
+      #
+      # Outbound SSH from GitHub-hosted runners occasionally hits long TCP timeouts
+      # or transient routing issues to shared hosting. Use ConnectTimeout so a bad
+      # attempt fails in ~25s instead of ~2m, and retry a few times before failing.
       - name: Configure SSH for Hostinger
         env:
           SSH_PRIVATE_KEY: ${{ secrets.HOSTINGER_SSH_PRIVATE_KEY }}
           SSH_KNOWN_HOSTS: ${{ secrets.HOSTINGER_SSH_KNOWN_HOSTS }}
+          SSH_PORT: ${{ secrets.HOSTINGER_SSH_PORT }}
+          SSH_USER: ${{ secrets.HOSTINGER_SSH_USERNAME }}
+          SSH_HOST: ${{ secrets.HOSTINGER_SSH_HOST }}
         run: |
           mkdir -p ~/.ssh
           chmod 700 ~/.ssh
@@ -64,10 +71,19 @@ jobs:
           printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
           chmod 644 ~/.ssh/known_hosts
           ssh-keygen -lf ~/.ssh/id_ed25519
-          ssh -p "${{ secrets.HOSTINGER_SSH_PORT }}" -i ~/.ssh/id_ed25519 \
-              -o StrictHostKeyChecking=yes -o BatchMode=yes \
-              "${{ secrets.HOSTINGER_SSH_USERNAME }}@${{ secrets.HOSTINGER_SSH_HOST }}" \
-              'echo OK; id; pwd'
+          SSH_BASE_OPTS="-o StrictHostKeyChecking=yes -o BatchMode=yes -o ConnectTimeout=25 -o ServerAliveInterval=10 -o ServerAliveCountMax=3"
+          TARGET="${SSH_USER}@${SSH_HOST}"
+          for attempt in 1 2 3 4; do
+            echo "::notice::SSH probe attempt ${attempt}/4 to ${SSH_HOST}:${SSH_PORT}..."
+            if ssh -p "${SSH_PORT}" -i ~/.ssh/id_ed25519 ${SSH_BASE_OPTS} "${TARGET}" 'echo OK; id; pwd'; then
+              exit 0
+            fi
+            if [ "${attempt}" -eq 4 ]; then
+              echo "::error::SSH to Hostinger failed after 4 attempts. Check Hostinger SSH is up, host/port secrets, and whether inbound SSH from GitHub-hosted runners is allowed (some hosts restrict by IP; compare ranges from GET https://api.github.com/meta with hPanel → SSH / firewall rules)."
+              exit 1
+            fi
+            sleep 25
+          done
 
       - name: Deploy to Hostinger via rsync over SSH
         env:
@@ -79,10 +95,21 @@ jobs:
           # if you only have one site configured today.
           DEST_PATH: ${{ secrets.HOSTINGER_MATTER_SSH_PATH || secrets.HOSTINGER_SSH_PATH }}
         run: |
-          rsync -avz --delete \
-            --exclude='.git*' --exclude='node_modules' \
-            -e "ssh -p ${DEST_PORT} -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=yes -o BatchMode=yes" \
-            web/dist/ "${DEST_USER}@${DEST_HOST}:${DEST_PATH}"
+          SSH_BASE_OPTS="-o StrictHostKeyChecking=yes -o BatchMode=yes -o ConnectTimeout=25 -o ServerAliveInterval=10 -o ServerAliveCountMax=3"
+          for attempt in 1 2 3 4; do
+            echo "::notice::rsync attempt ${attempt}/4..."
+            if rsync -avz --delete \
+              --exclude='.git*' --exclude='node_modules' \
+              -e "ssh -p ${DEST_PORT} -i ~/.ssh/id_ed25519 ${SSH_BASE_OPTS}" \
+              web/dist/ "${DEST_USER}@${DEST_HOST}:${DEST_PATH}"; then
+              exit 0
+            fi
+            if [ "${attempt}" -eq 4 ]; then
+              echo "::error::rsync over SSH failed after 4 attempts."
+              exit 1
+            fi
+            sleep 25
+          done
 
       - name: Verify live site responds
         # Soft-fail: rsync deploy is what we actually care about. The live URL
