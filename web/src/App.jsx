@@ -157,6 +157,7 @@ export function App() {
                     reloadTiles={reloadTiles}
                     submit={handleSubmit}
                     running={running}
+                    runFanOut={fanOut}
                     clientPagesByNorm={clientPagesByNorm}
                     buOptions={{ options, error: buError }}
                     buSelected={buSelected}

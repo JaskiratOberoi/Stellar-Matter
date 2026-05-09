@@ -6,6 +6,7 @@ import { TracerBanner } from '../components/TracerBanner.jsx';
 import '../styles/tracer.css';
 import { TracerForm } from '../components/TracerForm.jsx';
 import { RunModal } from '../components/RunModal.jsx';
+import { RunProgress } from '../components/RunProgress.jsx';
 
 /**
  * @param {{
@@ -14,6 +15,7 @@ import { RunModal } from '../components/RunModal.jsx';
  *   reloadTiles: () => Promise<void>,
  *   submit: (body: object) => Promise<{ ok: boolean, error?: string }>,
  *   running: boolean,
+ *   runFanOut?: object | null,
  *   clientPagesByNorm: Record<string, number>,
  *   buOptions: { options: { id: string, label: string }[], error: string | null },
  *   buSelected: Set<string>,
@@ -29,6 +31,7 @@ export function TracerPage({
     reloadTiles,
     submit,
     running,
+    runFanOut,
     clientPagesByNorm,
     buOptions,
     buSelected,
@@ -51,6 +54,7 @@ export function TracerPage({
 
     const pendingBannerRef = useRef( /** @type {null | { batchIso: string, from: string, to: string, bus: Set<string> }} */ (null));
     const busy = running || tracerBusy;
+    const showFanOut = running && !!runFanOut;
 
     const tilesForIndex = visibleTiles ?? tiles;
 
@@ -174,6 +178,14 @@ export function TracerPage({
                             {bannerRows.length} business unit{bannerRows.length === 1 ? '' : 's'}
                         </p>
                     ) : null}
+                </div>
+
+                <div className="tracer-hide-print">
+                    {showFanOut && <RunProgress payload={runFanOut} />}
+                    {running && !showFanOut && <RunProgress fallbackText="Starting run…" />}
+                    {!running && tracerBusy && (
+                        <RunProgress fallbackText="Preparing next tracer step…" />
+                    )}
                 </div>
 
                 <TracerForm
