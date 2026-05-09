@@ -33,7 +33,7 @@ export function Topbar({
                 <div className="topbar-brand">
                     <h1 className="wordmark">Stellar Matter</h1>
                     <p className="muted topbar-tagline">
-                        <span>Official counter for materials in Genomics</span>
+                        <span>Official tally for materials in Genomics</span>
                     </p>
                 </div>
                 <nav className="tablist" role="tablist" aria-label="Main sections">
