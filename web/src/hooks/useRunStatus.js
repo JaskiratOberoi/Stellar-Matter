@@ -14,6 +14,17 @@ export function useRunStatus({ onIdle } = {}) {
     const [submitError, setSubmitError] = useState(null);
     const pollTimer = useRef(null);
     const wasRunningRef = useRef(false);
+    // Ref pattern keeps `tick`'s identity stable across App re-renders even
+    // when callers pass an inline `onIdle: () => reloadTiles()`. Without this,
+    // every App render produced a new `onIdle` → new `tick` → the
+    // mount-effect below fired again → an immediate /api/run/status poll on
+    // every render, multiplied by every state update from those polls. Result
+    // was a tight loop hammering the API. Polling now happens exactly once on
+    // mount + at the 1.5 s interval while a run is active.
+    const onIdleRef = useRef(onIdle);
+    useEffect(() => {
+        onIdleRef.current = onIdle;
+    }, [onIdle]);
 
     const stopPolling = useCallback(() => {
         if (pollTimer.current) {
@@ -31,8 +42,8 @@ export function useRunStatus({ onIdle } = {}) {
             setRunning(!!isRun);
             if (!isRun) {
                 stopPolling();
-                if (wasRunningRef.current && typeof onIdle === 'function') {
-                    onIdle(j);
+                if (wasRunningRef.current && typeof onIdleRef.current === 'function') {
+                    onIdleRef.current(j);
                 }
                 wasRunningRef.current = false;
             } else {
@@ -41,7 +52,7 @@ export function useRunStatus({ onIdle } = {}) {
         } catch {
             /* swallow — next tick retries */
         }
-    }, [onIdle, stopPolling]);
+    }, [stopPolling]);
 
     const startPolling = useCallback(() => {
         if (pollTimer.current) return;
