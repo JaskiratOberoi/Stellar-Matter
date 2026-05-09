@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { aggregateEnvelopes, aggregatePages, makeOtherTestsPinned } from '../lib/envelopes.js';
 import { fmtDateRange, tileEyebrow } from '../lib/format.js';
 import { PackagesTable } from './PackagesTable.jsx';
@@ -35,13 +36,17 @@ export function RunModal({ tile, kind, indexFromOne, clientPagesByNorm, onClose 
         return matched + (hasPinned ? 1 : 0);
     }, [rows, filter, hasPinned]);
 
-    // Open / close the native <dialog> exactly once per tile identity. Depending
-    // on tile?.id (a stable string) instead of the tile object reference means a
-    // background tiles refresh that hands us a fresh-but-equivalent object will
-    // NOT trigger close+reopen — so the user's scroll position is preserved.
-    const tileId = tile?.id || null;
+    // Open / close the native <dialog> once per stable run identity. Never use
+    // `tile?.id || null` (valid ids like 0 would suppress open). Portaled to
+    // document.body so ancestor overflow (e.g. .main-pane) cannot trap the modal.
+    const modalOpenKey = useMemo(() => {
+        if (!tile) return null;
+        const rawId = tile.id;
+        if (rawId != null && String(rawId) !== '') return String(rawId);
+        return `fb:${tile.bu}|${tile.startedAt || ''}|${tile.mode || ''}|${tile.fromDate || ''}|${tile.toDate || ''}`;
+    }, [tile]);
     useEffect(() => {
-        if (!tileId) return;
+        if (!modalOpenKey) return;
         setFilter('');
         const dlg = dialogRef.current;
         if (!dlg) return;
@@ -73,7 +78,7 @@ export function RunModal({ tile, kind, indexFromOne, clientPagesByNorm, onClose 
                 dlg.removeAttribute('open');
             }
         };
-    }, [tileId]);
+    }, [modalOpenKey]);
 
     if (!tile) return null;
 
@@ -108,7 +113,7 @@ export function RunModal({ tile, kind, indexFromOne, clientPagesByNorm, onClose 
         estChip = agg.unknownLabels > 0 ? 'estimated minimum' : null;
     }
 
-    return (
+    const dialog = (
         <dialog ref={dialogRef} className="run-modal">
             <div className="run-modal-inner nexus-card">
                 <header className="run-modal-header row-between">
@@ -168,6 +173,7 @@ export function RunModal({ tile, kind, indexFromOne, clientPagesByNorm, onClose 
             </div>
         </dialog>
     );
+    return createPortal(dialog, document.body);
 }
 
 /**

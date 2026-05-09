@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch } from '../apiClient.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
-import { mapTilesToBanners, waitForRunIdle } from '../lib/tracer.js';
+import { mapTilesToBanners, tracerBuKey, waitForRunIdle } from '../lib/tracer.js';
 import { TracerBanner } from '../components/TracerBanner.jsx';
 import '../styles/tracer.css';
 import { TracerForm } from '../components/TracerForm.jsx';
@@ -10,6 +10,7 @@ import { RunModal } from '../components/RunModal.jsx';
 /**
  * @param {{
  *   tiles: object[],
+ *   visibleTiles?: object[],
  *   reloadTiles: () => Promise<void>,
  *   submit: (body: object) => Promise<{ ok: boolean, error?: string }>,
  *   running: boolean,
@@ -24,6 +25,7 @@ import { RunModal } from '../components/RunModal.jsx';
  */
 export function TracerPage({
     tiles,
+    visibleTiles,
     reloadTiles,
     submit,
     running,
@@ -38,32 +40,61 @@ export function TracerPage({
     const { authRequired, user } = useAuth();
     const viewerDisabled = Boolean(authRequired && user && user.role === 'viewer');
 
-    const [banners, setBanners] = useState(
-        /** @type {{ bu: string, generalTile: object | null, urineTile: object | null }[]} */ ([])
+    const [bannerRows, setBannerRows] = useState(
+        /** @type {{ buKey: string, bu: string, fromDate: string, toDate: string, generalTile: object | null, urineTile: object | null }[]} */ ([])
     );
-    const [range, setRange] = useState({ from: '', to: '' });
     const [localError, setLocalError] = useState( /** @type {string | null} */ (null));
     const [tracerBusy, setTracerBusy] = useState(false);
     const [openTile, setOpenTile] = useState( /** @type {object | null} */ (null));
     const [openTileKind, setOpenTileKind] = useState('letterheads');
+    const [printFocusKey, setPrintFocusKey] = useState( /** @type {string | null} */ (null));
 
     const pendingBannerRef = useRef( /** @type {null | { batchIso: string, from: string, to: string, bus: Set<string> }} */ (null));
     const busy = running || tracerBusy;
+
+    const tilesForIndex = visibleTiles ?? tiles;
 
     useEffect(() => {
         const p = pendingBannerRef.current;
         if (!p) return;
         pendingBannerRef.current = null;
-        setBanners(mapTilesToBanners(tiles, p.bus, p.batchIso, p.from, p.to));
+        const incoming = mapTilesToBanners(tiles, p.bus, p.batchIso, p.from, p.to);
+        setBannerRows((prev) => {
+            const m = new Map(prev.map((r) => [r.buKey, { ...r }]));
+            for (const row of incoming) {
+                const k = tracerBuKey(row.bu);
+                m.set(k, {
+                    buKey: k,
+                    bu: row.bu,
+                    generalTile: row.generalTile,
+                    urineTile: row.urineTile,
+                    fromDate: p.from,
+                    toDate: p.to
+                });
+            }
+            return [...m.values()];
+        });
     }, [tiles]);
+
+    useEffect(() => {
+        const onAfterPrint = () => setPrintFocusKey(null);
+        window.addEventListener('afterprint', onAfterPrint);
+        return () => window.removeEventListener('afterprint', onAfterPrint);
+    }, []);
 
     const indexFromOne = useCallback(
         (tile) => {
-            const i = tiles.findIndex((t) => String(t.id) === String(tile.id));
-            return i + 1;
+            const i = tilesForIndex.findIndex((t) => String(t.id) === String(tile.id));
+            const n = i + 1;
+            return n > 0 ? n : 1;
         },
-        [tiles]
+        [tilesForIndex]
     );
+
+    const startPrintBu = useCallback((buKey) => {
+        setPrintFocusKey(buKey);
+        requestAnimationFrame(() => window.print());
+    }, []);
 
     const buildBody = useCallback((mode, snap) => {
         const body = { source: 'sql', mode };
@@ -89,7 +120,6 @@ export function TracerPage({
             if (bus.size === 0 && String(snap.bu || '').trim()) {
                 bus.add(String(snap.bu).trim());
             }
-            setRange({ from: snap.fromDate, to: snap.toDate });
             setTracerBusy(true);
             try {
                 const r1 = await submit(buildBody('general', snap));
@@ -121,13 +151,13 @@ export function TracerPage({
     );
 
     return (
-        <div className="tracer-page">
+        <div className={`tracer-page${printFocusKey ? ' tracer-print-single' : ''}`}>
             <div className="tracer-print-root">
                 <div className="tracer-print-header" aria-hidden="true">
                     <h1 className="tracer-print-title">Stellar Matter — Tracer</h1>
-                    {range.from && range.to ? (
+                    {bannerRows.length > 0 ? (
                         <p className="tracer-print-sub muted small">
-                            {range.from} – {range.to}
+                            {bannerRows.length} business unit{bannerRows.length === 1 ? '' : 's'}
                         </p>
                     ) : null}
                 </div>
@@ -151,15 +181,17 @@ export function TracerPage({
                 )}
 
                 <div className="tracer-banner-stack">
-                    {banners.map((row) => (
+                    {bannerRows.map((row) => (
                         <TracerBanner
-                            key={row.bu}
+                            key={row.buKey}
                             bu={row.bu}
-                            fromDate={range.from}
-                            toDate={range.to}
+                            fromDate={row.fromDate}
+                            toDate={row.toDate}
                             generalTile={row.generalTile}
                             urineTile={row.urineTile}
                             clientPagesByNorm={clientPagesByNorm}
+                            isPrintTarget={printFocusKey === row.buKey}
+                            onPrintSection={() => startPrintBu(row.buKey)}
                             onOpenDetail={(tile, kind) => {
                                 if (!tile) return;
                                 setOpenTile(tile);
@@ -171,9 +203,9 @@ export function TracerPage({
 
                 <div className="tracer-pdf-row tracer-hide-print">
                     <button type="button" className="btn-secondary" onClick={() => window.print()}>
-                        Download PDF
+                        Print all
                     </button>
-                    <span className="muted small">Uses your browser print dialog (Save as PDF).</span>
+                    <span className="muted small">Opens the browser print dialog (Save as PDF).</span>
                 </div>
             </div>
 
@@ -181,7 +213,7 @@ export function TracerPage({
                 <RunModal
                     tile={openTile}
                     kind={openTileKind}
-                    indexFromOne={indexFromOne(openTile) || 1}
+                    indexFromOne={indexFromOne(openTile)}
                     clientPagesByNorm={clientPagesByNorm}
                     onClose={() => setOpenTile(null)}
                 />

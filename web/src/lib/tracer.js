@@ -43,15 +43,15 @@ export function projectUrineContainers(tile) {
     };
 }
 
+/** Normalized key for merging Tracer banners (case- and trim-insensitive). */
+export function tracerBuKey(bu) {
+    return String(bu || '')
+        .trim()
+        .toLowerCase();
+}
+
 function buEq(a, b) {
-    return (
-        String(a || '')
-            .trim()
-            .toLowerCase() ===
-        String(b || '')
-            .trim()
-            .toLowerCase()
-    );
+    return tracerBuKey(a) === tracerBuKey(b);
 }
 
 /**

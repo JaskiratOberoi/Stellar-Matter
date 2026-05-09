@@ -151,6 +151,7 @@ export function App() {
             <main className="main-pane tracer-main">
                 <TracerPage
                     tiles={tiles}
+                    visibleTiles={visibleTiles}
                     reloadTiles={reloadTiles}
                     submit={handleSubmit}
                     running={running}

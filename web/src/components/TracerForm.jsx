@@ -33,10 +33,7 @@ export function TracerForm({ buOptions, buSelected, buActions, busy, viewerDisab
 
     return (
         <form className="tracer-form nexus-card tracer-hide-print" onSubmit={handleSubmit}>
-            <h2 className="eyebrow tracer-form-title">Run range</h2>
-            <p className="muted small tracer-form-hint">SQL source — select at least one business unit and a date range.</p>
-
-            <div className="field-block">
+            <div className="field-block tracer-form-first-field">
                 <span className="eyebrow-lite field-label">Date quick picks</span>
                 <DateChips
                     fromDate={fromDate}
