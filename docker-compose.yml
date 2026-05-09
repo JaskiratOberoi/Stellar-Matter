@@ -46,7 +46,10 @@ services:
       # Listec API base. host.docker.internal so the container can reach the
       # Listec service running on the host (Linux host overrides via
       # extra_hosts below).
-      LISTEC_API_BASE_URL: ${LISTEC_API_BASE_URL:-http://host.docker.internal:3100}
+      # Default to the in-network listec service. Override to
+      # http://host.docker.internal:3100 if you want to run Listec on the host
+      # for local debugging.
+      LISTEC_API_BASE_URL: ${LISTEC_API_BASE_URL:-http://listec:3100}
       # Pin the run-artefact dir to the bind-mounted host folder so writes
       # (lib/run.js -> cwd/out) and reads (server.js /api/runs/tiles) target
       # the same path regardless of cwd or __dirname. Without this they drift:
@@ -72,6 +75,46 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      listec:
+        condition: service_healthy
+
+  # Listec worksheet API — talks to Noble (LIS) MS SQL and serves
+  # /api/worksheet-reports/packages, /api/regions, /api/lookups consumed by
+  # api-matter. Source lives at Listec/integration/node-mssql; .env at
+  # Listec/.env (gitignored) carries the SQL credentials.
+  listec:
+    build: ./Listec/integration/node-mssql
+    restart: unless-stopped
+    env_file:
+      - ./Listec/.env
+    environment:
+      LISTEC_API_HOST: 0.0.0.0
+      LISTEC_API_PORT: "3100"
+      LISTEC_ALIAS_NO_WATCH: "1"
+      TZ: ${TZ:-Asia/Kolkata}
+    ports:
+      # Bind to host loopback so devs can curl http://127.0.0.1:3100 without
+      # exposing the SQL-fronted API on the LAN. Internal traffic from `app`
+      # uses the docker-compose network DNS (http://listec:3100).
+      - "127.0.0.1:${LISTEC_API_PORT:-3100}:3100"
+    volumes:
+      # Hot-edit region aliases without rebuild. regionAliases.ts watches this
+      # path; LISTEC_ALIAS_NO_WATCH=1 disables fs.watch (unreliable across
+      # Docker Desktop bind mounts) so changes apply on next request via the
+      # cache rebuild.
+      - ./Listec/integration/node-mssql/data:/app/dist/data
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "require('http').get('http://127.0.0.1:3100/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
 volumes:
   stellar_matter_pgdata:
