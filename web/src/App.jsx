@@ -84,9 +84,14 @@ export function App() {
     const hiddenCount = hiddenSet.size;
 
     const handleSubmit = useCallback(
-        async (body) => {
+        // Forward `opts` so callers can override the target endpoint — e.g.
+        // TracerPage POSTs to '/api/tracer-run' to fan out 6 modes × N BUs in
+        // one Listec call. Dropping opts here previously fell back to
+        // '/api/run' and ran the legacy single-mode flow with no bucketing,
+        // producing empty Urine/EDTA/Citrate/SHeparin/LHeparin tiles.
+        async (body, opts) => {
             setSubmitError(null);
-            const r = await submit(body);
+            const r = await submit(body, opts);
             if (!r.ok && r.error) setSubmitError(String(r.error));
             return r;
         },
