@@ -44,7 +44,7 @@ export function TracerPage({
     const viewerDisabled = Boolean(authRequired && user && user.role === 'viewer');
 
     const [bannerRows, setBannerRows] = useState(
-        /** @type {{ buKey: string, bu: string, fromDate: string, toDate: string, generalTile: object | null, urineTile: object | null, edtaTile: object | null, citrateTile: object | null }[]} */ ([])
+        /** @type {{ buKey: string, bu: string, fromDate: string, toDate: string, generalTile: object | null, urineTile: object | null, edtaTile: object | null, citrateTile: object | null, sHeparinTile: object | null, lHeparinTile: object | null }[]} */ ([])
     );
     const [localError, setLocalError] = useState( /** @type {string | null} */ (null));
     const [tracerBusy, setTracerBusy] = useState(false);
@@ -74,6 +74,8 @@ export function TracerPage({
                     urineTile: row.urineTile,
                     edtaTile: row.edtaTile,
                     citrateTile: row.citrateTile,
+                    sHeparinTile: row.sHeparinTile,
+                    lHeparinTile: row.lHeparinTile,
                     fromDate: p.from,
                     toDate: p.to
                 });
@@ -152,6 +154,18 @@ export function TracerPage({
                     return;
                 }
                 await waitForRunIdle(() => apiFetch('/api/run/status'));
+                const r5 = await submit(buildBody('s_heparin', snap));
+                if (!r5.ok) {
+                    setLocalError(String(r5.error || 'S.Heparin run failed'));
+                    return;
+                }
+                await waitForRunIdle(() => apiFetch('/api/run/status'));
+                const r6 = await submit(buildBody('l_heparin', snap));
+                if (!r6.ok) {
+                    setLocalError(String(r6.error || 'L.Heparin run failed'));
+                    return;
+                }
+                await waitForRunIdle(() => apiFetch('/api/run/status'));
                 pendingBannerRef.current = { batchIso, from: snap.fromDate, to: snap.toDate, bus };
                 try {
                     await reloadTiles();
@@ -217,6 +231,8 @@ export function TracerPage({
                             urineTile={row.urineTile}
                             edtaTile={row.edtaTile}
                             citrateTile={row.citrateTile}
+                            sHeparinTile={row.sHeparinTile}
+                            lHeparinTile={row.lHeparinTile}
                             clientPagesByNorm={clientPagesByNorm}
                             isPrintTarget={printFocusKey === row.buKey}
                             onPrintSection={() => startPrintBu(row.buKey)}

@@ -27,6 +27,14 @@ const EDTA_VIAL_TEST_CODES = ['he011', 'he022', 'he006', 'he055', 'bi127'];
 // Citrate vials — same multi-call + SID union as EDTA.
 const CITRATE_VIAL_TEST_CODES = ['he030', 'he004', 'he016', 'hem001'];
 
+// Sodium-heparin (S.Heparin) tubes — same multi-call + SID union pattern.
+const S_HEPARIN_TEST_CODES = ['ky004', 'cp3257'];
+
+// Lithium-heparin (L.Heparin) tubes — currently a single test code, but still
+// runs through the multi-call/union pipeline so future expansion (extra assays
+// sharing the same tube) is a one-line array edit and still SID-dedupes.
+const L_HEPARIN_TEST_CODES = ['ms091'];
+
 /**
  * Merge N Listec /worksheet-reports/packages payloads into a single
  * payload-equivalent so the rest of runViaSql doesn't need to care that we
@@ -238,11 +246,15 @@ async function runViaSql(programOpts) {
     if (rawMode === 'urine_containers') mode = 'urine_containers';
     else if (rawMode === 'edta_vials') mode = 'edta_vials';
     else if (rawMode === 'citrate_vials') mode = 'citrate_vials';
+    else if (rawMode === 's_heparin') mode = 's_heparin';
+    else if (rawMode === 'l_heparin') mode = 'l_heparin';
 
     let testCodesToRun;
     if (mode === 'urine_containers') testCodesToRun = URINE_CONTAINER_TEST_CODES.slice();
     else if (mode === 'edta_vials') testCodesToRun = EDTA_VIAL_TEST_CODES.slice();
     else if (mode === 'citrate_vials') testCodesToRun = CITRATE_VIAL_TEST_CODES.slice();
+    else if (mode === 's_heparin') testCodesToRun = S_HEPARIN_TEST_CODES.slice();
+    else if (mode === 'l_heparin') testCodesToRun = L_HEPARIN_TEST_CODES.slice();
     else testCodesToRun = [filters.testCode || null]; // null = no testCode filter
 
     /** @type {string[]} */
@@ -262,7 +274,11 @@ async function runViaSql(programOpts) {
               ? EDTA_VIAL_TEST_CODES.slice()
               : mode === 'citrate_vials'
                 ? CITRATE_VIAL_TEST_CODES.slice()
-                : null;
+                : mode === 's_heparin'
+                  ? S_HEPARIN_TEST_CODES.slice()
+                  : mode === 'l_heparin'
+                    ? L_HEPARIN_TEST_CODES.slice()
+                    : null;
 
     const result = {
         startedAt,
@@ -295,7 +311,11 @@ async function runViaSql(programOpts) {
                   ? 'EDTA vial OR-union'
                   : mode === 'citrate_vials'
                     ? 'Citrate vial OR-union'
-                    : 'multi-code';
+                    : mode === 's_heparin'
+                      ? 'S.Heparin OR-union'
+                      : mode === 'l_heparin'
+                        ? 'L.Heparin OR-union'
+                        : 'multi-code';
         result.message =
             qsList.length === 1
                 ? `dry-run: would call ${dryUrls[0]}`
@@ -426,6 +446,36 @@ async function runViaSql(programOpts) {
             byTestCode
         };
     }
+    if (mode === 's_heparin') {
+        const byTestCode = {};
+        for (const { code, payload: p } of perCallResults) {
+            if (!code) continue;
+            byTestCode[code] = {
+                sids: Array.isArray(p.sids) ? p.sids.length : 0,
+                rows: Number(p.rowCount) || 0
+            };
+        }
+        result.sHeparin = {
+            sidsTotal: sids.length,
+            testCodes: S_HEPARIN_TEST_CODES.slice(),
+            byTestCode
+        };
+    }
+    if (mode === 'l_heparin') {
+        const byTestCode = {};
+        for (const { code, payload: p } of perCallResults) {
+            if (!code) continue;
+            byTestCode[code] = {
+                sids: Array.isArray(p.sids) ? p.sids.length : 0,
+                rows: Number(p.rowCount) || 0
+            };
+        }
+        result.lHeparin = {
+            sidsTotal: sids.length,
+            testCodes: L_HEPARIN_TEST_CODES.slice(),
+            byTestCode
+        };
+    }
 
     result.sidsFoundOnPage1 = sids;
     result.pager = { found: false, message: 'sql source — single batch, no grid pager' };
@@ -472,6 +522,8 @@ async function runViaSql(programOpts) {
             urineContainers: result.urineContainers || null,
             edtaVials: result.edtaVials || null,
             citrateVials: result.citrateVials || null,
+            sHeparin: result.sHeparin || null,
+            lHeparin: result.lHeparin || null,
             recoveryEvents: [],
             completedPagerPages: [1],
             lastCompletedPagerPage: 1,
@@ -493,7 +545,11 @@ async function runViaSql(programOpts) {
                   ? ` [edta: ${result.edtaVials.sidsTotal} vial(s) from ${EDTA_VIAL_TEST_CODES.join('+')}]`
                   : mode === 'citrate_vials'
                     ? ` [citrate: ${result.citrateVials.sidsTotal} vial(s) from ${CITRATE_VIAL_TEST_CODES.join('+')}]`
-                    : '';
+                    : mode === 's_heparin'
+                      ? ` [s.heparin: ${result.sHeparin.sidsTotal} tube(s) from ${S_HEPARIN_TEST_CODES.join('+')}]`
+                      : mode === 'l_heparin'
+                        ? ` [l.heparin: ${result.lHeparin.sidsTotal} tube(s) from ${L_HEPARIN_TEST_CODES.join('+')}]`
+                        : '';
         console.log(
             `[sql] ${rowCount} row(s), ${sids.length} SID(s), ${uniqueLabelCount} unique label(s), ${otherTestsRowCount} Other tests row(s).${modeNote}`
         );

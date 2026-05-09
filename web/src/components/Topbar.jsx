@@ -20,6 +20,8 @@ export function Topbar({
         { id: 'urine_containers', label: 'Urine Containers' },
         { id: 'edta_vials', label: 'EDTA Vials' },
         { id: 'citrate_vials', label: 'Citrate' },
+        { id: 's_heparin', label: 'S.Heparin' },
+        { id: 'l_heparin', label: 'L.Heparin' },
         { id: 'history', label: 'History' }
     ];
     return (

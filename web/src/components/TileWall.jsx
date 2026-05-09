@@ -1,13 +1,20 @@
 import { Tile } from './Tile.jsx';
 
-// Strict tab scoping. Letter Heads + Envelopes show only general runs; Urine
-// and EDTA tabs show only their specialty mode tiles.
+// Strict tab scoping. Letter Heads + Envelopes show only general runs; each
+// specialty tab (Urine / EDTA / Citrate / S.Heparin / L.Heparin) shows only
+// its own mode tiles. The general tabs explicitly exclude every specialty mode.
+const SPECIALTY_MODES = new Set([
+    'urine_containers',
+    'edta_vials',
+    'citrate_vials',
+    's_heparin',
+    'l_heparin'
+]);
+
 function tileMatchesTab(tile, kind) {
     const mode = tile.mode || 'general';
-    if (kind === 'urine_containers') return mode === 'urine_containers';
-    if (kind === 'edta_vials') return mode === 'edta_vials';
-    if (kind === 'citrate_vials') return mode === 'citrate_vials';
-    return mode !== 'urine_containers' && mode !== 'edta_vials' && mode !== 'citrate_vials';
+    if (SPECIALTY_MODES.has(kind)) return mode === kind;
+    return !SPECIALTY_MODES.has(mode);
 }
 
 export function TileWall({ tiles, kind, hiddenCount, onRestoreHidden, onOpen, clientPagesByNorm }) {
@@ -56,6 +63,22 @@ export function TileWall({ tiles, kind, hiddenCount, onRestoreHidden, onOpen, cl
                                 auto-pin <code>he030, he004, he016, hem001</code> and count each SID once.
                             </p>
                             <p className="muted small">Four parallel Listec calls per BU, unioned by SID.</p>
+                        </>
+                    ) : kind === 's_heparin' ? (
+                        <>
+                            <p className="tile-empty-lead">
+                                No <strong>S.Heparin</strong> runs yet. Start one from the run panel — the run will
+                                auto-pin <code>ky004, cp3257</code> and count each SID once.
+                            </p>
+                            <p className="muted small">Two parallel Listec calls per BU, unioned by SID.</p>
+                        </>
+                    ) : kind === 'l_heparin' ? (
+                        <>
+                            <p className="tile-empty-lead">
+                                No <strong>L.Heparin</strong> runs yet. Start one from the run panel — the run will
+                                auto-pin <code>ms091</code> through the SID-dedup pipeline.
+                            </p>
+                            <p className="muted small">One Listec call per BU; same dedup contract as the multi-code modes.</p>
                         </>
                     ) : (
                         <>

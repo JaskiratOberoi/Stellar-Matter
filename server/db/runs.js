@@ -133,6 +133,10 @@ function projectRun(id, { main, pkg, mainPath, pkgPath }, normalizedMap) {
         (pkg && pkg.mode === 'edta_vials' && 'edta_vials') ||
         (main && main.mode === 'citrate_vials' && 'citrate_vials') ||
         (pkg && pkg.mode === 'citrate_vials' && 'citrate_vials') ||
+        (main && main.mode === 's_heparin' && 's_heparin') ||
+        (pkg && pkg.mode === 's_heparin' && 's_heparin') ||
+        (main && main.mode === 'l_heparin' && 'l_heparin') ||
+        (pkg && pkg.mode === 'l_heparin' && 'l_heparin') ||
         'general';
     const urineContainers =
         mode === 'urine_containers'
@@ -146,6 +150,14 @@ function projectRun(id, { main, pkg, mainPath, pkgPath }, normalizedMap) {
     const citrateVials =
         mode === 'citrate_vials'
             ? (main && main.citrateVials) || (pkg && pkg.citrateVials && typeof pkg.citrateVials === 'object' ? pkg.citrateVials : null)
+            : null;
+    const sHeparin =
+        mode === 's_heparin'
+            ? (main && main.sHeparin) || (pkg && pkg.sHeparin && typeof pkg.sHeparin === 'object' ? pkg.sHeparin : null)
+            : null;
+    const lHeparin =
+        mode === 'l_heparin'
+            ? (main && main.lHeparin) || (pkg && pkg.lHeparin && typeof pkg.lHeparin === 'object' ? pkg.lHeparin : null)
             : null;
     const orgId = String(
         (main && main.org_id != null && main.org_id) ||
@@ -188,6 +200,8 @@ function projectRun(id, { main, pkg, mainPath, pkgPath }, normalizedMap) {
         urineContainers,
         edtaVials,
         citrateVials,
+        sHeparin,
+        lHeparin,
         filter,
         filtersApplied,
         filtersRequested: req,
@@ -245,7 +259,8 @@ async function ingestRun(client, outDir, id, opts = {}) {
             from_date, to_date, from_hour, to_hour, dry_run, exit_code,
             errors_count, sids_count, unique_label_count, other_tests_row_count,
             total_printed_pages, envelopes_big, envelopes_small, envelopes_unknown,
-            urine_containers, edta_vials, citrate_vials, filter, filters_applied, filters_requested, paths,
+            urine_containers, edta_vials, citrate_vials, s_heparin, l_heparin,
+            filter, filters_applied, filters_requested, paths,
             source_file_mtime
          )
          VALUES (
@@ -253,8 +268,9 @@ async function ingestRun(client, outDir, id, opts = {}) {
             $8, $9, $10, $11, $12, $13,
             $14, $15, $16, $17,
             $18, $19, $20, $21,
-            $22, $23, $24, $25, $26, $27, $28,
-            $29
+            $22, $23, $24, $25, $26,
+            $27, $28, $29, $30,
+            $31
          )
          ON CONFLICT (id) DO UPDATE SET
             org_id = EXCLUDED.org_id,
@@ -280,6 +296,8 @@ async function ingestRun(client, outDir, id, opts = {}) {
             urine_containers = EXCLUDED.urine_containers,
             edta_vials = EXCLUDED.edta_vials,
             citrate_vials = EXCLUDED.citrate_vials,
+            s_heparin = EXCLUDED.s_heparin,
+            l_heparin = EXCLUDED.l_heparin,
             filter = EXCLUDED.filter,
             filters_applied = EXCLUDED.filters_applied,
             filters_requested = EXCLUDED.filters_requested,
@@ -310,6 +328,8 @@ async function ingestRun(client, outDir, id, opts = {}) {
             projected.urineContainers ? JSON.stringify(projected.urineContainers) : null,
             projected.edtaVials ? JSON.stringify(projected.edtaVials) : null,
             projected.citrateVials ? JSON.stringify(projected.citrateVials) : null,
+            projected.sHeparin ? JSON.stringify(projected.sHeparin) : null,
+            projected.lHeparin ? JSON.stringify(projected.lHeparin) : null,
             JSON.stringify(projected.filter || {}),
             projected.filtersApplied ? JSON.stringify(projected.filtersApplied) : null,
             JSON.stringify(projected.filtersRequested || {}),
@@ -475,6 +495,8 @@ function tileFromRow(r, labelRows) {
         urineContainers: r.urine_containers || null,
         edtaVials: r.edta_vials || null,
         citrateVials: r.citrate_vials || null,
+        sHeparin: r.s_heparin || null,
+        lHeparin: r.l_heparin || null,
         orgId: r.org_id,
         bu: r.bu || '—',
         fromDate: r.from_date,

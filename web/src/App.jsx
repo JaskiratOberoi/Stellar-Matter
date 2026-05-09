@@ -36,7 +36,9 @@ function loadInitialView() {
         raw === 'letterheads' ||
         raw === 'urine_containers' ||
         raw === 'edta_vials' ||
-        raw === 'citrate_vials'
+        raw === 'citrate_vials' ||
+        raw === 's_heparin' ||
+        raw === 'l_heparin'
     )
         return raw;
     if (raw === 'results') return 'letterheads';
@@ -198,7 +200,11 @@ export function App() {
                               ? 'edta_vials'
                               : tab === 'citrate_vials'
                                 ? 'citrate_vials'
-                                : 'general'
+                                : tab === 's_heparin'
+                                  ? 's_heparin'
+                                  : tab === 'l_heparin'
+                                    ? 'l_heparin'
+                                    : 'general'
                     }
                     sqlOnlyLocked={Boolean(authRequired && user && user.role === 'admin')}
                     onSubmit={handleSubmit}
@@ -289,6 +295,38 @@ export function App() {
                                 onOpen={(t) => {
                                     setOpenTile(t);
                                     setOpenTileKind('citrate_vials');
+                                }}
+                            />
+                        </section>
+                    )}
+
+                    {tab === 's_heparin' && (
+                        <section className="tabpanel" data-metric-kind="s_heparin">
+                            <TileWall
+                                tiles={visibleTiles}
+                                kind="s_heparin"
+                                hiddenCount={hiddenCount}
+                                clientPagesByNorm={clientPagesByNorm}
+                                onRestoreHidden={restoreHidden}
+                                onOpen={(t) => {
+                                    setOpenTile(t);
+                                    setOpenTileKind('s_heparin');
+                                }}
+                            />
+                        </section>
+                    )}
+
+                    {tab === 'l_heparin' && (
+                        <section className="tabpanel" data-metric-kind="l_heparin">
+                            <TileWall
+                                tiles={visibleTiles}
+                                kind="l_heparin"
+                                hiddenCount={hiddenCount}
+                                clientPagesByNorm={clientPagesByNorm}
+                                onRestoreHidden={restoreHidden}
+                                onOpen={(t) => {
+                                    setOpenTile(t);
+                                    setOpenTileKind('l_heparin');
                                 }}
                             />
                         </section>

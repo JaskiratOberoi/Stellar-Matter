@@ -4,7 +4,9 @@ import {
     projectEnvelopes,
     projectUrineContainers,
     projectEdtaVials,
-    projectCitrateVials
+    projectCitrateVials,
+    projectSHeparin,
+    projectLHeparin
 } from '../lib/tracer.js';
 
 // Module-scope component. MUST NOT be redefined inside TracerBanner — when a
@@ -29,7 +31,7 @@ function StatCard({ title, headline, subline, est, onOpen }) {
     );
 }
 
-/** @param {{ bu: string, fromDate: string, toDate: string, generalTile: object|null, urineTile: object|null, edtaTile: object|null, citrateTile: object|null, clientPagesByNorm: Record<string, number>, isPrintTarget?: boolean, onPrintSection?: () => void, onOpenDetail?: (tile: object | null, kind: string) => void }} props */
+/** @param {{ bu: string, fromDate: string, toDate: string, generalTile: object|null, urineTile: object|null, edtaTile: object|null, citrateTile: object|null, sHeparinTile: object|null, lHeparinTile: object|null, clientPagesByNorm: Record<string, number>, isPrintTarget?: boolean, onPrintSection?: () => void, onOpenDetail?: (tile: object | null, kind: string) => void }} props */
 export function TracerBanner({
     bu,
     fromDate,
@@ -38,6 +40,8 @@ export function TracerBanner({
     urineTile,
     edtaTile,
     citrateTile,
+    sHeparinTile,
+    lHeparinTile,
     clientPagesByNorm,
     isPrintTarget,
     onPrintSection,
@@ -48,6 +52,8 @@ export function TracerBanner({
     const ur = urineTile ? projectUrineContainers(urineTile) : { headline: '0', subline: 'No data' };
     const ed = edtaTile ? projectEdtaVials(edtaTile) : { headline: '0', subline: 'No data' };
     const ct = citrateTile ? projectCitrateVials(citrateTile) : { headline: '0', subline: 'No data' };
+    const sh = sHeparinTile ? projectSHeparin(sHeparinTile) : { headline: '0', subline: 'No data' };
+    const lhep = lHeparinTile ? projectLHeparin(lHeparinTile) : { headline: '0', subline: 'No data' };
     const rangeLabel = fmtDateRange(fromDate, toDate);
 
     return (
@@ -98,6 +104,20 @@ export function TracerBanner({
                     subline={ct.subline}
                     est={false}
                     onOpen={citrateTile && onOpenDetail ? () => onOpenDetail(citrateTile, 'citrate_vials') : undefined}
+                />
+                <StatCard
+                    title="S.Heparin"
+                    headline={sh.headline}
+                    subline={sh.subline}
+                    est={false}
+                    onOpen={sHeparinTile && onOpenDetail ? () => onOpenDetail(sHeparinTile, 's_heparin') : undefined}
+                />
+                <StatCard
+                    title="L.Heparin"
+                    headline={lhep.headline}
+                    subline={lhep.subline}
+                    est={false}
+                    onOpen={lHeparinTile && onOpenDetail ? () => onOpenDetail(lHeparinTile, 'l_heparin') : undefined}
                 />
             </div>
         </section>

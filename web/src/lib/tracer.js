@@ -66,9 +66,23 @@ export function projectEdtaVials(tile) {
 
 /** @param {object | null | undefined} tile */
 export function projectCitrateVials(tile) {
-    if (!tile) return { headline: '0', subline: '', sidsTotal: 0 };
-    const cv = tile.citrateVials || {};
-    const btc = cv.byTestCode && typeof cv.byTestCode === 'object' ? cv.byTestCode : {};
+    return projectDedupBlob(tile && tile.citrateVials);
+}
+
+/** @param {object | null | undefined} tile */
+export function projectSHeparin(tile) {
+    return projectDedupBlob(tile && tile.sHeparin);
+}
+
+/** @param {object | null | undefined} tile */
+export function projectLHeparin(tile) {
+    return projectDedupBlob(tile && tile.lHeparin);
+}
+
+// Shared projection for any { sidsTotal, byTestCode } specialty blob.
+function projectDedupBlob(blob) {
+    if (!blob) return { headline: '0', subline: '', sidsTotal: 0 };
+    const btc = blob.byTestCode && typeof blob.byTestCode === 'object' ? blob.byTestCode : {};
     const codes = Object.keys(btc).sort();
     const totalRows = codes.reduce((s, c) => s + (Number(btc[c] && btc[c].rows) || 0), 0);
     const subParts = codes.map((code) => {
@@ -79,9 +93,9 @@ export function projectCitrateVials(tile) {
         ? `${subParts.join(' + ')} (${totalRows.toLocaleString('en-US')} tests)`
         : 'No data';
     return {
-        headline: (cv.sidsTotal || 0).toLocaleString('en-US'),
+        headline: (blob.sidsTotal || 0).toLocaleString('en-US'),
         subline,
-        sidsTotal: cv.sidsTotal || 0
+        sidsTotal: blob.sidsTotal || 0
     };
 }
 
@@ -123,6 +137,8 @@ export function mapTilesToBanners(tiles, selectedBus, batchStartedIso, fromDate,
         if (m === 'urine_containers') return 'urine_containers';
         if (m === 'edta_vials') return 'edta_vials';
         if (m === 'citrate_vials') return 'citrate_vials';
+        if (m === 's_heparin') return 's_heparin';
+        if (m === 'l_heparin') return 'l_heparin';
         return 'general';
     };
 
@@ -142,7 +158,9 @@ export function mapTilesToBanners(tiles, selectedBus, batchStartedIso, fromDate,
         generalTile: pick(bu, 'general'),
         urineTile: pick(bu, 'urine_containers'),
         edtaTile: pick(bu, 'edta_vials'),
-        citrateTile: pick(bu, 'citrate_vials')
+        citrateTile: pick(bu, 'citrate_vials'),
+        sHeparinTile: pick(bu, 's_heparin'),
+        lHeparinTile: pick(bu, 'l_heparin')
     }));
 }
 

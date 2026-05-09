@@ -48,7 +48,9 @@ export function RunSidebar({
     const isUrine = mode === 'urine_containers';
     const isEdta = mode === 'edta_vials';
     const isCitrate = mode === 'citrate_vials';
-    const pinMultiCode = isUrine || isEdta || isCitrate;
+    const isSHeparin = mode === 's_heparin';
+    const isLHeparin = mode === 'l_heparin';
+    const pinMultiCode = isUrine || isEdta || isCitrate || isSHeparin || isLHeparin;
     const lockedSql = !!sqlOnlyLocked;
     const [form, setForm] = useState(() => ({
         ...BLANK_FORM,
@@ -67,8 +69,8 @@ export function RunSidebar({
     }, [pinMultiCode, lockedSql, form.source]);
 
     useEffect(() => {
-        if (!isUrine && !isEdta && !isCitrate && !lockedSql) writeString(LS_SOURCE, form.source);
-    }, [form.source, isUrine, isEdta, isCitrate, lockedSql]);
+        if (!pinMultiCode && !lockedSql) writeString(LS_SOURCE, form.source);
+    }, [form.source, pinMultiCode, lockedSql]);
 
     function update(name, value) {
         setForm((prev) => ({ ...prev, [name]: value }));
@@ -100,6 +102,14 @@ export function RunSidebar({
             body.mode = 'citrate_vials';
             body.source = 'sql';
             delete body.testCode;
+        } else if (isSHeparin) {
+            body.mode = 's_heparin';
+            body.source = 'sql';
+            delete body.testCode;
+        } else if (isLHeparin) {
+            body.mode = 'l_heparin';
+            body.source = 'sql';
+            delete body.testCode;
         } else if (lockedSql) {
             body.source = 'sql';
         }
@@ -111,14 +121,18 @@ export function RunSidebar({
     }
 
     const wantSql = form.source === 'sql';
-    const showScrapeOnly = !wantSql && !isUrine && !isEdta && !isCitrate && !lockedSql;
+    const showScrapeOnly = !wantSql && !pinMultiCode && !lockedSql;
     const sourceHint = isUrine
         ? 'Urine container mode is locked to SQL. Each run fires two parallel Listec calls (cp004 + mb034) and unions the SIDs.'
         : isEdta
           ? 'EDTA vials mode is locked to SQL. Each run fires five parallel Listec calls and unions SIDs so each patient counts once.'
           : isCitrate
             ? 'Citrate mode is locked to SQL. Each run fires four parallel Listec calls and unions SIDs so each patient counts once.'
-            : wantSql
+            : isSHeparin
+              ? 'S.Heparin mode is locked to SQL. Each run fires two parallel Listec calls (ky004 + cp3257) and unions SIDs so each patient counts once.'
+              : isLHeparin
+                ? 'L.Heparin mode is locked to SQL. Each run fires a single Listec call (ms091) through the dedup pipeline.'
+                : wantSql
           ? 'Calls the Listec service (LISTEC_API_BASE_URL, default http://127.0.0.1:3100) — multi-BU runs allowed.'
           : 'Drives the LIS web grid via headless Chromium. Multi-BU runs require SQL.';
 
@@ -154,6 +168,18 @@ export function RunSidebar({
                                             <span className="chip chip-tool citrate-pin-chip">
                                                 Pinned: he030 OR he004 OR he016 OR hem001
                                             </span>
+                                        </p>
+                                    )}
+                                    {isSHeparin && (
+                                        <p className="muted small source-hint s-heparin-pin-banner">
+                                            <span className="chip chip-tool s-heparin-pin-chip">
+                                                Pinned: ky004 OR cp3257
+                                            </span>
+                                        </p>
+                                    )}
+                                    {isLHeparin && (
+                                        <p className="muted small source-hint l-heparin-pin-banner">
+                                            <span className="chip chip-tool l-heparin-pin-chip">Pinned: ms091</span>
                                         </p>
                                     )}
                                     <p className="muted small source-hint">{sourceHint}</p>
@@ -199,6 +225,18 @@ export function RunSidebar({
                                             <span className="chip chip-tool citrate-pin-chip">
                                                 Pinned: he030 OR he004 OR he016 OR hem001
                                             </span>
+                                        </p>
+                                    )}
+                                    {isSHeparin && (
+                                        <p className="muted small source-hint s-heparin-pin-banner">
+                                            <span className="chip chip-tool s-heparin-pin-chip">
+                                                Pinned: ky004 OR cp3257
+                                            </span>
+                                        </p>
+                                    )}
+                                    {isLHeparin && (
+                                        <p className="muted small source-hint l-heparin-pin-banner">
+                                            <span className="chip chip-tool l-heparin-pin-chip">Pinned: ms091</span>
                                         </p>
                                     )}
                                     <p className="muted small source-hint">{sourceHint}</p>
@@ -311,6 +349,20 @@ export function RunSidebar({
                                         >
                                             he030 OR he004 OR he016 OR hem001
                                         </span>
+                                    ) : isSHeparin ? (
+                                        <span
+                                            className="chip chip-tool s-heparin-pin-chip"
+                                            title="Locked by S.Heparin tab — server fires two test codes in parallel"
+                                        >
+                                            ky004 OR cp3257
+                                        </span>
+                                    ) : isLHeparin ? (
+                                        <span
+                                            className="chip chip-tool l-heparin-pin-chip"
+                                            title="Locked by L.Heparin tab — server pins this single test code through the dedup pipeline"
+                                        >
+                                            ms091
+                                        </span>
                                     ) : (
                                         <input
                                             type="text"
@@ -418,7 +470,17 @@ export function RunSidebar({
                     </div>
                     <div className="form-actions">
                         <button type="submit" className="btn-primary" disabled={busy}>
-                            {isUrine ? 'Run urine container count' : isEdta ? 'Run EDTA vials count' : isCitrate ? 'Run Citrate count' : 'Run'}
+                            {isUrine
+                                ? 'Run urine container count'
+                                : isEdta
+                                  ? 'Run EDTA vials count'
+                                  : isCitrate
+                                    ? 'Run Citrate count'
+                                    : isSHeparin
+                                      ? 'Run S.Heparin count'
+                                      : isLHeparin
+                                        ? 'Run L.Heparin count'
+                                        : 'Run'}
                         </button>
                         <button type="button" className="btn-secondary chip-like" onClick={onClearLedger}>
                             Clear ledger

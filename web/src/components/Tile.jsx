@@ -1,45 +1,40 @@
 import { aggregatePages, makeOtherTestsPinned, tileEnvelopes, topLabelFromTile } from '../lib/envelopes.js';
 import { fmtDateRange, tileEyebrow } from '../lib/format.js';
 
+// Specialty modes that share an identical { sidsTotal, byTestCode } shape and
+// can therefore be projected to a tile metric with the same code path. Adding
+// a new dedup-by-SID mode is a one-line entry here + the matching tile.<key>
+// blob in buildTileFromRunFiles / projectRun.
+const SPECIALTY_BLOB_BY_KIND = {
+    edta_vials: 'edtaVials',
+    citrate_vials: 'citrateVials',
+    s_heparin: 'sHeparin',
+    l_heparin: 'lHeparin'
+};
+
+function specialtyMetric(blob) {
+    const b = blob || {};
+    const btc = b.byTestCode && typeof b.byTestCode === 'object' ? b.byTestCode : {};
+    const codes = Object.keys(btc).sort();
+    const totalRows = codes.reduce((s, c) => s + (Number(btc[c] && btc[c].rows) || 0), 0);
+    const subParts = codes.map((code) => {
+        const row = btc[code] || { sids: 0, rows: 0 };
+        return `${(row.sids || 0).toLocaleString('en-US')} ${code}`;
+    });
+    const subline = subParts.length
+        ? `${subParts.join(' + ')} (${totalRows.toLocaleString('en-US')} tests)`
+        : 'No assay breakdown';
+    return {
+        num: (b.sidsTotal || 0).toLocaleString('en-US'),
+        label: subline,
+        estimated: false,
+        estimatedLabel: null
+    };
+}
+
 function metricFor(kind, tile, clientPagesByNorm) {
-    if (kind === 'citrate_vials') {
-        const cv = tile.citrateVials || {};
-        const btc = cv.byTestCode && typeof cv.byTestCode === 'object' ? cv.byTestCode : {};
-        const codes = Object.keys(btc).sort();
-        const totalRows = codes.reduce((s, c) => s + (Number(btc[c] && btc[c].rows) || 0), 0);
-        const subParts = codes.map((code) => {
-            const row = btc[code] || { sids: 0, rows: 0 };
-            return `${(row.sids || 0).toLocaleString('en-US')} ${code}`;
-        });
-        const subline = subParts.length
-            ? `${subParts.join(' + ')} (${totalRows.toLocaleString('en-US')} tests)`
-            : 'No assay breakdown';
-        return {
-            num: (cv.sidsTotal || 0).toLocaleString('en-US'),
-            label: subline,
-            estimated: false,
-            estimatedLabel: null
-        };
-    }
-    if (kind === 'edta_vials') {
-        const ev = tile.edtaVials || {};
-        const btc = ev.byTestCode && typeof ev.byTestCode === 'object' ? ev.byTestCode : {};
-        const codes = Object.keys(btc).sort();
-        const totalRows = codes.reduce((s, c) => s + (Number(btc[c] && btc[c].rows) || 0), 0);
-        const subParts = codes.map((code) => {
-            const row = btc[code] || { sids: 0, rows: 0 };
-            return `${(row.sids || 0).toLocaleString('en-US')} ${code}`;
-        });
-        const subline = subParts.length
-            ? `${subParts.join(' + ')} (${totalRows.toLocaleString('en-US')} tests)`
-            : 'No assay breakdown';
-        return {
-            num: (ev.sidsTotal || 0).toLocaleString('en-US'),
-            label: subline,
-            estimated: false,
-            estimatedLabel: null
-        };
-    }
+    const specialtyKey = SPECIALTY_BLOB_BY_KIND[kind];
+    if (specialtyKey) return specialtyMetric(tile[specialtyKey]);
     if (kind === 'urine_containers') {
         // Tile data shape comes from buildTileFromRunFiles in server.js: a
         // urine-container artefact carries tile.urineContainers = { sidsTotal,

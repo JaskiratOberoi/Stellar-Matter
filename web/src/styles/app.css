@@ -1683,6 +1683,42 @@ table.packages td.envelope-cell {
     margin: 6px 0 4px 0;
 }
 
+/* S.Heparin and L.Heparin pinned-code chips. Distinct hue per mode so the
+ * sidebar tells you at a glance which fan-out is locked in. */
+.s-heparin-pin-chip {
+    cursor: default;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-size: 10px;
+    background: rgba(150, 230, 180, 0.1);
+    border-color: rgba(150, 230, 180, 0.45);
+    color: rgb(var(--text));
+    line-height: 1.25;
+    white-space: normal;
+    text-align: left;
+}
+
+.s-heparin-pin-banner {
+    margin: 6px 0 4px 0;
+}
+
+.l-heparin-pin-chip {
+    cursor: default;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-size: 10px;
+    background: rgba(220, 170, 240, 0.1);
+    border-color: rgba(220, 170, 240, 0.45);
+    color: rgb(var(--text));
+    line-height: 1.25;
+    white-space: normal;
+    text-align: left;
+}
+
+.l-heparin-pin-banner {
+    margin: 6px 0 4px 0;
+}
+
 /* Urine-container modal breakdown table. Shares typography with .packages
  * but lays out as a small fixed 3-row summary (cp004 / mb034 / union footer)
  * instead of the long sortable label list.

@@ -86,15 +86,21 @@ export function RunModal({ tile, kind, indexFromOne, clientPagesByNorm, onClose 
     const isUrine = kind === 'urine_containers';
     const isEdta = kind === 'edta_vials';
     const isCitrate = kind === 'citrate_vials';
+    const isSHeparin = kind === 's_heparin';
+    const isLHeparin = kind === 'l_heparin';
     const kindBadge = isUrine
         ? 'URINE CONTAINERS'
         : isEdta
           ? 'EDTA VIALS'
           : isCitrate
             ? 'CITRATE VIALS'
-            : kind === 'envelopes'
-              ? 'ENVELOPES'
-              : 'LETTER HEADS';
+            : isSHeparin
+              ? 'S.HEPARIN'
+              : isLHeparin
+                ? 'L.HEPARIN'
+                : kind === 'envelopes'
+                  ? 'ENVELOPES'
+                  : 'LETTER HEADS';
     const range = fmtDateRange(tile.fromDate, tile.toDate);
     const errs = (tile.totals && tile.totals.errors) || 0;
     const status = errs > 0 ? `${errs} error${errs === 1 ? '' : 's'}` : 'success';
@@ -129,6 +135,34 @@ export function RunModal({ tile, kind, indexFromOne, clientPagesByNorm, onClose 
         totalLabel = 'Vials needed (unique SIDs)';
         totalNum = (cv.sidsTotal || 0).toLocaleString('en-US');
         const btc = cv.byTestCode && typeof cv.byTestCode === 'object' ? cv.byTestCode : {};
+        const codes = Object.keys(btc).sort();
+        totalSub = codes.length
+            ? codes
+                  .map((c) => {
+                      const row = btc[c] || { sids: 0 };
+                      return `${c}: ${(row.sids || 0).toLocaleString('en-US')}`;
+                  })
+                  .join(' \u00b7 ')
+            : null;
+    } else if (isSHeparin) {
+        const sh = tile.sHeparin || {};
+        totalLabel = 'Tubes needed (unique SIDs)';
+        totalNum = (sh.sidsTotal || 0).toLocaleString('en-US');
+        const btc = sh.byTestCode && typeof sh.byTestCode === 'object' ? sh.byTestCode : {};
+        const codes = Object.keys(btc).sort();
+        totalSub = codes.length
+            ? codes
+                  .map((c) => {
+                      const row = btc[c] || { sids: 0 };
+                      return `${c}: ${(row.sids || 0).toLocaleString('en-US')}`;
+                  })
+                  .join(' \u00b7 ')
+            : null;
+    } else if (isLHeparin) {
+        const lh = tile.lHeparin || {};
+        totalLabel = 'Tubes needed (unique SIDs)';
+        totalNum = (lh.sidsTotal || 0).toLocaleString('en-US');
+        const btc = lh.byTestCode && typeof lh.byTestCode === 'object' ? lh.byTestCode : {};
         const codes = Object.keys(btc).sort();
         totalSub = codes.length
             ? codes
@@ -180,6 +214,14 @@ export function RunModal({ tile, kind, indexFromOne, clientPagesByNorm, onClose 
                 ) : isCitrate ? (
                     <div className="packages-table-host-modal table-wrap">
                         <CitrateBreakdownTable citrateVials={tile.citrateVials} />
+                    </div>
+                ) : isSHeparin ? (
+                    <div className="packages-table-host-modal table-wrap">
+                        <SHeparinBreakdownTable sHeparin={tile.sHeparin} />
+                    </div>
+                ) : isLHeparin ? (
+                    <div className="packages-table-host-modal table-wrap">
+                        <LHeparinBreakdownTable lHeparin={tile.lHeparin} />
                     </div>
                 ) : (
                     <>
@@ -255,6 +297,66 @@ function EdtaBreakdownTable({ edtaVials }) {
             <tfoot>
                 <tr>
                     <td>Union (OR) — vials needed</td>
+                    <td className="num">{totalSids.toLocaleString('en-US')}</td>
+                    <td className="num">{totalRows.toLocaleString('en-US')}</td>
+                </tr>
+            </tfoot>
+        </table>
+    );
+}
+
+/**
+ * Per-assay breakdown for S.Heparin runs. Identical row contract to EDTA/Citrate
+ * (dynamic rows from byTestCode + union footer = unique tubes needed).
+ */
+function SHeparinBreakdownTable({ sHeparin }) {
+    return <DedupBreakdownTable blob={sHeparin} className="s-heparin-breakdown" footerLabel="Union (OR) — tubes needed" />;
+}
+
+/**
+ * Per-assay breakdown for L.Heparin runs. Single test code today, but rendered
+ * through the same dedup-pipeline component so future expansion is a one-line
+ * change in S_HEPARIN_TEST_CODES / L_HEPARIN_TEST_CODES.
+ */
+function LHeparinBreakdownTable({ lHeparin }) {
+    return <DedupBreakdownTable blob={lHeparin} className="l-heparin-breakdown" footerLabel="Union (OR) — tubes needed" />;
+}
+
+/**
+ * Shared per-assay table for any specialty mode whose tile blob is the
+ * { sidsTotal, byTestCode: { code: { sids, rows } } } shape produced by
+ * cli/lib/sql-source.js mergePayloads.
+ */
+function DedupBreakdownTable({ blob, className, footerLabel }) {
+    const b = blob || {};
+    const btc = b.byTestCode && typeof b.byTestCode === 'object' ? b.byTestCode : {};
+    const codes = Object.keys(btc).sort();
+    const totalSids = b.sidsTotal || 0;
+    const totalRows = codes.reduce((s, c) => s + (Number(btc[c] && btc[c].rows) || 0), 0);
+    return (
+        <table className={`${className} urine-breakdown`}>
+            <thead>
+                <tr>
+                    <th>Test code</th>
+                    <th className="num">SIDs (patients)</th>
+                    <th className="num">Rows (raw)</th>
+                </tr>
+            </thead>
+            <tbody>
+                {codes.map((code) => {
+                    const row = btc[code] || { sids: 0, rows: 0 };
+                    return (
+                        <tr key={code}>
+                            <td>{code}</td>
+                            <td className="num">{(row.sids || 0).toLocaleString('en-US')}</td>
+                            <td className="num">{(row.rows || 0).toLocaleString('en-US')}</td>
+                        </tr>
+                    );
+                })}
+            </tbody>
+            <tfoot>
+                <tr>
+                    <td>{footerLabel}</td>
                     <td className="num">{totalSids.toLocaleString('en-US')}</td>
                     <td className="num">{totalRows.toLocaleString('en-US')}</td>
                 </tr>
