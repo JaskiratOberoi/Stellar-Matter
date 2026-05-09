@@ -26,7 +26,9 @@ import {
 
 const app = express();
 const port = Number(process.env.LISTEC_API_PORT ?? process.env.PORT ?? 3100);
-const host = process.env.LISTEC_API_HOST ?? '127.0.0.1';
+// Default 0.0.0.0 so api-matter in Docker (LISTEC_API_BASE_URL=http://host.docker.internal:3100)
+// can reach Listec on Windows/Mac hosts. Use LISTEC_API_HOST=127.0.0.1 for localhost-only.
+const host = process.env.LISTEC_API_HOST ?? '0.0.0.0';
 
 function parseNum(v: string | undefined): number | null {
   if (v === undefined || v === '') return null;

@@ -538,8 +538,16 @@ app.get('/api/bu', async (_req, res) => {
 
 app.get('/api/regions', async (_req, res) => {
     try {
-        const r = await fetch(`${listecApiBase()}/api/regions`);
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const base = listecApiBase();
+        const url = `${base}/api/regions`;
+        const r = await fetch(url);
+        if (!r.ok) {
+            const hint =
+                r.status === 404 ?
+                    `HTTP 404 from Listec (${url}). Rebuild and restart Listec: cd Listec/integration/node-mssql && npm run build && npm start. If api-matter runs in Docker, set LISTEC_API_HOST=0.0.0.0 (default) on the Listec host so host.docker.internal can connect.`
+                :   `HTTP ${r.status} from Listec (${url})`;
+            throw new Error(hint);
+        }
         res.json(await r.json());
     } catch (e) {
         res.status(502).json({
