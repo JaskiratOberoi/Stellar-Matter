@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext.jsx';
 
 export function Topbar({
@@ -12,6 +12,8 @@ export function Topbar({
     onOrgSwitched
 }) {
     const { user, orgs, authRequired, logout, switchOrg } = useAuth();
+    const location = useLocation();
+    const isTracer = location.pathname === '/tracer';
     const tabs = [
         { id: 'letterheads', label: 'Letter Heads' },
         { id: 'envelopes', label: 'Envelopes' },
@@ -21,35 +23,48 @@ export function Topbar({
     return (
         <header className="topbar" role="banner">
             <div className="topbar-left">
-                <button
-                    type="button"
-                    className="sidebar-toggle-btn"
-                    aria-expanded={sidebarCollapsed ? 'false' : 'true'}
-                    title={sidebarCollapsed ? 'Expand run panel' : 'Collapse run panel'}
-                    onClick={onToggleSidebar}
-                >
-                    <span className="ico-sidebar" aria-hidden="true" />
-                </button>
+                {!isTracer && (
+                    <button
+                        type="button"
+                        className="sidebar-toggle-btn"
+                        aria-expanded={sidebarCollapsed ? 'false' : 'true'}
+                        title={sidebarCollapsed ? 'Expand run panel' : 'Collapse run panel'}
+                        onClick={onToggleSidebar}
+                    >
+                        <span className="ico-sidebar" aria-hidden="true" />
+                    </button>
+                )}
                 <div className="topbar-brand">
-                    <h1 className="wordmark">Stellar Matter</h1>
-                    <p className="muted topbar-tagline">
-                        <span>Official tally for materials in Genomics</span>
-                    </p>
+                    <div className="topbar-brand-text">
+                        <h1 className="wordmark">Stellar Matter</h1>
+                        <p className="muted topbar-tagline">
+                            <span>Official tally for materials in Genomics</span>
+                        </p>
+                    </div>
+                    <Link
+                        to={isTracer ? '/' : '/tracer'}
+                        className="chip chip-tool tracer-ui-link"
+                        title={isTracer ? 'Return to tabbed dashboard' : 'Lab-wise Tracer view'}
+                    >
+                        {isTracer ? 'Switch to Dashboard' : 'Switch to Tracer UI'}
+                    </Link>
                 </div>
-                <nav className="tablist" role="tablist" aria-label="Main sections">
-                    {tabs.map((t) => (
-                        <button
-                            key={t.id}
-                            type="button"
-                            role="tab"
-                            aria-selected={currentTab === t.id ? 'true' : 'false'}
-                            className={currentTab === t.id ? 'active' : ''}
-                            onClick={() => onTabChange(t.id)}
-                        >
-                            {t.label}
-                        </button>
-                    ))}
-                </nav>
+                {!isTracer && (
+                    <nav className="tablist" role="tablist" aria-label="Main sections">
+                        {tabs.map((t) => (
+                            <button
+                                key={t.id}
+                                type="button"
+                                role="tab"
+                                aria-selected={currentTab === t.id ? 'true' : 'false'}
+                                className={currentTab === t.id ? 'active' : ''}
+                                onClick={() => onTabChange(t.id)}
+                            >
+                                {t.label}
+                            </button>
+                        ))}
+                    </nav>
+                )}
             </div>
             <div className="topbar-right">
                 {statusPill && <span className={`status-pill ${statusPill.kind}`}>{statusPill.text}</span>}

@@ -1,0 +1,172 @@
+/* Tracer lab-wise view */
+
+.tracer-main.main-pane {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 1rem 1.25rem 2.5rem;
+}
+
+.tracer-page {
+    min-height: 60vh;
+}
+
+.tracer-print-root {
+    display: block;
+}
+
+.tracer-form {
+    padding: 1rem 1.15rem;
+    margin-bottom: 1rem;
+}
+
+.tracer-form-title {
+    margin: 0 0 0.35rem;
+}
+
+.tracer-form-hint {
+    margin: 0 0 1rem;
+}
+
+.tracer-form-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem;
+    margin-top: 1rem;
+}
+
+.tracer-date-grid {
+    margin-bottom: 0.5rem;
+}
+
+.tracer-banner-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.tracer-banner {
+    padding: 1rem 1.15rem;
+}
+
+.tracer-banner-head {
+    margin-bottom: 0.75rem;
+}
+
+.tracer-banner-bu {
+    margin: 0;
+    font-size: 1.1rem;
+    font-weight: 650;
+    letter-spacing: -0.02em;
+}
+
+.tracer-banner-range {
+    margin: 0.2rem 0 0;
+}
+
+.tracer-stat-row {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.65rem;
+}
+
+@media (max-width: 900px) {
+    .tracer-stat-row {
+        grid-template-columns: 1fr;
+    }
+}
+
+.tracer-stat-card {
+    padding: 0.65rem 0.75rem;
+    border-radius: 10px;
+    border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+    position: relative;
+}
+
+.tracer-stat-title {
+    margin: 0 0 0.25rem;
+}
+
+.tracer-stat-headline {
+    margin: 0;
+    font-size: 1.05rem;
+    font-weight: 650;
+}
+
+.tracer-stat-sub {
+    margin: 0.2rem 0 0;
+}
+
+.tracer-stat-est {
+    display: block;
+    margin-top: 0.15rem;
+}
+
+.tracer-stat-link {
+    margin-top: 0.5rem;
+}
+
+.tracer-pdf-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem;
+    margin-top: 1.25rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+}
+
+/* Screen: hide print-only masthead */
+.tracer-print-header {
+    display: none;
+}
+
+@media print {
+    @page {
+        margin: 12mm;
+    }
+
+    header.topbar {
+        display: none !important;
+    }
+
+    .tracer-hide-print {
+        display: none !important;
+    }
+
+    .tracer-print-header {
+        display: block !important;
+        margin-bottom: 0.75rem;
+        padding-bottom: 0.5rem;
+        border-bottom: 1px solid #ccc;
+    }
+
+    .tracer-print-title {
+        margin: 0;
+        font-size: 14pt;
+    }
+
+    .tracer-print-sub {
+        margin: 0.2rem 0 0;
+    }
+
+    .tracer-main.main-pane {
+        max-width: none;
+        padding: 0;
+    }
+
+    .tracer-banner {
+        break-inside: avoid;
+        page-break-inside: avoid;
+        border: 1px solid #ddd;
+        margin-bottom: 0.75rem;
+    }
+
+    .tracer-stat-card {
+        border: 1px solid #ddd;
+    }
+
+    .tracer-stat-link {
+        display: none;
+    }
+}

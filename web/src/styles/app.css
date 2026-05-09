@@ -196,6 +196,24 @@ kbd {
     flex-shrink: 0;
 }
 
+.topbar-brand {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 0.55rem;
+    flex-wrap: wrap;
+}
+
+.topbar-brand-text {
+    min-width: 0;
+}
+
+.tracer-ui-link {
+    font-size: 0.68rem;
+    margin-top: 0.12rem;
+    white-space: nowrap;
+}
+
 .topbar-brand h1 {
     margin: 0;
     font-size: 1.15rem;

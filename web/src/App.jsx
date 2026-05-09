@@ -10,6 +10,7 @@ import { LoginPage } from './pages/LoginPage.jsx';
 import { AdminUsersPage } from './pages/AdminUsersPage.jsx';
 import { AdminAuditLogPage } from './pages/AdminAuditLogPage.jsx';
 import { AdminOrgsPage } from './pages/AdminOrgsPage.jsx';
+import { TracerPage } from './pages/TracerPage.jsx';
 import { useAuth } from './contexts/AuthContext.jsx';
 import { useTiles } from './hooks/useTiles.js';
 import { useBuOptions } from './hooks/useBuOptions.js';
@@ -83,6 +84,7 @@ export function App() {
             setSubmitError(null);
             const r = await submit(body);
             if (!r.ok && r.error) setSubmitError(String(r.error));
+            return r;
         },
         [submit]
     );
@@ -132,6 +134,37 @@ export function App() {
     }
 
     const indexFor = (tile) => visibleTiles.findIndex((t) => String(t.id) === String(tile.id)) + 1;
+
+    const tracerView = (
+        <>
+            <Topbar
+                currentTab={tab}
+                onTabChange={setTab}
+                statusPill={statusPill}
+                lastUpdated={loadedAt}
+                sidebarCollapsed={sidebarCollapsed}
+                onToggleSidebar={() => setSidebarCollapsed((c) => !c)}
+                onOrgSwitched={() => {
+                    reloadTiles();
+                }}
+            />
+            <main className="main-pane tracer-main">
+                <TracerPage
+                    tiles={tiles}
+                    reloadTiles={reloadTiles}
+                    submit={handleSubmit}
+                    running={running}
+                    clientPagesByNorm={clientPagesByNorm}
+                    buOptions={{ options, error: buError }}
+                    buSelected={buSelected}
+                    buActions={{ toggle, selectAll, clear: clearBu }}
+                    loadError={loadError}
+                    errors={errors}
+                    submitError={submitError}
+                />
+            </main>
+        </>
+    );
 
     const dashboard = (
         <>
@@ -272,6 +305,7 @@ export function App() {
                 }
             />
             <Route path="/" element={dashboard} />
+            <Route path="/tracer" element={tracerView} />
             <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
     );
