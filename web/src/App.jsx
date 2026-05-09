@@ -155,6 +155,7 @@ export function App() {
                     buActions={{ toggle, selectAll, clear: clearBu }}
                     busy={running}
                     mode={tab === 'urine_containers' ? 'urine_containers' : 'general'}
+                    sqlOnlyLocked={Boolean(authRequired && user && user.role === 'admin')}
                     onSubmit={handleSubmit}
                     onClearLedger={handleClearLedger}
                 />

@@ -1,7 +1,7 @@
 'use strict';
 
 // Lifted from Stellar-Shark/server/auth.js. Roles changed to the Stellar
-// Matter set (super_admin / operator / viewer). JWT_SECRET must be set in
+// Matter roles: super_admin / admin / operator / viewer. JWT_SECRET must be set in
 // production — falls back to an obvious dev secret only when NODE_ENV !== 'production'.
 //
 // Phase 10 adds active_org_id to the JWT plus loadOrgsForUser /

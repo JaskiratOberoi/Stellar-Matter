@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { apiFetch } from '../apiClient.js';
 
-const ROLES = ['operator', 'viewer'];
+const ROLES = ['operator', 'admin', 'viewer'];
 
 export function AdminUsersPage() {
     const [users, setUsers] = useState([]);
@@ -38,7 +38,11 @@ export function AdminUsersPage() {
                 <div>
                     <p className="eyebrow">Admin</p>
                     <h1 className="wordmark">Users</h1>
-                    <p className="muted small">Operators can run jobs; viewers can browse tiles only.</p>
+                    <p className="muted small">
+                        Operators can run jobs (web or SQL).{' '}
+                        <strong>admin</strong> users run SQL-only (no web scrape picker).{' '}
+                        Viewers browse tiles only; they cannot start runs.
+                    </p>
                 </div>
                 <div className="admin-actions">
                     <Link to="/" className="chip chip-tool">

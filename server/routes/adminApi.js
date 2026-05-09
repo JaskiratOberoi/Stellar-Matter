@@ -1,7 +1,7 @@
 'use strict';
 
 // Stellar Matter admin endpoints — narrower than Shark's. Currently only
-// /users (super_admin can create operators / viewers, reset passwords,
+// /users (super_admin can create operators / admins / viewers, reset passwords,
 // toggle active). Org management lands in Phase 10.
 
 const crypto = require('crypto');
@@ -17,7 +17,7 @@ const router = express.Router();
 router.use(requireAuth);
 router.use(requireRole('super_admin'));
 
-const ALLOWED_NEW_ROLES = new Set(['operator', 'viewer']);
+const ALLOWED_NEW_ROLES = new Set(['operator', 'viewer', 'admin']);
 
 function newUserId() {
     return `user-${crypto.randomBytes(8).toString('hex')}`;

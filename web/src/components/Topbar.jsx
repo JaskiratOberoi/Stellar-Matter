@@ -84,7 +84,8 @@ export function Topbar({
                         )}
                         <span>
                             {user.display_name || user.username}
-                            {user.role === 'super_admin' && ' \u00b7 admin'}
+                            {user.role === 'super_admin' && ' \u00b7 super admin'}
+                            {user.role === 'admin' && ' \u00b7 admin'}
                         </span>
                         <button type="button" className="chip chip-tool user-logout" onClick={logout}>
                             Log out

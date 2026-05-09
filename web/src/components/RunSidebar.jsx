@@ -26,27 +26,46 @@ const BLANK_FORM = {
     noScreenshots: false
 };
 
-export function RunSidebar({ collapsed, buOptions, buSelected, buActions, busy, mode, onSubmit, onClearLedger }) {
+export function RunSidebar({
+    collapsed,
+    buOptions,
+    buSelected,
+    buActions,
+    busy,
+    mode,
+    sqlOnlyLocked,
+    onSubmit,
+    onClearLedger
+}) {
     // Urine-container mode auto-pins testCode = cp004 OR mb034 (the union is
     // executed server-side by lib/sql-source.js). When the user is on the
     // Urine Containers tab we lock the source to SQL (the only source that
     // can take a testCode) and replace the free-text Test code input with a
     // read-only chip so it's clear which assays drive the count.
+    //
+    // sqlOnlyLocked: users with app role 'admin' — Data source radios are
+    // hidden; SQL is the only allowed source (enforced on POST /api/run too).
     const isUrine = mode === 'urine_containers';
+    const lockedSql = !!sqlOnlyLocked;
     const [form, setForm] = useState(() => ({
         ...BLANK_FORM,
-        source: isUrine ? 'sql' : readString(LS_SOURCE, 'scrape') === 'sql' ? 'sql' : 'scrape'
+        source:
+            isUrine || lockedSql
+                ? 'sql'
+                : readString(LS_SOURCE, 'scrape') === 'sql'
+                  ? 'sql'
+                  : 'scrape'
     }));
 
     useEffect(() => {
-        if (isUrine && form.source !== 'sql') {
+        if ((isUrine || lockedSql) && form.source !== 'sql') {
             setForm((prev) => ({ ...prev, source: 'sql' }));
         }
-    }, [isUrine, form.source]);
+    }, [isUrine, lockedSql, form.source]);
 
     useEffect(() => {
-        if (!isUrine) writeString(LS_SOURCE, form.source);
-    }, [form.source, isUrine]);
+        if (!isUrine && !lockedSql) writeString(LS_SOURCE, form.source);
+    }, [form.source, isUrine, lockedSql]);
 
     function update(name, value) {
         setForm((prev) => ({ ...prev, [name]: value }));
@@ -70,6 +89,8 @@ export function RunSidebar({ collapsed, buOptions, buSelected, buActions, busy, 
             body.source = 'sql';
             // Strip any stale free-text testCode — server pins cp004+mb034 from the mode flag.
             delete body.testCode;
+        } else if (lockedSql) {
+            body.source = 'sql';
         }
         if (body.source === 'sql' && buSelected.size > 0) {
             body.businessUnits = [...buSelected];
@@ -79,7 +100,7 @@ export function RunSidebar({ collapsed, buOptions, buSelected, buActions, busy, 
     }
 
     const wantSql = form.source === 'sql';
-    const showScrapeOnly = !wantSql && !isUrine;
+    const showScrapeOnly = !wantSql && !isUrine && !lockedSql;
     const sourceHint = isUrine
         ? 'Urine container mode is locked to SQL. Each run fires two parallel Listec calls (cp004 + mb034) and unions the SIDs.'
         : wantSql
@@ -96,34 +117,50 @@ export function RunSidebar({ collapsed, buOptions, buSelected, buActions, busy, 
                     <div className="sidebar-groups">
                         <fieldset className="source-picker nexus-card source-picker-card" aria-label="Data source">
                             <legend className="source-picker-legend eyebrow-lite">Data source</legend>
-                            <label>
-                                <input
-                                    type="radio"
-                                    name="source"
-                                    value="scrape"
-                                    checked={form.source === 'scrape'}
-                                    disabled={isUrine}
-                                    onChange={() => update('source', 'scrape')}
-                                />{' '}
-                                Web scrape
-                            </label>
-                            <label>
-                                <input
-                                    type="radio"
-                                    name="source"
-                                    value="sql"
-                                    checked={form.source === 'sql'}
-                                    disabled={isUrine}
-                                    onChange={() => update('source', 'sql')}
-                                />{' '}
-                                SQL (Listec)
-                            </label>
-                            {isUrine && (
-                                <p className="muted small source-hint urine-pin-banner">
-                                    <span className="chip chip-tool urine-pin-chip">Pinned: cp004 OR mb034</span>
-                                </p>
+                            {lockedSql ? (
+                                <>
+                                    <p className="muted small source-sql-readonly">
+                                        Data source: <strong>SQL (Listec)</strong>
+                                    </p>
+                                    {isUrine && (
+                                        <p className="muted small source-hint urine-pin-banner">
+                                            <span className="chip chip-tool urine-pin-chip">Pinned: cp004 OR mb034</span>
+                                        </p>
+                                    )}
+                                    <p className="muted small source-hint">{sourceHint}</p>
+                                </>
+                            ) : (
+                                <>
+                                    <label>
+                                        <input
+                                            type="radio"
+                                            name="source"
+                                            value="scrape"
+                                            checked={form.source === 'scrape'}
+                                            disabled={isUrine}
+                                            onChange={() => update('source', 'scrape')}
+                                        />{' '}
+                                        Web scrape
+                                    </label>
+                                    <label>
+                                        <input
+                                            type="radio"
+                                            name="source"
+                                            value="sql"
+                                            checked={form.source === 'sql'}
+                                            disabled={isUrine}
+                                            onChange={() => update('source', 'sql')}
+                                        />{' '}
+                                        SQL (Listec)
+                                    </label>
+                                    {isUrine && (
+                                        <p className="muted small source-hint urine-pin-banner">
+                                            <span className="chip chip-tool urine-pin-chip">Pinned: cp004 OR mb034</span>
+                                        </p>
+                                    )}
+                                    <p className="muted small source-hint">{sourceHint}</p>
+                                </>
                             )}
-                            <p className="muted small source-hint">{sourceHint}</p>
                         </fieldset>
 
                         <section className="nexus-card section-card">

@@ -55,10 +55,40 @@ async function migrate() {
                 username TEXT UNIQUE NOT NULL,
                 password_hash TEXT NOT NULL,
                 display_name TEXT NOT NULL,
-                role TEXT NOT NULL CHECK (role IN ('super_admin', 'operator', 'viewer')),
+                role TEXT NOT NULL CHECK (role IN ('super_admin', 'operator', 'viewer', 'admin')),
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 active BOOLEAN NOT NULL DEFAULT true
             );
+        `);
+
+        // Broaden users.role to include 'admin' (SQL-only dashboard users). Existing
+        // DBs may still have a 3-value CHECK from before this migration — drop any
+        // check on users whose definition mentions role, then re-add a single
+        // canonical constraint. Idempotent on re-runs.
+        await client.query(`
+            DO $body$
+            DECLARE
+                r RECORD;
+            BEGIN
+                FOR r IN (
+                    SELECT c.conname::text AS cname
+                    FROM pg_constraint c
+                    JOIN pg_class t ON t.oid = c.conrelid
+                    JOIN pg_namespace n ON n.oid = t.relnamespace
+                    WHERE n.nspname = 'public'
+                      AND t.relname = 'users'
+                      AND c.contype = 'c'
+                      AND pg_get_constraintdef(c.oid) LIKE '%role%'
+                ) LOOP
+                    EXECUTE format('ALTER TABLE users DROP CONSTRAINT %I', r.cname);
+                END LOOP;
+            END
+            $body$;
+        `);
+        await client.query(`
+            ALTER TABLE users
+            ADD CONSTRAINT users_role_check
+            CHECK (role IN ('super_admin', 'operator', 'viewer', 'admin'));
         `);
 
         // audit_log: append-only. actor_id is nullable for failed logins where

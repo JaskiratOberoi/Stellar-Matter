@@ -426,6 +426,8 @@ if (runMigrate) {
 }
 
 const requireSuperAdmin = auth ? auth.requireRole('super_admin') : (_req, _res, next) => next();
+const requireRunStarter =
+    auth ? auth.requireRole('super_admin', 'operator', 'admin') : (_req, _res, next) => next();
 
 app.get('/api/health', (_req, res) => {
     res.json({ ok: true });
@@ -556,7 +558,7 @@ app.get('/api/runs/tiles', async (req, res) => {
     }
 });
 
-app.post('/api/run', requireSuperAdmin, async (req, res) => {
+app.post('/api/run', requireRunStarter, async (req, res) => {
     if (jobState.state === 'running') {
         return res.status(409).json({ error: 'A run is already in progress.' });
     }
@@ -565,6 +567,14 @@ app.post('/api/run', requireSuperAdmin, async (req, res) => {
     }
 
     const body = req.body && typeof req.body === 'object' ? req.body : {};
+    // Admin dashboard users: SQL-only (UI hides the data-source picker). Reject
+    // explicit scrape requests so tampering cannot bypass the policy.
+    if (req.user && req.user.role === 'admin') {
+        if (body.source != null && !/^sql$/i.test(String(body.source).trim())) {
+            return res.status(400).json({ error: 'Admin role runs are restricted to SQL (Listec).' });
+        }
+        body.source = 'sql';
+    }
     const source = resolveSource(body);
     const businessUnits = normalizeBusinessUnits(body);
     if (businessUnits.length && source !== 'sql') {
