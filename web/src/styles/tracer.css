@@ -37,6 +37,30 @@
     gap: 0.45rem 0.65rem;
 }
 
+.region-field-block {
+    margin-top: 1rem;
+}
+
+.region-city-block {
+    margin-top: 0.75rem;
+    padding-left: 0.35rem;
+    border-left: 2px solid rgba(148, 163, 184, 0.25);
+}
+
+.region-city-heading {
+    margin: 0.35rem 0 0.4rem !important;
+}
+
+.region-chip-count {
+    margin-left: 0.35rem;
+    font-size: 0.72em;
+    opacity: 0.85;
+}
+
+.tracer-region-stack-head {
+    margin: 1.25rem 0 0.5rem;
+}
+
 .tracer-banner-stack {
     display: flex;
     flex-direction: column;

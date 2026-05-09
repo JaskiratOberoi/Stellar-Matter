@@ -121,10 +121,33 @@ function projectRun(id, { main, pkg, mainPath, pkgPath }, normalizedMap) {
     const filter = (pkg.filter && typeof pkg.filter === 'object' && pkg.filter) || {};
     const req = (main && main.filtersRequested && typeof main.filtersRequested === 'object' && main.filtersRequested) || {};
     const filtersApplied = (main && main.filtersApplied) || (pkg.filtersApplied && typeof pkg.filtersApplied === 'object' ? pkg.filtersApplied : null);
-    const bu =
+    const filtRegion =
+        filter.region && typeof filter.region === 'object' && String(filter.region.key || '').trim() ? filter.region : null;
+    const reqRegion =
+        req.region && typeof req.region === 'object' && String(req.region.key || '').trim() ? req.region : null;
+    const regionObj =
+        filtRegion || reqRegion
+            ? {
+                  kind: String((filtRegion || reqRegion).kind || '').trim(),
+                  key: String((filtRegion || reqRegion).key || '').trim(),
+                  label:
+                      String((filtRegion || reqRegion).label || (filtRegion || reqRegion).key || '').trim() ||
+                      String((filtRegion || reqRegion).key || '').trim()
+              }
+            : null;
+    let tracerScopeNorm =
+        String(filter.tracerScope || '').trim().toLowerCase() ||
+        String(req.tracerScope || '').trim().toLowerCase() ||
+        '';
+    if (tracerScopeNorm !== 'region' && regionObj) tracerScopeNorm = 'region';
+    if (!tracerScopeNorm || tracerScopeNorm === 'bu') tracerScopeNorm = regionObj ? 'region' : 'bu';
+    let bu =
         (filter.bu != null && String(filter.bu).trim()) ||
         (req.bu != null && String(req.bu).trim()) ||
         null;
+    if ((!bu || String(bu).trim() === '') && tracerScopeNorm === 'region' && regionObj) {
+        bu = regionObj.label || regionObj.key;
+    }
     const source = (main && main.source) || (pkg && pkg.source) || 'scrape';
     const mode =
         (main && main.mode === 'urine_containers' && 'urine_containers') ||
@@ -485,11 +508,33 @@ async function listTiles(opts = {}) {
 }
 
 function tileFromRow(r, labelRows) {
+    const filt =
+        typeof r.filter === 'object' && r.filter !== null && !Array.isArray(r.filter)
+            ? r.filter
+            : {};
+    const filtRegion =
+        filt.region && typeof filt.region === 'object' && String(filt.region.key || '').trim() ? filt.region : null;
+    let tracerScopeFromFilter = String(filt.tracerScope || '').trim().toLowerCase();
+    if (tracerScopeFromFilter !== 'region' && filtRegion) tracerScopeFromFilter = 'region';
+    if (!tracerScopeFromFilter || tracerScopeFromFilter === 'bu') tracerScopeFromFilter = filtRegion ? 'region' : 'bu';
+    const kind = tracerScopeFromFilter === 'region' ? 'region' : 'bu';
+    const region =
+        filtRegion
+            ? {
+                  kind: String(filtRegion.kind || '').trim(),
+                  key: String(filtRegion.key || '').trim(),
+                  label: String(filtRegion.label || filtRegion.key || '').trim()
+              }
+            : null;
+    const tracerScope = kind === 'region' ? 'region' : 'bu';
     const occurrences = labelRows.reduce((s, x) => s + (Number(x.count) || 0), 0) + (r.other_tests_row_count || 0);
     return {
         id: r.id,
         startedAt: r.started_at ? new Date(r.started_at).toISOString() : null,
         finishedAt: r.finished_at ? new Date(r.finished_at).toISOString() : null,
+        tracerScope,
+        kind,
+        region,
         source: r.source,
         mode: r.mode,
         urineContainers: r.urine_containers || null,

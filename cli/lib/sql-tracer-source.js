@@ -49,6 +49,132 @@ const ALL_SPECIALTY_CODES = [
     ...L_HEPARIN_TEST_CODES
 ];
 
+const BRACKET_RE = /\[([^\]]+)\]/g;
+
+function normaliseLabelBracket(raw) {
+    return raw.replace(/\s+/g, ' ').trim();
+}
+
+function aggregateBracketsFromPackageRows(sliceRows) {
+    const rows = Array.isArray(sliceRows) ? sliceRows : [];
+    const labelOccurrences = {};
+    const labelToSidSets = {};
+    const sidSet = new Set();
+    let rowsWithBrackets = 0;
+    let otherTestsRowCount = 0;
+    /** @type {{ sid: string, testNamesText: string }[]} */
+    const rowsOut = [];
+
+    for (const row of rows) {
+        const sid = String(row.sid ?? '').trim();
+        const text = row.testNamesText ?? '';
+        rowsOut.push({ sid, testNamesText: text });
+        if (sid) sidSet.add(sid);
+        BRACKET_RE.lastIndex = 0;
+        const counts = {};
+        let m;
+        while ((m = BRACKET_RE.exec(text)) !== null) {
+            const label = normaliseLabelBracket(m[1] ?? '');
+            if (!label) continue;
+            counts[label] = (counts[label] ?? 0) + 1;
+        }
+        const labels = Object.keys(counts);
+        if (labels.length === 0) {
+            otherTestsRowCount++;
+            continue;
+        }
+        rowsWithBrackets++;
+        for (const [label, c] of Object.entries(counts)) {
+            labelOccurrences[label] = (labelOccurrences[label] || 0) + c;
+        }
+        if (!sid) continue;
+        const seenLbl = new Set();
+        BRACKET_RE.lastIndex = 0;
+        while ((m = BRACKET_RE.exec(text)) !== null) {
+            const label = normaliseLabelBracket(m[1] ?? '');
+            if (!label || seenLbl.has(label)) continue;
+            seenLbl.add(label);
+            if (!labelToSidSets[label]) labelToSidSets[label] = new Set();
+            labelToSidSets[label].add(sid);
+        }
+    }
+
+    const labelToSids = {};
+    for (const [lbl, set] of Object.entries(labelToSidSets)) {
+        labelToSids[lbl] = [...set].sort();
+    }
+
+    return {
+        labelOccurrences,
+        labelToSids,
+        rowCount: rows.length,
+        otherTestsRowCount,
+        rowsWithBrackets,
+        uniqueLabelCount: Object.keys(labelOccurrences).length,
+        sids: [...sidSet].sort(),
+        rows: rowsOut
+    };
+}
+
+/** @param {object} payload */
+function sidSetFromRegionBucket(payload, kind, regionKey) {
+    const k = String(regionKey || '')
+        .trim()
+        .toUpperCase();
+    if (!k) return new Set();
+    if (kind === 'city')
+        return new Set(Array.isArray(payload?.sidsByCity?.[k]) ? payload.sidsByCity[k].map(String) : []);
+    return new Set(Array.isArray(payload?.sidsByState?.[k]) ? payload.sidsByState[k].map(String) : []);
+}
+
+/**
+ * @param {object[]} listOfPayloads - one or many Listec `/packages` JSON bodies from the same date window (per-BU slices or global).
+ * @param {'city'|'state'} kind
+ * @param {string} regionKey - upper/normalised bucket key from `/api/regions`
+ */
+function buildSyntheticRegionalPayload(listOfPayloads, kind, regionKey) {
+    const payloads = Array.isArray(listOfPayloads) ? listOfPayloads.filter(Boolean) : [];
+    const mergedSliceRows = [];
+    for (const p of payloads) {
+        const allow = sidSetFromRegionBucket(p, kind, regionKey);
+        for (const row of Array.isArray(p.rows) ? p.rows : []) {
+            const sid = String(row.sid ?? '').trim();
+            if (!sid || !allow.has(sid)) continue;
+            mergedSliceRows.push(row);
+        }
+    }
+    const bracket = aggregateBracketsFromPackageRows(mergedSliceRows);
+    /** @type {Record<string,string[]>} */
+    const sidsByTestCode = {};
+    /** @type {Record<string,number>} */
+    const resultRowsByTestCode = {};
+    for (const code of ALL_SPECIALTY_CODES) {
+        const lc = code.toLowerCase();
+        const u = new Set();
+        let rowPart = 0;
+        for (const p of payloads) {
+            const reg = sidSetFromRegionBucket(p, kind, regionKey);
+            const arr = Array.isArray(p?.sidsByTestCode?.[lc]) ? p.sidsByTestCode[lc].map(String) : [];
+            const hit = arr.filter((sid) => reg.has(String(sid).trim()));
+            for (const sid of hit) u.add(String(sid).trim());
+            const fullLen = arr.length;
+            rowPart += fullLen
+                ? Math.round((((p.resultRowsByTestCode && p.resultRowsByTestCode[lc]) || 0) * hit.length) / fullLen)
+                : 0;
+        }
+        sidsByTestCode[lc] = [...u].sort();
+        resultRowsByTestCode[lc] = rowPart;
+    }
+    return {
+        ...bracket,
+        sidsByTestCode,
+        resultRowsByTestCode,
+        filters: payloads[0]?.filters || null,
+        resolved: payloads[0]?.resolved || null,
+        rows: bracket.rows
+    };
+}
+
 function trimOrNull(v) {
     if (v == null) return null;
     const s = String(v).trim();
@@ -76,7 +202,7 @@ function toIsoDate(value) {
  * never set `testCode` because that would re-narrow the SP and defeat the
  * whole optimisation.
  */
-function buildQueryString({ bu, fromDate, toDate, fromHour, toHour, bucketCodes }) {
+function buildQueryString({ bu, fromDate, toDate, fromHour, toHour, bucketCodes, bucketCityKeys, bucketStateKeys }) {
     const params = new URLSearchParams();
     const fromIso = toIsoDate(fromDate);
     const toIso = toIsoDate(toDate) || fromIso;
@@ -99,6 +225,10 @@ function buildQueryString({ bu, fromDate, toDate, fromHour, toHour, bucketCodes 
     if (bucketCodes && bucketCodes.length > 0) {
         params.set('bucketTestCodes', bucketCodes.join(','));
     }
+    const cityCsv = bucketCityKeys && bucketCityKeys.length ? bucketCityKeys.join(',') : '';
+    const stateCsv = bucketStateKeys && bucketStateKeys.length ? bucketStateKeys.join(',') : '';
+    if (cityCsv) params.set('bucketCities', cityCsv);
+    if (stateCsv) params.set('bucketStates', stateCsv);
     return params.toString();
 }
 
@@ -155,8 +285,11 @@ function writeModeArtefact(ctx) {
         startedAtIso,
         runId,
         orgId,
-        outDir
+        outDir,
+        tracerTarget
     } = ctx;
+
+    const target = tracerTarget || { type: 'bu', bu: bu != null ? String(bu) : null };
 
     // Tracer always uses the FULL payload's labels for the general-mode tile
     // (Letter Heads / Envelopes / Other tests). Specialty tiles never read
@@ -204,7 +337,12 @@ function writeModeArtefact(ctx) {
     }
 
     const filters = {
-        bu: bu != null ? String(bu) : null,
+        bu: target.type === 'bu' && target.bu ? String(target.bu) : null,
+        tracerScope: target.type,
+        region:
+            target.type === 'region'
+                ? { kind: target.kind, key: target.key, label: target.label || target.key }
+                : null,
         status: null,
         testCode: null,
         fromDate: fromDate || null,
@@ -218,9 +356,12 @@ function writeModeArtefact(ctx) {
         deptNo: null
     };
 
+    let note = `tracer-run: bucketed ${ALL_SPECIALTY_CODES.length} test code(s) from Listec`;
+    if (target.type === 'region') note += `; region=${target.kind}:${target.label || target.key}`;
+
     const filtersApplied = {
         query: requestUrl ? requestUrl.split('?')[1] || '' : '',
-        notes: [`tracer-run: bucketed ${ALL_SPECIALTY_CODES.length} test code(s) from a single SP execution`],
+        notes: [note],
         spFilters: payload.filters || null,
         resolved: payload.resolved || null
     };
@@ -234,6 +375,11 @@ function writeModeArtefact(ctx) {
         listecApiBase,
         primaryUrl: null,
         backupUrlUsed: false,
+        tracerScope: target.type,
+        region:
+            target.type === 'region'
+                ? { kind: target.kind, key: target.key, label: target.label || target.key }
+                : null,
         filtersRequested: { ...filters },
         filtersApplied,
         dryRun: false,
@@ -300,28 +446,180 @@ function writeModeArtefact(ctx) {
 }
 
 /**
- * Run one Tracer batch — N BUs × 6 modes derived from N Listec calls (one
- * per BU, fired with capped concurrency).
- *
+ * @param {unknown} optsRegions - body.regions `{ cities:[{key,label}], states:[…] }`
+ */
+function parseRegions(optsRegions) {
+    const raw = optsRegions && typeof optsRegions === 'object' ? optsRegions : {};
+    /** @type {Array<{ key: string; label?: string } | string>} */
+    const cities = Array.isArray(raw.cities) ? raw.cities : [];
+    /** @type {Array<{ key: string; label?: string } | string>} */
+    const states = Array.isArray(raw.states) ? raw.states : [];
+    /** @type {Record<string, string>} */
+    const cityLabels = {};
+    /** @type {Record<string, string>} */
+    const stateLabels = {};
+
+    /** @type {string[]} */
+    const cityKeys = [
+        ...new Set(
+            cities
+                .map((c) => {
+                    const o = typeof c === 'string' ? { key: c, label: c } : c || {};
+                    const k = String(o.key ?? '')
+                        .trim()
+                        .toUpperCase();
+                    if (!k) return '';
+                    cityLabels[k] =
+                        String(o.label ?? o.key ?? k)
+                            .trim() || k;
+                    return k;
+                })
+                .filter(Boolean)
+        )
+    ];
+    /** @type {string[]} */
+    const stateKeys = [
+        ...new Set(
+            states
+                .map((s) => {
+                    const o = typeof s === 'string' ? { key: s, label: s } : s || {};
+                    const k = String(o.key ?? '')
+                        .trim()
+                        .toUpperCase();
+                    if (!k) return '';
+                    stateLabels[k] =
+                        String(o.label ?? o.key ?? k)
+                            .trim() || k;
+                    return k;
+                })
+                .filter(Boolean)
+        )
+    ];
+
+    /** @type {{ kind: 'city' | 'state'; key: string; label: string }[]} */
+    const targets = [];
+    for (const key of stateKeys) targets.push({ kind: 'state', key, label: stateLabels[key] });
+    for (const key of cityKeys) targets.push({ kind: 'city', key, label: cityLabels[key] });
+    return { cityKeys, stateKeys, targets };
+}
+
+async function fetchTracerPayload(apiBase, { bu, fromDate, toDate, fromHour, toHour, cityKeys, stateKeys }) {
+    const qs = buildQueryString({
+        bu,
+        fromDate,
+        toDate,
+        fromHour,
+        toHour,
+        bucketCodes: ALL_SPECIALTY_CODES,
+        bucketCityKeys: cityKeys && cityKeys.length ? cityKeys : undefined,
+        bucketStateKeys: stateKeys && stateKeys.length ? stateKeys : undefined
+    });
+    const url = `${apiBase}/api/worksheet-reports/packages?${qs}`;
+    console.log(`[tracer-sql] GET ${url}`);
+    const res = await fetch(url, { headers: { Accept: 'application/json' } });
+    const text = await res.text();
+    if (!res.ok) {
+        throw new Error(`Listec API ${res.status} (${bu || 'global'}): ${text.slice(0, 500)}`);
+    }
+    let payload;
+    try {
+        payload = JSON.parse(text);
+    } catch (e) {
+        throw new Error(`Listec non-JSON (${bu || 'global'}): ${e.message}`);
+    }
+    return { url, payload };
+}
+
+/** @returns {void} */
+function assertTracerPayload(payload, { needGeo, label }) {
+    if (!payload || typeof payload.sidsByTestCode !== 'object') {
+        throw new Error(`Listec response missing sidsByTestCode for ${label} — redeploy/restart Listec.`);
+    }
+    if (
+        needGeo &&
+        typeof payload.sidsByCity !== 'object' &&
+        typeof payload.sidsByState !== 'object'
+    ) {
+        throw new Error(
+            `Region bucketing missing on Listec response for ${label}. Deploy Listec with bucketCities/bucketStates and grant listec_ro SELECT on Noble.dbo.tbl_med_mcc_unit_master so MCC lookup can populate geography buckets.`
+        );
+    }
+}
+
+function writeSixModesForPayload(payload, meta) {
+    const {
+        tracerTarget,
+        fromDate,
+        toDate,
+        fromHour,
+        toHour,
+        listecApiBase,
+        url,
+        orgId,
+        outDir,
+        baseMsOffset
+    } = meta;
+
+    /** @type {Record<string,string>} */
+    const runIds = {};
+    let lastMain = null;
+    let lastPkg = null;
+    const modes = ['general', ...SPECIALTY_MODES.map((m) => m.mode)];
+    /** @type {Record<string,string[]|null>} */
+    const codesByMode = { general: null };
+    /** @type {Record<string,string|null>} */
+    const blobKeyByMode = { general: null };
+    for (const m of SPECIALTY_MODES) {
+        codesByMode[m.mode] = m.codes;
+        blobKeyByMode[m.mode] = m.blobKey;
+    }
+
+    for (let mi = 0; mi < modes.length; mi++) {
+        const mode = modes[mi];
+        const startedAtIso = new Date(baseMsOffset + mi).toISOString();
+        const runId = startedAtIso.replace(/[:.]/g, '-');
+        const dispBu = tracerTarget.type === 'bu' ? tracerTarget.bu : tracerTarget.label;
+        const written = writeModeArtefact({
+            mode,
+            blobKey: blobKeyByMode[mode],
+            codes: codesByMode[mode] || [],
+            payload,
+            bu: dispBu,
+            fromDate,
+            toDate,
+            fromHour,
+            toHour,
+            listecApiBase,
+            requestUrl: url,
+            startedAtIso,
+            runId,
+            orgId,
+            outDir,
+            tracerTarget
+        });
+        runIds[mode] = written.runId;
+        lastMain = written.outMainPath;
+        lastPkg = written.outPackagesPath;
+    }
+    return { runIds, lastOutMainPath: lastMain, lastOutPackagesPath: lastPkg };
+}
+
+/**
  * @param {object} opts
- * @param {string[]} opts.businessUnits - resolved BU names/ids passed to Listec
- * @param {string} opts.fromDate
- * @param {string} opts.toDate
- * @param {number=} opts.fromHour
- * @param {number=} opts.toHour
- * @param {string} opts.orgId
- * @param {string} opts.outDir
- * @param {number=} opts.concurrency - default 3
- * @param {string=} opts.listecApiBase - default LISTEC_API_BASE_URL or 127.0.0.1:3100
- * @param {(item: { bu: string, state: 'queued'|'running'|'done'|'failed', runIds?: Record<string, string>, error?: string|null }) => void=} opts.onProgress
+ * @param {{ cities?: object[]; states?: object[] }} [opts.regions]
+ * @param {(item: { bu: string, state: string, runIds?: object, error?: string|null }) => void} [opts.onProgress]
  *
- * @returns {Promise<{ items: Array<{ bu: string, state: string, runIds: Record<string,string>, error: string|null, lastOutMainPath: string|null, lastOutPackagesPath: string|null }>, completed: string[], failed: string[] }>}
+ * @returns {Promise<{ items: object[], regionItems: object[], completed: string[], failed: string[], regionCompleted: string[], regionFailed: string[], buPayloadList: object[] }>}
  */
 async function runTracerBatch(opts) {
     const businessUnits = Array.isArray(opts.businessUnits) ? opts.businessUnits.slice() : [];
-    if (businessUnits.length === 0) {
-        const err = new Error('runTracerBatch: businessUnits required');
-        err.code = 'TRACER_NO_BUS';
+    const { cityKeys, stateKeys, targets } = parseRegions(opts.regions);
+    const hasBu = businessUnits.length > 0;
+    const hasReg = targets.length > 0;
+
+    if (!hasBu && !hasReg) {
+        const err = new Error('runTracerBatch: pass businessUnits and/or regions (cities/states).');
+        err.code = 'TRACER_NO_SCOPE';
         throw err;
     }
 
@@ -333,114 +631,193 @@ async function runTracerBatch(opts) {
     const concurrency = opts.concurrency != null ? Number(opts.concurrency) : 3;
     const onProgress = typeof opts.onProgress === 'function' ? opts.onProgress : () => {};
 
-    /** @type {Array<{ bu: string, state: string, runIds: Record<string,string>, error: string|null, lastOutMainPath: string|null, lastOutPackagesPath: string|null }>} */
-    const items = businessUnits.map((bu) => ({
-        bu,
-        state: 'queued',
-        runIds: {},
-        error: null,
-        lastOutMainPath: null,
-        lastOutPackagesPath: null
-    }));
+    /** @type {object[]} Listec payload bodies (successful fetches only) — used to merge geography when BU+region combined */
+    /** @type {object[]} */
+    const buPayloadList = [];
+
+    /** @type {{ bu: string, state: string, runIds: Record<string,string>, error: string|null, lastOutMainPath: string|null, lastOutPackagesPath: string|null }[]} */
+    const items = hasBu
+        ? businessUnits.map((bu) => ({
+              bu,
+              state: 'queued',
+              runIds: {},
+              error: null,
+              lastOutMainPath: null,
+              lastOutPackagesPath: null
+          }))
+        : [];
 
     for (const it of items) onProgress({ ...it });
 
-    const tasks = businessUnits.map((bu, i) => async () => {
-        const item = items[i];
-        item.state = 'running';
-        onProgress({ ...item });
+    if (hasBu) {
+        const geoKeysForFetch = hasReg ? { cityKeys, stateKeys } : { cityKeys: [], stateKeys: [] };
 
-        try {
-            const qs = buildQueryString({
-                bu,
-                fromDate: opts.fromDate,
-                toDate: opts.toDate,
-                fromHour: opts.fromHour,
-                toHour: opts.toHour,
-                bucketCodes: ALL_SPECIALTY_CODES
-            });
-            const url = `${apiBase}/api/worksheet-reports/packages?${qs}`;
-            console.log(`[tracer-sql] GET ${url}`);
-            const r = await fetch(url, { headers: { Accept: 'application/json' } });
-            const text = await r.text();
-            if (!r.ok) {
-                throw new Error(`Listec API ${r.status} for BU=${bu}: ${text.slice(0, 500)}`);
-            }
-            let payload;
+        const tasks = businessUnits.map((bu, i) => async () => {
+            const item = items[i];
+            item.state = 'running';
+            onProgress({ ...item });
             try {
-                payload = JSON.parse(text);
-            } catch (parseErr) {
-                throw new Error(`Listec API returned non-JSON for BU=${bu}: ${parseErr.message}`);
-            }
-
-            // Defensive contract check — surface a clear error if Listec is
-            // older than this lis-nav-bot. Without sidsByTestCode we cannot
-            // bucket SIDs, so we'd silently produce empty specialty tiles.
-            if (!payload || typeof payload.sidsByTestCode !== 'object') {
-                throw new Error(
-                    `Listec response missing sidsByTestCode for BU=${bu} — Listec service is older than lis-nav-bot. Restart the Listec service after deploying the bucketTestCodes change.`
-                );
-            }
-
-            // Stamp 6 distinct ISO timestamps (1ms apart) so each mode gets a
-            // unique slug. Sub-second offset keeps tile sort order intuitive
-            // (general first, then urine, EDTA, citrate, S.Hep, L.Hep) within
-            // the same BU's batch.
-            const baseMs = Date.now();
-            const modes = ['general', ...SPECIALTY_MODES.map((m) => m.mode)];
-            const codesByMode = { general: null };
-            const blobKeyByMode = { general: null };
-            for (const m of SPECIALTY_MODES) {
-                codesByMode[m.mode] = m.codes;
-                blobKeyByMode[m.mode] = m.blobKey;
-            }
-
-            for (let mi = 0; mi < modes.length; mi++) {
-                const mode = modes[mi];
-                const startedAtIso = new Date(baseMs + mi).toISOString();
-                const runId = startedAtIso.replace(/[:.]/g, '-');
-                const written = writeModeArtefact({
-                    mode,
-                    blobKey: blobKeyByMode[mode],
-                    codes: codesByMode[mode] || [],
-                    payload,
+                const { url, payload } = await fetchTracerPayload(apiBase, {
                     bu,
                     fromDate: opts.fromDate,
                     toDate: opts.toDate,
                     fromHour: opts.fromHour,
                     toHour: opts.toHour,
-                    listecApiBase: apiBase,
-                    requestUrl: url,
-                    startedAtIso,
-                    runId,
-                    orgId,
-                    outDir
+                    cityKeys: geoKeysForFetch.cityKeys,
+                    stateKeys: geoKeysForFetch.stateKeys
                 });
-                item.runIds[mode] = written.runId;
-                item.lastOutMainPath = written.outMainPath;
-                item.lastOutPackagesPath = written.outPackagesPath;
+                assertTracerPayload(payload, { needGeo: hasReg, label: `BU=${bu}` });
+                buPayloadList.push(payload);
+                const w = writeSixModesForPayload(payload, {
+                    tracerTarget: { type: 'bu', bu },
+                    fromDate: opts.fromDate,
+                    toDate: opts.toDate,
+                    fromHour: opts.fromHour,
+                    toHour: opts.toHour,
+                    listecApiBase: apiBase,
+                    url,
+                    orgId,
+                    outDir,
+                    baseMsOffset: Date.now()
+                });
+                item.runIds = w.runIds;
+                item.lastOutMainPath = w.lastOutMainPath;
+                item.lastOutPackagesPath = w.lastOutPackagesPath;
+                item.state = 'done';
+                item.error = null;
+            } catch (e) {
+                item.state = 'failed';
+                item.error = String(e && e.message ? e.message : e);
             }
-
-            item.state = 'done';
             onProgress({ ...item });
             return item;
-        } catch (e) {
-            item.state = 'failed';
-            item.error = String(e && e.message ? e.message : e);
-            onProgress({ ...item });
-            return item;
-        }
-    });
+        });
 
-    await runWithConcurrency(tasks, concurrency);
+        await runWithConcurrency(tasks, concurrency);
+    }
+
+    /** Single global fetch — region-only (no BU filter) — only if no BU list */
+    if (!hasBu && hasReg) {
+        const { url, payload } = await fetchTracerPayload(apiBase, {
+            bu: undefined,
+            fromDate: opts.fromDate,
+            toDate: opts.toDate,
+            fromHour: opts.fromHour,
+            toHour: opts.toHour,
+            cityKeys,
+            stateKeys
+        });
+        assertTracerPayload(payload, { needGeo: true, label: 'global-region' });
+        buPayloadList.push(payload);
+        // BU items empty — region loops below consume buPayloadList
+    }
 
     const completed = items.filter((it) => it.state === 'done').map((it) => it.bu);
     const failed = items.filter((it) => it.state === 'failed').map((it) => it.bu);
-    return { items, completed, failed };
+
+    /** Region progress rows mimic BU shape for FanOut strip */
+    /** @type {{ bu: string, state: string, runIds: Record<string,string>, error: string|null, lastOutMainPath: string|null, lastOutPackagesPath: string|null, regionKind?: string, regionKey?: string }[]} */
+    const regionItems = [];
+    /** @type {string[]} */
+    const regionCompleted = [];
+    /** @type {string[]} */
+    const regionFailed = [];
+
+    if (hasReg) {
+        if (buPayloadList.length === 0) {
+            for (const targ of targets) {
+                const progressLabel =
+                    targ.kind === 'city' ? `City · ${targ.label}` : `State · ${targ.label}`;
+                regionItems.push({
+                    bu: progressLabel,
+                    regionKind: targ.kind,
+                    regionKey: targ.key,
+                    state: 'failed',
+                    runIds: {},
+                    error: 'No Listec payloads succeeded for this batch — expand geo stats after BU runs succeed.',
+                    lastOutMainPath: null,
+                    lastOutPackagesPath: null
+                });
+                regionFailed.push(progressLabel);
+            }
+            for (const rit of regionItems) onProgress({ ...rit });
+        } else {
+            let rIdx = 0;
+            for (const targ of targets) {
+                const progressLabel =
+                    targ.kind === 'city' ? `City · ${targ.label}` : `State · ${targ.label}`;
+                regionItems.push({
+                    bu: progressLabel,
+                    regionKind: targ.kind,
+                    regionKey: targ.key,
+                    state: 'queued',
+                    runIds: {},
+                    error: null,
+                    lastOutMainPath: null,
+                    lastOutPackagesPath: null
+                });
+            }
+            for (const rit of regionItems) onProgress({ ...rit });
+
+            for (let i = 0; i < targets.length; i++) {
+                const targ = targets[i];
+                const rit = regionItems[i];
+                rit.state = 'running';
+                onProgress({ ...rit });
+                try {
+                    const synthetic = buildSyntheticRegionalPayload(buPayloadList, targ.kind, targ.key);
+                    const progressLabel =
+                        targ.kind === 'city' ? `City · ${targ.label}` : `State · ${targ.label}`;
+                    const tracerTarget = { type: 'region', kind: targ.kind, key: targ.key, label: targ.label };
+                    const baseMsOffset = Date.now() + rIdx * 60000;
+                    rIdx++;
+
+                    assertTracerPayload(synthetic, {
+                        needGeo: false,
+                        label: `Region ${progressLabel}`
+                    });
+                    const w = writeSixModesForPayload(synthetic, {
+                        tracerTarget,
+                        fromDate: opts.fromDate,
+                        toDate: opts.toDate,
+                        fromHour: opts.fromHour,
+                        toHour: opts.toHour,
+                        listecApiBase: apiBase,
+                        url: `${apiBase}/api/worksheet-reports/packages?[synthetic-region:${progressLabel}]`,
+                        orgId,
+                        outDir,
+                        baseMsOffset
+                    });
+                    rit.runIds = w.runIds;
+                    rit.lastOutMainPath = w.lastOutMainPath;
+                    rit.lastOutPackagesPath = w.lastOutPackagesPath;
+                    rit.state = 'done';
+                    rit.error = null;
+                    regionCompleted.push(progressLabel);
+                } catch (e) {
+                    rit.state = 'failed';
+                    rit.error = String(e && e.message ? e.message : e);
+                    regionFailed.push(String(rit.bu));
+                }
+                onProgress({ ...rit });
+            }
+        }
+    }
+
+    return {
+        items,
+        regionItems,
+        completed,
+        failed,
+        regionCompleted,
+        regionFailed,
+        buPayloadList
+    };
 }
 
 module.exports = {
     runTracerBatch,
+    parseTracerRegions: parseRegions,
     ALL_SPECIALTY_CODES,
     SPECIALTY_MODES,
     URINE_CONTAINER_TEST_CODES,

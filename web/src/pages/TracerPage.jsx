@@ -1,7 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch } from '../apiClient.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
-import { mapTilesToBanners, tracerBuKey, waitForRunIdle } from '../lib/tracer.js';
+import { useRegions } from '../hooks/useRegions.js';
+import { useTracerRegionSelection } from '../hooks/useTracerRegionSelection.js';
+import {
+    buildRegionsSubmitPayload,
+    mapRegionTilesToBanners,
+    mapTilesToBanners,
+    tracerBuKey,
+    waitForRunIdle
+} from '../lib/tracer.js';
 import { TracerBanner } from '../components/TracerBanner.jsx';
 import '../styles/tracer.css';
 import { TracerForm } from '../components/TracerForm.jsx';
@@ -43,45 +51,100 @@ export function TracerPage({
     const { authRequired, user } = useAuth();
     const viewerDisabled = Boolean(authRequired && user && user.role === 'viewer');
 
+    const { states: regionStates, error: regionsFetchErr, loading: regionsLoading } = useRegions();
+    const {
+        selectedStates: regionSelectedStates,
+        selectedCities: regionSelectedCities,
+        toggleState,
+        toggleCity,
+        clearRegions,
+        pruneStale
+    } = useTracerRegionSelection();
+
     const [bannerRows, setBannerRows] = useState(
-        /** @type {{ buKey: string, bu: string, fromDate: string, toDate: string, generalTile: object | null, urineTile: object | null, edtaTile: object | null, citrateTile: object | null, sHeparinTile: object | null, lHeparinTile: object | null }[]} */ ([])
+        /** @type {{ buKey: string, bu: string, fromDate: string, toDate: string, generalTile: object | null, urineTile: object | null, edtaTile: object | null, citrateTile: object | null, sHeparinTile: object | null, lHeparinTile: object | null }[]} */ (
+            []
+        )
+    );
+    const [regionBannerRows, setRegionBannerRows] = useState(
+        /** @type {{ bannerKey: string, label: string, kind: string, key: string, fromDate: string, toDate: string, generalTile: object | null, urineTile: object | null, edtaTile: object | null, citrateTile: object | null, sHeparinTile: object | null, lHeparinTile: object | null }[]} */ (
+            []
+        )
     );
     const [localError, setLocalError] = useState( /** @type {string | null} */ (null));
     const [tracerBusy, setTracerBusy] = useState(false);
     const [openTile, setOpenTile] = useState( /** @type {object | null} */ (null));
     const [openTileKind, setOpenTileKind] = useState('letterheads');
+    /** Print focus: BU key (`bu:normalized`) or region `tracerRegionRowKey`. */
     const [printFocusKey, setPrintFocusKey] = useState( /** @type {string | null} */ (null));
 
-    const pendingBannerRef = useRef( /** @type {null | { batchIso: string, from: string, to: string, bus: Set<string> }} */ (null));
+    const pendingBannerRef = useRef(
+        /** @type {null | { batchIso: string, from: string, to: string, bus: Set<string>, regionTargets: { kind: string, key: string, label: string }[] }} */ (
+            null
+        )
+    );
     const busy = running || tracerBusy;
     const showFanOut = running && !!runFanOut;
 
     const tilesForIndex = visibleTiles ?? tiles;
 
     useEffect(() => {
+        if (!regionStates.length) return;
+        const validStateKeys = new Set(regionStates.map((s) => s.key));
+        const validCityKeys = new Set();
+        for (const s of regionStates) {
+            for (const c of s.cities || []) validCityKeys.add(c.key);
+        }
+        pruneStale(validStateKeys, validCityKeys);
+    }, [regionStates, pruneStale]);
+
+    useEffect(() => {
         const p = pendingBannerRef.current;
         if (!p) return;
         pendingBannerRef.current = null;
-        const incoming = mapTilesToBanners(tiles, p.bus, p.batchIso, p.from, p.to);
-        setBannerRows((prev) => {
-            const m = new Map(prev.map((r) => [r.buKey, { ...r }]));
-            for (const row of incoming) {
-                const k = tracerBuKey(row.bu);
-                m.set(k, {
-                    buKey: k,
-                    bu: row.bu,
-                    generalTile: row.generalTile,
-                    urineTile: row.urineTile,
-                    edtaTile: row.edtaTile,
-                    citrateTile: row.citrateTile,
-                    sHeparinTile: row.sHeparinTile,
-                    lHeparinTile: row.lHeparinTile,
-                    fromDate: p.from,
-                    toDate: p.to
-                });
-            }
-            return [...m.values()];
-        });
+
+        const from = p.from;
+        const to = p.to;
+        const batchIso = p.batchIso;
+
+        if (p.bus && p.bus.size > 0) {
+            const incoming = mapTilesToBanners(tiles, p.bus, batchIso, from, to);
+            setBannerRows((prev) => {
+                const m = new Map(prev.map((r) => [r.buKey, { ...r }]));
+                for (const row of incoming) {
+                    const k = tracerBuKey(row.bu);
+                    m.set(k, {
+                        buKey: k,
+                        bu: row.bu,
+                        generalTile: row.generalTile,
+                        urineTile: row.urineTile,
+                        edtaTile: row.edtaTile,
+                        citrateTile: row.citrateTile,
+                        sHeparinTile: row.sHeparinTile,
+                        lHeparinTile: row.lHeparinTile,
+                        fromDate: from,
+                        toDate: to
+                    });
+                }
+                return [...m.values()];
+            });
+        }
+
+        const rt = p.regionTargets || [];
+        if (rt.length > 0) {
+            const incomingReg = mapRegionTilesToBanners(tiles, rt, batchIso, from, to);
+            setRegionBannerRows((prev) => {
+                const m = new Map(prev.map((r) => [r.bannerKey, { ...r }]));
+                for (const row of incomingReg) {
+                    m.set(row.bannerKey, {
+                        ...row,
+                        fromDate: from,
+                        toDate: to
+                    });
+                }
+                return [...m.values()];
+            });
+        }
     }, [tiles]);
 
     useEffect(() => {
@@ -99,17 +162,11 @@ export function TracerPage({
         [tilesForIndex]
     );
 
-    const startPrintBu = useCallback((buKey) => {
-        setPrintFocusKey(buKey);
+    const startPrintSection = useCallback((key) => {
+        setPrintFocusKey(key);
         requestAnimationFrame(() => window.print());
     }, []);
 
-    /**
-     * Build the body for the new combined Tracer endpoint. Unlike the legacy
-     * per-mode dance (which posted 6 bodies, one per mode), `/api/tracer-run`
-     * derives every mode from a single Listec SP execution per BU and so
-     * doesn't need a `mode` field.
-     */
     const buildTracerBody = useCallback((snap) => {
         const body = { source: 'sql' };
         if (snap.fromDate) body.fromDate = snap.fromDate;
@@ -123,6 +180,10 @@ export function TracerPage({
             body.bu = String(snap.bu).trim();
             body.businessUnits = [body.bu];
         }
+        const { regions } = buildRegionsSubmitPayload(snap.regionStatesTree, snap.selectedRegions.states, snap.selectedRegions.cities);
+        if (regions.states.length > 0 || regions.cities.length > 0) {
+            body.regions = regions;
+        }
         return body;
     }, []);
 
@@ -135,20 +196,27 @@ export function TracerPage({
             if (bus.size === 0 && String(snap.bu || '').trim()) {
                 bus.add(String(snap.bu).trim());
             }
+            const { bannerTargets } = buildRegionsSubmitPayload(
+                snap.regionStatesTree,
+                snap.selectedRegions.states,
+                snap.selectedRegions.cities
+            );
+
             setTracerBusy(true);
             try {
-                // One call to the new combined endpoint replaces the old
-                // 6-step sequential dance. lis-nav-bot fans out across BUs
-                // (cap 3 in parallel) and synthesises all 6 mode artefacts
-                // per BU from a single Listec SP execution. For a 2-BU month
-                // run this drops 30 SP calls to 2.
                 const r = await submit(buildTracerBody(snap), { endpoint: '/api/tracer-run' });
                 if (!r.ok) {
                     setLocalError(String(r.error || 'Tracer run failed'));
                     return;
                 }
                 await waitForRunIdle(() => apiFetch('/api/run/status'));
-                pendingBannerRef.current = { batchIso, from: snap.fromDate, to: snap.toDate, bus };
+                pendingBannerRef.current = {
+                    batchIso,
+                    from: snap.fromDate,
+                    to: snap.toDate,
+                    bus,
+                    regionTargets: bannerTargets
+                };
                 try {
                     await reloadTiles();
                 } catch (loadErr) {
@@ -164,30 +232,44 @@ export function TracerPage({
         [buildTracerBody, reloadTiles, submit, viewerDisabled]
     );
 
+    const buCount = bannerRows.filter((row) => row.generalTile || row.urineTile || row.edtaTile).length;
+    const regCount = regionBannerRows.filter(
+        (row) => row.generalTile || row.urineTile || row.edtaTile || row.citrateTile || row.sHeparinTile || row.lHeparinTile
+    ).length;
+    const printSummaryParts = [];
+    if (buCount) printSummaryParts.push(`${buCount} BU${buCount === 1 ? '' : 's'}`);
+    if (regCount) printSummaryParts.push(`${regCount} region${regCount === 1 ? '' : 's'}`);
+
     return (
         <div className={`tracer-page${printFocusKey ? ' tracer-print-single' : ''}`}>
             <div className="tracer-print-root">
                 <div className="tracer-print-header" aria-hidden="true">
                     <h1 className="tracer-print-title">Stellar Matter — Tracer</h1>
-                    {bannerRows.length > 0 ? (
-                        <p className="tracer-print-sub muted small">
-                            {bannerRows.length} business unit{bannerRows.length === 1 ? '' : 's'}
-                        </p>
+                    {printSummaryParts.length > 0 ? (
+                        <p className="tracer-print-sub muted small">{printSummaryParts.join(' · ')}</p>
                     ) : null}
                 </div>
 
                 <div className="tracer-hide-print">
                     {showFanOut && <RunProgress payload={runFanOut} />}
                     {running && !showFanOut && <RunProgress fallbackText="Starting run…" />}
-                    {!running && tracerBusy && (
-                        <RunProgress fallbackText="Preparing next tracer step…" />
-                    )}
+                    {!running && tracerBusy && <RunProgress fallbackText="Preparing next tracer step…" />}
                 </div>
 
                 <TracerForm
                     buOptions={buOptions}
                     buSelected={buSelected}
                     buActions={buActions}
+                    regionStates={regionStates}
+                    regionLoading={regionsLoading}
+                    regionLookupError={regionsFetchErr}
+                    regionSelectedStates={regionSelectedStates}
+                    regionSelectedCities={regionSelectedCities}
+                    regionActions={{
+                        toggleState,
+                        toggleCity,
+                        clearRegions
+                    }}
                     busy={busy}
                     viewerDisabled={viewerDisabled}
                     onRun={handleRun}
@@ -216,8 +298,39 @@ export function TracerPage({
                             sHeparinTile={row.sHeparinTile}
                             lHeparinTile={row.lHeparinTile}
                             clientPagesByNorm={clientPagesByNorm}
-                            isPrintTarget={printFocusKey === row.buKey}
-                            onPrintSection={() => startPrintBu(row.buKey)}
+                            isPrintTarget={printFocusKey === `bu:${row.buKey}`}
+                            onPrintSection={() => startPrintSection(`bu:${row.buKey}`)}
+                            onOpenDetail={(tile, kind) => {
+                                if (!tile) return;
+                                setOpenTile(tile);
+                                setOpenTileKind(kind);
+                            }}
+                        />
+                    ))}
+                </div>
+
+                {regionBannerRows.length > 0 ? (
+                    <div className="tracer-region-stack-head tracer-hide-print">
+                        <span className="eyebrow-lite field-label">Region tracer</span>
+                    </div>
+                ) : null}
+
+                <div className="tracer-banner-stack">
+                    {regionBannerRows.map((row) => (
+                        <TracerBanner
+                            key={row.bannerKey}
+                            bu={row.label}
+                            fromDate={row.fromDate}
+                            toDate={row.toDate}
+                            generalTile={row.generalTile}
+                            urineTile={row.urineTile}
+                            edtaTile={row.edtaTile}
+                            citrateTile={row.citrateTile}
+                            sHeparinTile={row.sHeparinTile}
+                            lHeparinTile={row.lHeparinTile}
+                            clientPagesByNorm={clientPagesByNorm}
+                            isPrintTarget={printFocusKey === row.bannerKey}
+                            onPrintSection={() => startPrintSection(row.bannerKey)}
                             onOpenDetail={(tile, kind) => {
                                 if (!tile) return;
                                 setOpenTile(tile);

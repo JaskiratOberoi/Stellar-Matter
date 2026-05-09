@@ -1,0 +1,9 @@
+{
+  "cities": {
+    "CHANDIGDH": { "key": "CHANDIGARH", "label": "Chandigarh" },
+    "ALLAHABAD": { "key": "PRAYAGRAJ", "label": "Prayagraj" },
+    "ALLAHABAD ": { "key": "PRAYAGRAJ", "label": "Prayagraj" },
+    "prayagraj": { "key": "PRAYAGRAJ", "label": "Prayagraj" }
+  },
+  "states": {}
+}

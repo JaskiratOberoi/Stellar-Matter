@@ -30,6 +30,11 @@ export interface PackagesAggregate {
      */
     sidsByTestCode?: Record<string, string[]>;
     resultRowsByTestCode?: Record<string, number>;
+    /** Tracer regions — bucket keys match `bucketCities` / `bucketStates` param values (upper, underscore-normalised city/state keys). */
+    sidsByCity?: Record<string, string[]>;
+    sidsByState?: Record<string, string[]>;
+    resultRowsByCity?: Record<string, number>;
+    resultRowsByState?: Record<string, number>;
 }
 
 export interface AggregateOptions {
@@ -40,6 +45,11 @@ export interface AggregateOptions {
      * shape regardless of data presence.
      */
     bucketCodes?: string[];
+    /** Normalised city keys (same as `/api/regions` city.key). Requires `mccGeoLookup`. */
+    bucketCities?: string[];
+    bucketStates?: string[];
+    /** MCCUnitCode (uppercase) → geography from tbl_med_mcc_unit_master */
+    mccGeoLookup?: Map<string, { cityKey: string; stateKey: string }>;
 }
 
 const BRACKET_RE = /\[([^\]]+)\]/g;
@@ -155,6 +165,62 @@ export function aggregatePackages(
         }
         out.sidsByTestCode = sidsByCodeOut;
         out.resultRowsByTestCode = rowsByCode;
+    }
+
+    const cityKeys = opts.bucketCities?.map((k) => String(k || '').trim().toUpperCase()).filter(Boolean) ?? [];
+    const stateKeys = opts.bucketStates?.map((k) => String(k || '').trim().toUpperCase()).filter(Boolean) ?? [];
+    const geoLookup = opts.mccGeoLookup;
+
+    if ((cityKeys.length > 0 || stateKeys.length > 0) && geoLookup && geoLookup.size > 0) {
+        const wantedCity = new Set(cityKeys);
+        const wantedState = new Set(stateKeys);
+        const byCitySid: Record<string, Set<string>> = {};
+        const byStateSid: Record<string, Set<string>> = {};
+        const rowCountCity: Record<string, number> = {};
+        const rowCountState: Record<string, number> = {};
+
+        for (const k of wantedCity) {
+            byCitySid[k] = new Set();
+            rowCountCity[k] = 0;
+        }
+        for (const k of wantedState) {
+            byStateSid[k] = new Set();
+            rowCountState[k] = 0;
+        }
+
+        for (const r of rawRows) {
+            const sid = String(r.sid ?? '').trim();
+            if (!sid) continue;
+            const mcc = String(r.client_code ?? '')
+                .trim()
+                .toUpperCase();
+            const g = geoLookup.get(mcc);
+            if (!g) continue;
+            if (wantedCity.has(g.cityKey)) {
+                byCitySid[g.cityKey].add(sid);
+                rowCountCity[g.cityKey] += 1;
+            }
+            if (wantedState.has(g.stateKey)) {
+                byStateSid[g.stateKey].add(sid);
+                rowCountState[g.stateKey] += 1;
+            }
+        }
+
+
+
+        const sidsByCityOut: Record<string, string[]> = {};
+        for (const k of wantedCity) {
+            sidsByCityOut[k] = [...byCitySid[k]].sort();
+        }
+        const sidsByStateOut: Record<string, string[]> = {};
+        for (const k of wantedState) {
+            sidsByStateOut[k] = [...byStateSid[k]].sort();
+        }
+
+        out.sidsByCity = sidsByCityOut;
+        out.sidsByState = sidsByStateOut;
+        out.resultRowsByCity = rowCountCity;
+        out.resultRowsByState = rowCountState;
     }
 
     return out;

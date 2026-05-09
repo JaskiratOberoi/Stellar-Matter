@@ -20,6 +20,8 @@ import {
     resolveDepartmentId,
     resolveStatusId,
     dumpLookups,
+    loadMccGeoMap,
+    dumpRegionsHierarchy,
 } from './listec.lookups';
 
 const app = express();
@@ -153,12 +155,48 @@ app.get('/api/worksheet-reports/packages', async (req, res) => {
             .filter(Boolean)
         : [];
 
+    const parseBucketKeys = (raw: unknown): string[] => {
+      if (typeof raw !== 'string' || !raw.trim()) return [];
+      return [
+        ...new Set(
+          raw
+            .split(',')
+            .map((s) => s.trim().toUpperCase())
+            .filter(Boolean),
+        ),
+      ];
+    };
+    const bucketCities = parseBucketKeys(req.query.bucketCities);
+    const bucketStates = parseBucketKeys(req.query.bucketStates);
+
+    let mccGeoLookup: Map<string, { cityKey: string; stateKey: string }> | undefined;
+    if (bucketCities.length > 0 || bucketStates.length > 0) {
+      const mccMap = await loadMccGeoMap();
+      mccGeoLookup = new Map();
+      for (const [code, g] of mccMap) {
+        mccGeoLookup.set(code, { cityKey: g.cityKey, stateKey: g.stateKey });
+      }
+    }
+
     const rows = await fetchAllWorksheetReports(filters);
-    const summary = aggregatePackages(rows, { bucketCodes });
+    const summary = aggregatePackages(rows, {
+      bucketCodes,
+      bucketCities: bucketCities.length ? bucketCities : undefined,
+      bucketStates: bucketStates.length ? bucketStates : undefined,
+      mccGeoLookup,
+    });
     res.json({ ...summary, resolved, unresolved, filters });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     res.status(400).json({ error: msg });
+  }
+});
+
+app.get('/api/regions', async (_req, res) => {
+  try {
+    res.json(await dumpRegionsHierarchy());
+  } catch (e) {
+    res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
   }
 });
 

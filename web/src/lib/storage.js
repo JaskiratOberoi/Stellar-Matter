@@ -6,6 +6,8 @@ export const LS_SIDEBAR = 'lisbot:sidebar';
 export const LS_SOURCE = 'lisbot:source';
 export const LS_HIDDEN = 'lisbot:hidden-tiles';
 export const LS_BU_SELECTION = 'lisbot:bu-selection';
+/** Tracer page: persisted selected region chip keys `{ stateKeys: string[], cityKeys: string[] }` */
+export const LS_TRACER_REGION_SELECTION = 'lisbot:tracer-region-selection';
 
 export function readJSON(key, fallback) {
     try {

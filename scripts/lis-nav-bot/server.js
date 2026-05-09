@@ -12,7 +12,7 @@ const { loadLisNavBotEnv } = require('../../cli/lib/load-env');
 loadLisNavBotEnv(__dirname);
 
 const { runLisNavBot } = require('../../cli/lib/run');
-const { runTracerBatch, ALL_SPECIALTY_CODES } = require('../../cli/lib/sql-tracer-source');
+const { runTracerBatch, parseTracerRegions, ALL_SPECIALTY_CODES } = require('../../cli/lib/sql-tracer-source');
 
 const app = express();
 const PORT = Number(process.env.LIS_UI_PORT || 4377);
@@ -255,11 +255,29 @@ function buildTileFromRunFiles(outDir, packagesFileName) {
             ? Number(pkg.uniqueLabelCount)
             : labelRows.length + (pinned ? 1 : 0);
     const filter = (pkg.filter && typeof pkg.filter === 'object' ? pkg.filter : null) || {};
-    const req = (main && main.filtersRequested) || {};
-    const bu =
-        (filter.bu != null && String(filter.bu).trim() && String(filter.bu).trim()) ||
-        (req.bu != null && String(req.bu).trim() && String(req.bu).trim()) ||
-        '—';
+    const req = (main && main.filtersRequested && typeof main.filtersRequested === 'object' ? main.filtersRequested : {}) || {};
+    const filtRegion =
+        filter.region && typeof filter.region === 'object' && String(filter.region.key || '').trim() ? filter.region : null;
+    const reqRegion =
+        req.region && typeof req.region === 'object' && String(req.region.key || '').trim() ? req.region : null;
+    const region =
+        filtRegion || reqRegion
+            ? {
+                  kind: String((filtRegion || reqRegion).kind || '').trim(),
+                  key: String((filtRegion || reqRegion).key || '').trim(),
+                  label:
+                      String((filtRegion || reqRegion).label || (filtRegion || reqRegion).key || '')
+                          .trim() || String((filtRegion || reqRegion).key || '').trim()
+              }
+            : null;
+    let tracerScope = String(filter.tracerScope || req.tracerScope || '').trim().toLowerCase();
+    if (tracerScope !== 'region' && region) tracerScope = 'region';
+    if (!tracerScope || tracerScope === 'bu') tracerScope = region ? 'region' : 'bu';
+    const kind = tracerScope === 'region' ? 'region' : 'bu';
+    let bu =
+        (filter.bu != null && String(filter.bu).trim()) || (req.bu != null && String(req.bu).trim()) || '';
+    if (!bu && kind === 'region' && region && region.label) bu = region.label;
+    bu = String(bu).trim() || '—';
     const source = (main && main.source) || (pkg.source && String(pkg.source)) || 'scrape';
     const sidCount = main && Array.isArray(main.sidsFoundOnPage1) ? main.sidsFoundOnPage1.length : 0;
     const errors = (main && Array.isArray(main.errors) ? main.errors : []) || [];
@@ -314,6 +332,9 @@ function buildTileFromRunFiles(outDir, packagesFileName) {
         id,
         startedAt,
         finishedAt: null,
+        tracerScope,
+        kind,
+        region,
         source,
         mode,
         urineContainers,
@@ -513,6 +534,19 @@ function runChildIdFromOutMainPath(p) {
 app.get('/api/bu', async (_req, res) => {
     const data = await fetchListecLookups();
     res.json(data);
+});
+
+app.get('/api/regions', async (_req, res) => {
+    try {
+        const r = await fetch(`${listecApiBase()}/api/regions`);
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        res.json(await r.json());
+    } catch (e) {
+        res.status(502).json({
+            error: String(e && e.message ? e.message : e),
+            states: []
+        });
+    }
 });
 
 app.get('/api/runs/tiles', async (req, res) => {
@@ -914,8 +948,11 @@ app.post('/api/tracer-run', requireRunStarter, async (req, res) => {
         const single = trimOrNullStr(body.bu);
         if (single) businessUnits.push(single);
     }
-    if (businessUnits.length === 0) {
-        return res.status(400).json({ error: 'businessUnits (or bu) required for /api/tracer-run.' });
+    const regInfo = parseTracerRegions(body.regions);
+    if (businessUnits.length === 0 && regInfo.targets.length === 0) {
+        return res
+            .status(400)
+            .json({ error: 'Select at least one business unit and/or region (state/city).' });
     }
 
     const fromDate = trimOrNullStr(body.fromDate);
@@ -930,12 +967,23 @@ app.post('/api/tracer-run', requireRunStarter, async (req, res) => {
     const startedAt = new Date().toISOString();
     const runId = startedAt.replace(/[:.]/g, '-');
 
-    const initialItems = businessUnits.map((bu) => ({
+    const buProgressRows = businessUnits.map((bu) => ({
         bu,
         state: 'queued',
         childRunId: null,
         error: null
     }));
+    /** @type {{ bu: string, state: string, childRunId: null, error: null }[]} */
+    const regionProgressRows = regInfo.targets.map((t) => ({
+        bu: t.kind === 'city' ? `City · ${t.label}` : `State · ${t.label}`,
+        state: 'queued',
+        childRunId: null,
+        error: null
+    }));
+
+    /** @type {string[]} */
+    const queuedFanOutLabels = [...businessUnits, ...regionProgressRows.map((r) => r.bu)];
+
     jobState = {
         state: 'running',
         runId,
@@ -949,10 +997,10 @@ app.post('/api/tracer-run', requireRunStarter, async (req, res) => {
         fanOut: {
             batchRunId: runId,
             kind: 'tracer',
-            queued: businessUnits.slice(),
+            queued: queuedFanOutLabels,
             completed: [],
             failed: [],
-            items: initialItems
+            items: [...buProgressRows, ...regionProgressRows]
         },
         lastFanOut: null
     };
@@ -969,10 +1017,11 @@ app.post('/api/tracer-run', requireRunStarter, async (req, res) => {
                 source: 'sql-tracer',
                 org_id: orgId,
                 business_units: businessUnits,
+                regions: body.regions || null,
                 from_date: fromDate,
                 to_date: toDate,
                 bucket_test_codes: ALL_SPECIALTY_CODES,
-                fan_out: businessUnits.length > 0
+                fan_out: queuedFanOutLabels.length > 1
             }
         }).catch(() => {});
     }
@@ -999,6 +1048,7 @@ app.post('/api/tracer-run', requireRunStarter, async (req, res) => {
 
             const result = await runTracerBatch({
                 businessUnits,
+                regions: body.regions,
                 fromDate,
                 toDate,
                 fromHour,
@@ -1010,12 +1060,14 @@ app.post('/api/tracer-run', requireRunStarter, async (req, res) => {
                 onProgress
             });
 
+            const allWrites = [...result.items, ...result.regionItems];
+
             // Ingest every per-mode artefact into Postgres so the tile wall
             // sees them on the next /api/runs/tiles poll without waiting for
             // the boot-time backfill sweep. Fire-and-forget per artefact;
             // ingestRunSafe never throws.
             if (runsDb) {
-                for (const it of result.items) {
+                for (const it of allWrites) {
                     if (it.state !== 'done') continue;
                     for (const cid of Object.values(it.runIds || {})) {
                         if (cid) runsDb.ingestRunSafe(resolveOutDir(), cid).catch(() => {});
@@ -1023,29 +1075,34 @@ app.post('/api/tracer-run', requireRunStarter, async (req, res) => {
                 }
             }
 
+            const mapSnap = (it) => ({
+                bu: it.bu,
+                state: it.state,
+                childRunId: it.runIds && it.runIds.general ? it.runIds.general : null,
+                error: it.error || null
+            });
+
             const fanOutSnapshot = {
                 batchRunId: runId,
                 kind: 'tracer',
-                queued: businessUnits.slice(),
-                completed: result.completed.slice(),
-                failed: result.failed.slice(),
-                items: result.items.map((it) => ({
-                    bu: it.bu,
-                    state: it.state,
-                    childRunId: it.runIds && it.runIds.general ? it.runIds.general : null,
-                    error: it.error || null
-                }))
+                queued: queuedFanOutLabels.slice(),
+                completed: [...result.completed, ...result.regionCompleted],
+                failed: [...result.failed, ...result.regionFailed],
+                items: [...result.items.map(mapSnap), ...result.regionItems.map(mapSnap)]
             };
 
-            const anyFail = result.failed.length > 0;
+            const anyFail =
+                result.failed.length > 0 ||
+                result.regionFailed.length > 0;
+            const errTxt =
+                anyFail ?
+                    `Failed: ${[...result.failed, ...result.regionFailed].join('; ')}`
+                :   null;
             jobState = {
                 state: 'idle',
                 runId,
                 startedAt,
-                error: anyFail ? `Failed BU(s): ${result.failed.join(', ')}` : null,
-                // Tracer doesn't surface a single "result" the way per-mode
-                // runs do — there are 6 mode artefacts × N BUs. Leave summary
-                // null; the UI reads tiles from /api/runs/tiles instead.
+                error: errTxt,
                 summary: null,
                 result: null,
                 outMainPath: null,
@@ -1076,7 +1133,9 @@ app.post('/api/tracer-run', requireRunStarter, async (req, res) => {
         runId,
         startedAt,
         kind: 'tracer',
-        queued: businessUnits.slice(),
+        queuedLabels: queuedFanOutLabels.slice(),
+        businessUnits: businessUnits.slice(),
+        regionTargets: regInfo.targets.length,
         completed: [],
         failed: []
     });

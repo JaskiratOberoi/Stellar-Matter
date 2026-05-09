@@ -1,18 +1,47 @@
 import { useState } from 'react';
 import { DateChips } from './DateChips.jsx';
 import { BuChips } from './BuChips.jsx';
+import { RegionChips } from './RegionChips.jsx';
 
 /**
  * @param {{
  *   buOptions: { options: { id: string, label: string }[], error: string | null },
  *   buSelected: Set<string>,
  *   buActions: { toggle: (label: string) => void, selectAll: () => void, clear: () => void },
+ *   regionStates: { key: string, label: string, cities?: { key: string, label: string, mccCount?: number }[], mccCount?: number }[],
+ *   regionLoading: boolean,
+ *   regionLookupError: string | null,
+ *   regionSelectedStates: Set<string>,
+ *   regionSelectedCities: Set<string>,
+ *   regionActions: { toggleState: (k: string) => void, toggleCity: (k: string) => void, clearRegions: () => void },
  *   busy: boolean,
  *   viewerDisabled: boolean,
- *   onRun: (form: { fromDate: string, toDate: string, fromHour: string, toHour: string, bu: string, businessUnits: string[] }) => void | Promise<void>,
+ *   onRun: (form: {
+ *     fromDate: string,
+ *     toDate: string,
+ *     fromHour: string,
+ *     toHour: string,
+ *     bu: string,
+ *     businessUnits: string[],
+ *     regionStatesTree: unknown[],
+ *     selectedRegions: { states: Set<string>, cities: Set<string> }
+ *   }) => void | Promise<void>,
  * }} props
  */
-export function TracerForm({ buOptions, buSelected, buActions, busy, viewerDisabled, onRun }) {
+export function TracerForm({
+    buOptions,
+    buSelected,
+    buActions,
+    regionStates,
+    regionLoading,
+    regionLookupError,
+    regionSelectedStates,
+    regionSelectedCities,
+    regionActions,
+    busy,
+    viewerDisabled,
+    onRun
+}) {
     const [fromDate, setFromDate] = useState('');
     const [toDate, setToDate] = useState('');
     const [fromHour, setFromHour] = useState('');
@@ -22,13 +51,25 @@ export function TracerForm({ buOptions, buSelected, buActions, busy, viewerDisab
     const datesOk = String(fromDate || '').trim() !== '' && String(toDate || '').trim() !== '';
     const hasBuPick = buSelected.size > 0;
     const hasBuFallback = buOptions.options.length === 0 && String(bu || '').trim() !== '';
-    const canRun = datesOk && (hasBuPick || hasBuFallback) && !viewerDisabled;
+    const hasRegionPick = regionSelectedStates.size > 0 || regionSelectedCities.size > 0;
+
+    /** At least one of BU chips / BU text fallback / geography chips — matches server validation */
+    const canRun = datesOk && (hasBuPick || hasBuFallback || hasRegionPick) && !viewerDisabled;
 
     async function handleSubmit(e) {
         e.preventDefault();
         if (!canRun || busy) return;
         const businessUnits = hasBuPick ? [...buSelected] : [];
-        await onRun({ fromDate, toDate, fromHour, toHour, bu, businessUnits });
+        await onRun({
+            fromDate,
+            toDate,
+            fromHour,
+            toHour,
+            bu,
+            businessUnits,
+            regionStatesTree: regionStates,
+            selectedRegions: { states: regionSelectedStates, cities: regionSelectedCities }
+        });
     }
 
     return (
@@ -102,6 +143,17 @@ export function TracerForm({ buOptions, buSelected, buActions, busy, viewerDisab
                         onChange={(e) => setBu(e.target.value)}
                     />
                 }
+            />
+
+            <RegionChips
+                states={regionStates}
+                loading={regionLoading}
+                selectedStates={regionSelectedStates}
+                selectedCities={regionSelectedCities}
+                onToggleState={regionActions.toggleState}
+                onToggleCity={regionActions.toggleCity}
+                onClear={regionActions.clearRegions}
+                lookupError={regionLookupError}
             />
 
             <div className="tracer-form-actions">

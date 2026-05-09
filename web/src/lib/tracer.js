@@ -106,6 +106,64 @@ export function tracerBuKey(bu) {
         .toLowerCase();
 }
 
+/** Stable React / print key for a region banner row. */
+export function tracerRegionRowKey(kind, key) {
+    return `region:${String(kind || '').toLowerCase()}:${String(key || '')
+        .trim()
+        .toUpperCase()}`;
+}
+
+function normRegionKey(key) {
+    return String(key || '')
+        .trim()
+        .toUpperCase();
+}
+
+/**
+ * Build `regions` body for `/api/tracer-run` + labels for banners.
+ * @param {Array<{ key: string, label: string, cities?: { key: string, label: string }[] }>} treeStates
+ * @param {Set<string>} selectedStates
+ * @param {Set<string>} selectedCities
+ */
+export function buildRegionsSubmitPayload(treeStates, selectedStates, selectedCities) {
+    const states = [];
+    const cities = [];
+    const bannerTargets = [];
+
+    /** @type {Map<string, string>} */
+    const stateLabelByKey = new Map();
+    /** @type {Map<string, string>} */
+    const cityLabelByKey = new Map();
+
+    for (const st of treeStates || []) {
+        stateLabelByKey.set(st.key, st.label);
+        for (const c of st.cities || []) {
+            cityLabelByKey.set(c.key, c.label);
+        }
+    }
+
+    for (const sk of selectedStates) {
+        const label = stateLabelByKey.get(sk) || sk;
+        states.push({ key: sk, label });
+        bannerTargets.push({ kind: 'state', key: sk, label });
+    }
+    for (const ck of selectedCities) {
+        const label = cityLabelByKey.get(ck) || ck;
+        cities.push({ key: ck, label });
+        bannerTargets.push({ kind: 'city', key: ck, label });
+    }
+
+    return { regions: { states, cities }, bannerTargets };
+}
+
+/** @param {object | null | undefined} tile */
+export function isRegionTile(tile) {
+    if (!tile) return false;
+    if (tile.kind === 'region') return true;
+    if (tile.tracerScope === 'region') return true;
+    return !!(tile.region && tile.region.key);
+}
+
 function buEq(a, b) {
     return tracerBuKey(a) === tracerBuKey(b);
 }
@@ -144,7 +202,9 @@ export function mapTilesToBanners(tiles, selectedBus, batchStartedIso, fromDate,
 
     /** @param {string} bu */
     const pick = (bu, modeKey) => {
-        const list = (tiles || []).filter((t) => buEq(t.bu, bu) && modeOf(t) === modeKey && inBatch(t));
+        const list = (tiles || []).filter(
+            (t) => !isRegionTile(t) && buEq(t.bu, bu) && modeOf(t) === modeKey && inBatch(t)
+        );
         list.sort((a, b) => {
             const ta = Date.parse(a.startedAt) || 0;
             const tb = Date.parse(b.startedAt) || 0;
@@ -161,6 +221,73 @@ export function mapTilesToBanners(tiles, selectedBus, batchStartedIso, fromDate,
         citrateTile: pick(bu, 'citrate_vials'),
         sHeparinTile: pick(bu, 's_heparin'),
         lHeparinTile: pick(bu, 'l_heparin')
+    }));
+}
+
+/**
+ * Mirror mapTilesToBanners for geography-scoped tracer tiles.
+ * @param {object[]} tiles
+ * @param {{ kind: string, key: string, label: string }[]} regionTargets — from submit snapshot
+ */
+export function mapRegionTilesToBanners(tiles, regionTargets, batchStartedIso, fromDate, toDate) {
+    const batchMs = (Date.parse(batchStartedIso) || 0) - 5000;
+    const fd = String(fromDate || '').trim();
+    const td = String(toDate || '').trim();
+
+    /** @param {object} tile */
+    const inBatch = (tile) => {
+        const st = Date.parse(tile.startedAt);
+        if (Number.isNaN(st) || st < batchMs) return false;
+        if (fd && String(tile.fromDate || '').trim() !== fd) return false;
+        if (td && String(tile.toDate || '').trim() !== td) return false;
+        return true;
+    };
+    /** @param {object} tile */
+    const modeOf = (tile) => {
+        const m = tile.mode;
+        if (m === 'urine_containers') return 'urine_containers';
+        if (m === 'edta_vials') return 'edta_vials';
+        if (m === 'citrate_vials') return 'citrate_vials';
+        if (m === 's_heparin') return 's_heparin';
+        if (m === 'l_heparin') return 'l_heparin';
+        return 'general';
+    };
+
+    /** @param {object} tile */
+    /** @param {{ kind: string, key: string }} targ */
+    const matches = (tile, targ) => {
+        if (!isRegionTile(tile)) return false;
+        const tr = tile.region;
+        if (!tr || !tr.key) return false;
+        return (
+            String(tr.kind || '').toLowerCase() === String(targ.kind || '').toLowerCase() &&
+            normRegionKey(tr.key) === normRegionKey(targ.key)
+        );
+    };
+
+    /** @param {{ kind: string, key: string }} targ */
+    /** @param {string} modeKey */
+    const pick = (targ, modeKey) => {
+        const list = (tiles || []).filter((t) => matches(t, targ) && modeOf(t) === modeKey && inBatch(t));
+        list.sort((a, b) => {
+            const ta = Date.parse(a.startedAt) || 0;
+            const tb = Date.parse(b.startedAt) || 0;
+            return tb - ta;
+        });
+        return list[0] || null;
+    };
+
+    return (regionTargets || []).map((targ) => ({
+        bannerKey: tracerRegionRowKey(targ.kind, targ.key),
+        label: targ.label || targ.key,
+        kind: targ.kind,
+        key: targ.key,
+        generalTile: pick(targ, 'general'),
+        urineTile: pick(targ, 'urine_containers'),
+        edtaTile: pick(targ, 'edta_vials'),
+        citrateTile: pick(targ, 'citrate_vials'),
+        sHeparinTile: pick(targ, 's_heparin'),
+        lHeparinTile: pick(targ, 'l_heparin')
     }));
 }
 
