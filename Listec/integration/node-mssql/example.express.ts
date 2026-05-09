@@ -139,8 +139,22 @@ app.get('/api/worksheet-reports', async (req, res) => {
 app.get('/api/worksheet-reports/packages', async (req, res) => {
   try {
     const { filters, resolved, unresolved } = await filtersFromQuery(req.query);
+    // Tracer optimisation: when the caller passes `bucketTestCodes=he011,he022,...`
+    // we keep the SP `@test_code` filter NULL (returning every SID for the
+    // window) and bucket SIDs by test_code in JS afterwards. One SP execution
+    // replaces N (one per test code), and the caller can derive any number of
+    // mode-specific tile blobs from the single response.
+    const bucketRaw = req.query.bucketTestCodes;
+    const bucketCodes =
+      typeof bucketRaw === 'string' && bucketRaw.trim().length > 0
+        ? bucketRaw
+            .split(',')
+            .map((s) => s.trim())
+            .filter(Boolean)
+        : [];
+
     const rows = await fetchAllWorksheetReports(filters);
-    const summary = aggregatePackages(rows);
+    const summary = aggregatePackages(rows, { bucketCodes });
     res.json({ ...summary, resolved, unresolved, filters });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

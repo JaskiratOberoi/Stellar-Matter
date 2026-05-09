@@ -54,10 +54,18 @@ export function useRunStatus({ onIdle } = {}) {
     }, [tick, stopPolling]);
 
     const submit = useCallback(
-        async (body) => {
+        /**
+         * @param {object} body
+         * @param {{ endpoint?: string }} [opts] - override target endpoint (e.g.
+         *   the Tracer page POSTs to '/api/tracer-run' so a single call kicks
+         *   off all 6 modes × N BUs in one go). Defaults to '/api/run' so the
+         *   dashboard's per-mode runs are unchanged.
+         */
+        async (body, opts = {}) => {
             setSubmitError(null);
+            const endpoint = opts.endpoint || '/api/run';
             try {
-                const r = await apiFetch('/api/run', {
+                const r = await apiFetch(endpoint, {
                     method: 'POST',
                     body: JSON.stringify(body)
                 });

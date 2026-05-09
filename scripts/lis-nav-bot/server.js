@@ -12,6 +12,7 @@ const { loadLisNavBotEnv } = require('../../cli/lib/load-env');
 loadLisNavBotEnv(__dirname);
 
 const { runLisNavBot } = require('../../cli/lib/run');
+const { runTracerBatch, ALL_SPECIALTY_CODES } = require('../../cli/lib/sql-tracer-source');
 
 const app = express();
 const PORT = Number(process.env.LIS_UI_PORT || 4377);
@@ -888,6 +889,205 @@ app.post('/api/run', requireRunStarter, async (req, res) => {
             : { runId, startedAt };
     res.json(payload);
 });
+
+/**
+ * Tracer-only: run all 6 modes (general + 5 specialty) for N BUs from a
+ * single Listec SP execution per BU. Replaces the 6-step sequential
+ * /api/run dance the Tracer page used to do (one POST + waitForRunIdle per
+ * mode), collapsing 30 SP calls down to 2 for a 2-BU month run.
+ *
+ * Behaviour mirrors POST /api/run's fan-out shape so the existing run
+ * status polling, RunProgress strip, and tile ingest pipeline all work
+ * unchanged. The dashboard's per-mode runs continue to use /api/run.
+ */
+app.post('/api/tracer-run', requireRunStarter, async (req, res) => {
+    if (jobState.state === 'running') {
+        return res.status(409).json({ error: 'A run is already in progress.' });
+    }
+    if (process.env.LIS_ALLOW_WRITES === '1') {
+        return res.status(400).json({ error: 'LIS_ALLOW_WRITES=1 — this tool refuses to start.' });
+    }
+
+    const body = req.body && typeof req.body === 'object' ? req.body : {};
+    const businessUnits = normalizeBusinessUnits(body);
+    if (businessUnits.length === 0) {
+        const single = trimOrNullStr(body.bu);
+        if (single) businessUnits.push(single);
+    }
+    if (businessUnits.length === 0) {
+        return res.status(400).json({ error: 'businessUnits (or bu) required for /api/tracer-run.' });
+    }
+
+    const fromDate = trimOrNullStr(body.fromDate);
+    const toDate = trimOrNullStr(body.toDate);
+    if (!fromDate || !toDate) {
+        return res.status(400).json({ error: 'fromDate and toDate are required.' });
+    }
+
+    const fromHour = body.fromHour != null && String(body.fromHour).trim() !== '' ? Number(body.fromHour) : undefined;
+    const toHour = body.toHour != null && String(body.toHour).trim() !== '' ? Number(body.toHour) : undefined;
+
+    const startedAt = new Date().toISOString();
+    const runId = startedAt.replace(/[:.]/g, '-');
+
+    const initialItems = businessUnits.map((bu) => ({
+        bu,
+        state: 'queued',
+        childRunId: null,
+        error: null
+    }));
+    jobState = {
+        state: 'running',
+        runId,
+        startedAt,
+        error: null,
+        summary: null,
+        result: null,
+        outMainPath: null,
+        outPackagesPath: null,
+        exitCode: null,
+        fanOut: {
+            batchRunId: runId,
+            kind: 'tracer',
+            queued: businessUnits.slice(),
+            completed: [],
+            failed: [],
+            items: initialItems
+        },
+        lastFanOut: null
+    };
+
+    const orgId = (req.user && req.user.activeOrgId) || 'org-default';
+
+    if (auditLog) {
+        auditLog(req, {
+            action: 'tracer-run.start',
+            targetType: 'tracer-run',
+            targetId: runId,
+            outcome: 'success',
+            metadata: {
+                source: 'sql-tracer',
+                org_id: orgId,
+                business_units: businessUnits,
+                from_date: fromDate,
+                to_date: toDate,
+                bucket_test_codes: ALL_SPECIALTY_CODES,
+                fan_out: businessUnits.length > 0
+            }
+        }).catch(() => {});
+    }
+
+    setImmediate(async () => {
+        try {
+            const onProgress = (snap) => {
+                if (!jobState.fanOut || jobState.fanOut.batchRunId !== runId) return;
+                const idx = jobState.fanOut.items.findIndex((it) => it.bu === snap.bu);
+                if (idx < 0) return;
+                jobState.fanOut.items[idx] = {
+                    bu: snap.bu,
+                    state: snap.state,
+                    childRunId: snap.runIds && snap.runIds.general ? snap.runIds.general : null,
+                    error: snap.error || null
+                };
+                if (snap.state === 'done' && !jobState.fanOut.completed.includes(snap.bu)) {
+                    jobState.fanOut.completed.push(snap.bu);
+                }
+                if (snap.state === 'failed' && !jobState.fanOut.failed.includes(snap.bu)) {
+                    jobState.fanOut.failed.push(snap.bu);
+                }
+            };
+
+            const result = await runTracerBatch({
+                businessUnits,
+                fromDate,
+                toDate,
+                fromHour,
+                toHour,
+                orgId,
+                outDir: resolveOutDir(),
+                concurrency: 3,
+                listecApiBase: listecApiBase(),
+                onProgress
+            });
+
+            // Ingest every per-mode artefact into Postgres so the tile wall
+            // sees them on the next /api/runs/tiles poll without waiting for
+            // the boot-time backfill sweep. Fire-and-forget per artefact;
+            // ingestRunSafe never throws.
+            if (runsDb) {
+                for (const it of result.items) {
+                    if (it.state !== 'done') continue;
+                    for (const cid of Object.values(it.runIds || {})) {
+                        if (cid) runsDb.ingestRunSafe(resolveOutDir(), cid).catch(() => {});
+                    }
+                }
+            }
+
+            const fanOutSnapshot = {
+                batchRunId: runId,
+                kind: 'tracer',
+                queued: businessUnits.slice(),
+                completed: result.completed.slice(),
+                failed: result.failed.slice(),
+                items: result.items.map((it) => ({
+                    bu: it.bu,
+                    state: it.state,
+                    childRunId: it.runIds && it.runIds.general ? it.runIds.general : null,
+                    error: it.error || null
+                }))
+            };
+
+            const anyFail = result.failed.length > 0;
+            jobState = {
+                state: 'idle',
+                runId,
+                startedAt,
+                error: anyFail ? `Failed BU(s): ${result.failed.join(', ')}` : null,
+                // Tracer doesn't surface a single "result" the way per-mode
+                // runs do — there are 6 mode artefacts × N BUs. Leave summary
+                // null; the UI reads tiles from /api/runs/tiles instead.
+                summary: null,
+                result: null,
+                outMainPath: null,
+                outPackagesPath: null,
+                exitCode: anyFail ? 1 : 0,
+                fanOut: null,
+                lastFanOut: fanOutSnapshot
+            };
+        } catch (e) {
+            const partial = jobState.fanOut;
+            jobState = {
+                state: 'idle',
+                runId,
+                startedAt,
+                error: String(e && e.message ? e.message : e),
+                summary: null,
+                result: null,
+                outMainPath: null,
+                outPackagesPath: null,
+                exitCode: 1,
+                fanOut: null,
+                lastFanOut: partial
+            };
+        }
+    });
+
+    res.json({
+        runId,
+        startedAt,
+        kind: 'tracer',
+        queued: businessUnits.slice(),
+        completed: [],
+        failed: []
+    });
+});
+
+/** @param {unknown} v */
+function trimOrNullStr(v) {
+    if (v == null) return null;
+    const s = String(v).trim();
+    return s === '' ? null : s;
+}
 
 app.get('/api/runs', (_req, res) => {
     const outDir = resolveOutDir();

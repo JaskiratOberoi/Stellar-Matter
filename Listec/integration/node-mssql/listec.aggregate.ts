@@ -16,6 +16,30 @@ export interface PackagesAggregate {
     labelToSids: Record<string, string[]>;
     sids: string[];
     rows: { sid: string; testNamesText: string }[];
+    /**
+     * Tracer-only opt-in. When `bucketCodes` is passed, we walk each row's
+     * `results` array and bucket SIDs / result-row counts by test_code. This
+     * lets the Tracer pipeline derive every specialty mode (urine / EDTA /
+     * citrate / S.Hep / L.Hep) from a single SP execution per BU instead of
+     * one SP execution per (mode × test_code) combination.
+     *
+     * Match is case-insensitive on `test_code`. SID dedupe is per-bucket.
+     * `resultRowsByTestCode` counts the raw result rows (not SIDs) — same
+     * semantics as the legacy `byTestCode[code].rows` field that the tile
+     * renderer uses for the breakdown table.
+     */
+    sidsByTestCode?: Record<string, string[]>;
+    resultRowsByTestCode?: Record<string, number>;
+}
+
+export interface AggregateOptions {
+    /**
+     * If set, the result includes `sidsByTestCode` + `resultRowsByTestCode`
+     * keyed by these (lowercased) codes. Codes that match nothing in the
+     * window still appear with empty bucket so the caller can rely on the
+     * shape regardless of data presence.
+     */
+    bucketCodes?: string[];
 }
 
 const BRACKET_RE = /\[([^\]]+)\]/g;
@@ -50,7 +74,10 @@ function uniqueLabels(text: string): string[] {
     return out;
 }
 
-export function aggregatePackages(rawRows: WorksheetReportRow[]): PackagesAggregate {
+export function aggregatePackages(
+    rawRows: WorksheetReportRow[],
+    opts: AggregateOptions = {},
+): PackagesAggregate {
     const rows = rawRows.map((r) => ({
         sid: String(r.sid ?? '').trim(),
         testNamesText: r.test_names_csv ?? '',
@@ -86,7 +113,7 @@ export function aggregatePackages(rawRows: WorksheetReportRow[]): PackagesAggreg
         labelToSidsOut[label] = [...set].sort();
     }
 
-    return {
+    const out: PackagesAggregate = {
         rowCount: rows.length,
         rowsWithBrackets,
         otherTestsRowCount,
@@ -96,4 +123,39 @@ export function aggregatePackages(rawRows: WorksheetReportRow[]): PackagesAggreg
         sids: [...sidSet].sort(),
         rows,
     };
+
+    if (opts.bucketCodes && opts.bucketCodes.length > 0) {
+        // Pre-seed every requested code so the response shape is stable even
+        // when a code has zero hits in the window. Lowercase normalisation
+        // mirrors how SQL Server's collation typically compares these codes
+        // (case-insensitive) and keeps the caller's key lookup predictable.
+        const wanted = new Set(opts.bucketCodes.map((c) => String(c || '').trim().toLowerCase()).filter(Boolean));
+        const sidsByCode: Record<string, Set<string>> = {};
+        const rowsByCode: Record<string, number> = {};
+        for (const code of wanted) {
+            sidsByCode[code] = new Set();
+            rowsByCode[code] = 0;
+        }
+
+        for (const r of rawRows) {
+            const sid = String(r.sid ?? '').trim();
+            if (!sid) continue;
+            const results = Array.isArray(r.results) ? r.results : [];
+            for (const tr of results) {
+                const code = String(tr?.test_code ?? '').trim().toLowerCase();
+                if (!code || !wanted.has(code)) continue;
+                sidsByCode[code].add(sid);
+                rowsByCode[code] += 1;
+            }
+        }
+
+        const sidsByCodeOut: Record<string, string[]> = {};
+        for (const [code, set] of Object.entries(sidsByCode)) {
+            sidsByCodeOut[code] = [...set].sort();
+        }
+        out.sidsByTestCode = sidsByCodeOut;
+        out.resultRowsByTestCode = rowsByCode;
+    }
+
+    return out;
 }

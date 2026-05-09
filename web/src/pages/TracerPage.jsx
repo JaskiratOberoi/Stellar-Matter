@@ -104,8 +104,14 @@ export function TracerPage({
         requestAnimationFrame(() => window.print());
     }, []);
 
-    const buildBody = useCallback((mode, snap) => {
-        const body = { source: 'sql', mode };
+    /**
+     * Build the body for the new combined Tracer endpoint. Unlike the legacy
+     * per-mode dance (which posted 6 bodies, one per mode), `/api/tracer-run`
+     * derives every mode from a single Listec SP execution per BU and so
+     * doesn't need a `mode` field.
+     */
+    const buildTracerBody = useCallback((snap) => {
+        const body = { source: 'sql' };
         if (snap.fromDate) body.fromDate = snap.fromDate;
         if (snap.toDate) body.toDate = snap.toDate;
         if (String(snap.fromHour || '').trim() !== '') body.fromHour = Number(snap.fromHour);
@@ -115,6 +121,7 @@ export function TracerPage({
             if (snap.businessUnits.length === 1 && !body.bu) body.bu = snap.businessUnits[0];
         } else if (String(snap.bu || '').trim()) {
             body.bu = String(snap.bu).trim();
+            body.businessUnits = [body.bu];
         }
         return body;
     }, []);
@@ -130,39 +137,14 @@ export function TracerPage({
             }
             setTracerBusy(true);
             try {
-                const r1 = await submit(buildBody('general', snap));
-                if (!r1.ok) {
-                    setLocalError(String(r1.error || 'General run failed'));
-                    return;
-                }
-                await waitForRunIdle(() => apiFetch('/api/run/status'));
-                const r2 = await submit(buildBody('urine_containers', snap));
-                if (!r2.ok) {
-                    setLocalError(String(r2.error || 'Urine container run failed'));
-                    return;
-                }
-                await waitForRunIdle(() => apiFetch('/api/run/status'));
-                const r3 = await submit(buildBody('edta_vials', snap));
-                if (!r3.ok) {
-                    setLocalError(String(r3.error || 'EDTA vials run failed'));
-                    return;
-                }
-                await waitForRunIdle(() => apiFetch('/api/run/status'));
-                const r4 = await submit(buildBody('citrate_vials', snap));
-                if (!r4.ok) {
-                    setLocalError(String(r4.error || 'Citrate run failed'));
-                    return;
-                }
-                await waitForRunIdle(() => apiFetch('/api/run/status'));
-                const r5 = await submit(buildBody('s_heparin', snap));
-                if (!r5.ok) {
-                    setLocalError(String(r5.error || 'S.Heparin run failed'));
-                    return;
-                }
-                await waitForRunIdle(() => apiFetch('/api/run/status'));
-                const r6 = await submit(buildBody('l_heparin', snap));
-                if (!r6.ok) {
-                    setLocalError(String(r6.error || 'L.Heparin run failed'));
+                // One call to the new combined endpoint replaces the old
+                // 6-step sequential dance. lis-nav-bot fans out across BUs
+                // (cap 3 in parallel) and synthesises all 6 mode artefacts
+                // per BU from a single Listec SP execution. For a 2-BU month
+                // run this drops 30 SP calls to 2.
+                const r = await submit(buildTracerBody(snap), { endpoint: '/api/tracer-run' });
+                if (!r.ok) {
+                    setLocalError(String(r.error || 'Tracer run failed'));
                     return;
                 }
                 await waitForRunIdle(() => apiFetch('/api/run/status'));
@@ -179,7 +161,7 @@ export function TracerPage({
                 setTracerBusy(false);
             }
         },
-        [buildBody, reloadTiles, submit, viewerDisabled]
+        [buildTracerBody, reloadTiles, submit, viewerDisabled]
     );
 
     return (
