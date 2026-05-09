@@ -13,7 +13,11 @@ export function Topbar({
 }) {
     const { user, orgs, authRequired, logout, switchOrg } = useAuth();
     const location = useLocation();
-    const isTracer = location.pathname === '/tracer';
+    // Tracer is now the default surface at `/`; the legacy tabbed dashboard
+    // lives at `/dashboard`. Treat the legacy `/tracer` alias as tracer too
+    // so the toggle still works if a bookmark hits the old URL before the
+    // redirect fires.
+    const isTracer = location.pathname === '/' || location.pathname === '/tracer';
     const tabs = [
         { id: 'letterheads', label: 'Letter Heads' },
         { id: 'envelopes', label: 'Envelopes' },
@@ -46,11 +50,11 @@ export function Topbar({
                         </p>
                     </div>
                     <Link
-                        to={isTracer ? '/' : '/tracer'}
+                        to={isTracer ? '/dashboard' : '/'}
                         className="chip chip-tool tracer-ui-link"
-                        title={isTracer ? 'Return to tabbed dashboard' : 'Lab-wise Tracer view'}
+                        title={isTracer ? 'Open tabbed dashboard' : 'Return to Tracer'}
                     >
-                        {isTracer ? 'Switch to Dashboard' : 'Switch to Tracer UI'}
+                        {isTracer ? 'Switch to Dashboard' : 'Switch to Tracer'}
                     </Link>
                 </div>
                 {!isTracer && (

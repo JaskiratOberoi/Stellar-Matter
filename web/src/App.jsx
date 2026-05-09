@@ -386,8 +386,12 @@ export function App() {
                     </RoleGate>
                 }
             />
-            <Route path="/" element={dashboard} />
-            <Route path="/tracer" element={tracerView} />
+            {/* Tracer is the default landing surface (post-login + bookmark). */}
+            <Route path="/" element={tracerView} />
+            <Route path="/dashboard" element={dashboard} />
+            {/* /tracer kept as an alias so existing bookmarks and the old
+                "Switch to Tracer UI" link continue to resolve. */}
+            <Route path="/tracer" element={<Navigate to="/" replace />} />
             <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
     );
