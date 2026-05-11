@@ -11,6 +11,10 @@ const { getPool, useDatabase } = require('../db/pool');
 const { requireAuth, requireRole } = require('../auth');
 const { adminWriteLimiter } = require('../rateLimit');
 const { logAudit } = require('../audit');
+const {
+    runClientLocationsSync,
+    getClientLocationsSyncStatus
+} = require('../sync/syncClientLocations');
 
 const router = express.Router();
 
@@ -513,6 +517,52 @@ router.get('/audit-log', async (req, res) => {
         );
         const next_cursor = r.rows.length === limit ? r.rows[r.rows.length - 1].id : null;
         res.json({ entries: r.rows, next_cursor });
+    } catch (err) {
+        res.status(500).json({ error: err.message || String(err) });
+    }
+});
+
+// -- client_locations sync (Phase 12) -------------------------------------
+//
+// On-demand trigger for the Postgres mirror of Noble.dbo.tbl_med_mcc_unit_master.
+// Boot already runs sync once; this endpoint covers the case where ops adds
+// or retires a code in MSSQL and wants the chip set + chip->client_codes
+// resolver to refresh without a service restart.
+
+router.get('/client-locations/sync', async (_req, res) => {
+    try {
+        const status = await getClientLocationsSyncStatus();
+        res.json({ status });
+    } catch (err) {
+        res.status(500).json({ error: err.message || String(err) });
+    }
+});
+
+router.post('/client-locations/sync', adminWriteLimiter, async (req, res) => {
+    try {
+        const result = await runClientLocationsSync({});
+        await logAudit(req, {
+            action: 'admin.client_locations.sync',
+            outcome: result.ok ? 'success' : 'failure',
+            metadata: result.ok
+                ? {
+                      rows_seen: result.rowsSeen,
+                      rows_upserted: result.rowsUpserted,
+                      rows_deleted: result.rowsDeleted,
+                      duration_ms: result.durationMs
+                  }
+                : { error: result.error }
+        });
+        if (!result.ok) {
+            return res.status(502).json({ error: result.error });
+        }
+        res.json({
+            ok: true,
+            rows_seen: result.rowsSeen,
+            rows_upserted: result.rowsUpserted,
+            rows_deleted: result.rowsDeleted,
+            duration_ms: result.durationMs
+        });
     } catch (err) {
         res.status(500).json({ error: err.message || String(err) });
     }

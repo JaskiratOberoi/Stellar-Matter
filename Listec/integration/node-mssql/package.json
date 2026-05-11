@@ -5,6 +5,8 @@
     "description": "HTTP service that exposes Noble.dbo.usp_listec_worksheet_report_json",
     "scripts": {
         "deploy:sp": "ts-node scripts/deploy-sp.ts",
+        "grant:ro": "ts-node scripts/deploy-sp.ts ../../sp/grant_listec_ro.sql",
+        "inspect:mcc": "ts-node scripts/inspect-mcc.ts",
         "dev": "ts-node example.express.ts",
         "build": "tsc -p tsconfig.json",
         "start": "node dist/example.express.js"

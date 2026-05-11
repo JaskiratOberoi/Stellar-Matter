@@ -255,6 +255,71 @@ async function migrate() {
             `CREATE INDEX IF NOT EXISTS run_packages_run_position_idx
              ON run_packages (run_id, position);`
         );
+
+        // Phase 12 (client_locations) — local mirror of
+        // Noble.dbo.tbl_med_mcc_unit_master so the Tracer Region (State -> City)
+        // chips, the chip-to-client_codes resolver, and any future cross-org
+        // reporting can be answered from Postgres without a per-request hop to
+        // the Listec MSSQL pool. The mirror is populated by
+        // server/sync/syncClientLocations.js (boot + on-demand). MSSQL stays
+        // the source of truth; Postgres is a derived index.
+        //
+        // city_key/state_key are the same normalised tokens that
+        // Listec/integration/node-mssql/regionAliases.ts produces, so chip
+        // payloads (LS_TRACER_REGION_SELECTION, /api/regions) keep working
+        // byte-for-byte after the cutover.
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS client_locations (
+                code TEXT PRIMARY KEY,
+                name TEXT,
+                business_unit_code TEXT,
+                business_unit_name TEXT,
+                city_raw TEXT,
+                city_key TEXT,
+                city_label TEXT,
+                state_raw TEXT,
+                state_key TEXT,
+                state_label TEXT,
+                mobile TEXT,
+                rate_label TEXT,
+                report_flag TEXT,
+                sub_codes TEXT,
+                active BOOLEAN NOT NULL DEFAULT true,
+                synced_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                source_row_hash TEXT NOT NULL
+            );
+        `);
+        await client.query(
+            `CREATE INDEX IF NOT EXISTS client_locations_city_key_idx
+             ON client_locations (city_key) WHERE active = true;`
+        );
+        await client.query(
+            `CREATE INDEX IF NOT EXISTS client_locations_state_key_idx
+             ON client_locations (state_key) WHERE active = true;`
+        );
+        await client.query(
+            `CREATE INDEX IF NOT EXISTS client_locations_bu_idx
+             ON client_locations (business_unit_code) WHERE active = true;`
+        );
+
+        // Single-row metadata table (id always = 1) so ops can see when the
+        // last sync ran without scanning client_locations row-by-row.
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS client_locations_sync (
+                id INT PRIMARY KEY DEFAULT 1,
+                last_run_at TIMESTAMPTZ,
+                last_success_at TIMESTAMPTZ,
+                last_error TEXT,
+                rows_seen INT,
+                rows_upserted INT,
+                rows_deleted INT,
+                CONSTRAINT client_locations_sync_singleton CHECK (id = 1)
+            );
+        `);
+        await client.query(
+            `INSERT INTO client_locations_sync (id) VALUES (1)
+             ON CONFLICT (id) DO NOTHING;`
+        );
     } finally {
         client.release();
     }

@@ -530,6 +530,132 @@ async function fetchTracerPayload(apiBase, { bu, fromDate, toDate, fromHour, toH
     return { url, payload };
 }
 
+/**
+ * Phase 12 by-codes path. Calls /api/worksheet-reports/packages-by-codes,
+ * which delegates to dbo.usp_listec_worksheet_report_by_codes (TVP filter)
+ * — so MSSQL only returns SIDs owned by `codes`. Geography bucketing is no
+ * longer needed because the SP IS the geographic filter.
+ */
+async function fetchTracerPayloadByCodes(
+    apiBase,
+    { bu, fromDate, toDate, fromHour, toHour, codes }
+) {
+    const params = new URLSearchParams();
+    const fromIso = toIsoDate(fromDate);
+    const toIso = toIsoDate(toDate) || fromIso;
+    if (!fromIso) {
+        const today = new Date().toISOString().slice(0, 10);
+        params.set('fromDate', today);
+        params.set('toDate', today);
+    } else {
+        params.set('fromDate', fromIso);
+        params.set('toDate', toIso || fromIso);
+    }
+    if (fromHour != null && String(fromHour).trim() !== '') params.set('fromHour', String(fromHour));
+    if (toHour != null && String(toHour).trim() !== '') params.set('toHour', String(toHour));
+    const buStr = trimOrNull(bu);
+    if (buStr) {
+        const buNum = Number(buStr);
+        if (Number.isFinite(buNum) && /^\d+$/.test(buStr)) params.set('businessUnitId', buStr);
+        else params.set('businessUnit', buStr);
+    }
+    params.set('bucketTestCodes', ALL_SPECIALTY_CODES.join(','));
+    params.set('clientCodes', codes.join(','));
+
+    const url = `${apiBase}/api/worksheet-reports/packages-by-codes?${params.toString()}`;
+    console.log(`[tracer-sql] GET ${url} (${codes.length} client codes)`);
+    const res = await fetch(url, { headers: { Accept: 'application/json' } });
+    const text = await res.text();
+    if (!res.ok) {
+        throw new Error(
+            `Listec by-codes API ${res.status} (${bu || 'no-bu'}): ${text.slice(0, 500)}`
+        );
+    }
+    let payload;
+    try {
+        payload = JSON.parse(text);
+    } catch (e) {
+        throw new Error(`Listec by-codes non-JSON (${bu || 'no-bu'}): ${e.message}`);
+    }
+    return { url, payload };
+}
+
+/**
+ * Merge multiple /packages-by-codes payloads into one. Used when a region
+ * chip is combined with a list of BUs — we issue one /packages-by-codes
+ * call per BU (with that BU as `businessUnitId` plus the region's codes)
+ * and merge the responses so a single artefact represents the whole
+ * BU x region intersection.
+ */
+function mergeByCodesPayloads(payloads) {
+    const arr = (Array.isArray(payloads) ? payloads : []).filter(Boolean);
+    if (arr.length === 1) return arr[0];
+
+    const mergedRows = [];
+    const sidsByTestCode = {};
+    const resultRowsByTestCode = {};
+    for (const code of ALL_SPECIALTY_CODES) {
+        sidsByTestCode[code.toLowerCase()] = new Set();
+        resultRowsByTestCode[code.toLowerCase()] = 0;
+    }
+
+    for (const p of arr) {
+        for (const row of Array.isArray(p.rows) ? p.rows : []) {
+            mergedRows.push(row);
+        }
+        const codeBuckets = (p && p.sidsByTestCode) || {};
+        for (const [code, sids] of Object.entries(codeBuckets)) {
+            if (!sidsByTestCode[code]) sidsByTestCode[code] = new Set();
+            for (const s of Array.isArray(sids) ? sids : []) {
+                sidsByTestCode[code].add(String(s));
+            }
+        }
+        const rowBuckets = (p && p.resultRowsByTestCode) || {};
+        for (const [code, n] of Object.entries(rowBuckets)) {
+            resultRowsByTestCode[code] = (resultRowsByTestCode[code] || 0) + (Number(n) || 0);
+        }
+    }
+
+    const bracket = aggregateBracketsFromPackageRows(mergedRows);
+    /** @type {Record<string,string[]>} */
+    const sidsByTestCodeOut = {};
+    for (const [code, set] of Object.entries(sidsByTestCode)) {
+        sidsByTestCodeOut[code] = [...set].sort();
+    }
+
+    return {
+        ...bracket,
+        sidsByTestCode: sidsByTestCodeOut,
+        resultRowsByTestCode,
+        filters: arr[0].filters || null,
+        resolved: arr[0].resolved || null,
+        rows: bracket.rows
+    };
+}
+
+/**
+ * Phase 12 chip resolver bridge. Loads server/sync/resolveClientCodes only
+ * when needed so this file stays usable from contexts where Postgres isn't
+ * configured (e.g. one-off CLI runs).
+ *
+ * @returns {Promise<null | { resolveClientCodes: typeof import('../../server/sync/resolveClientCodes')['resolveClientCodes'] }>}
+ */
+function loadResolverModule() {
+    try {
+        return Promise.resolve(require('../../server/sync/resolveClientCodes'));
+    } catch (e) {
+        console.warn(
+            `[tracer-sql] resolveClientCodes module unavailable: ${e && e.message ? e.message : e}`
+        );
+        return Promise.resolve(null);
+    }
+}
+
+function tracerByCodesEnabled() {
+    const v = String(process.env.TRACER_RESOLVE_CODES_VIA_PG || '').trim().toLowerCase();
+    return v === '1' || v === 'true' || v === 'yes' || v === 'on';
+}
+
 /** @returns {void} */
 function assertTracerPayload(payload, { needGeo, label }) {
     if (!payload || typeof payload.sidsByTestCode !== 'object') {
@@ -630,9 +756,36 @@ async function runTracerBatch(opts) {
         : path.resolve(process.cwd(), opts.outDir || './out');
     const concurrency = opts.concurrency != null ? Number(opts.concurrency) : 3;
     const onProgress = typeof opts.onProgress === 'function' ? opts.onProgress : () => {};
+    const useByCodes = hasReg && tracerByCodesEnabled();
 
-    /** @type {object[]} Listec payload bodies (successful fetches only) — used to merge geography when BU+region combined */
-    /** @type {object[]} */
+    // Pre-resolve city/state -> client_codes per chip target so:
+    //  - Region calls can hit the new dbo.usp_listec_worksheet_report_by_codes
+    //    instead of the legacy bucket-cities post-aggregation path.
+    //  - We can fast-fail a chip whose codes don't resolve (likely a stale
+    //    client_locations sync or a missing region alias) before it ever
+    //    reaches MSSQL.
+    /** @type {Map<string, string[]>} key = `${kind}:${key}` -> code[] */
+    const codesByTarget = new Map();
+    if (useByCodes) {
+        const resolverMod = await loadResolverModule();
+        if (!resolverMod) {
+            throw new Error(
+                'TRACER_RESOLVE_CODES_VIA_PG=1 but server/sync/resolveClientCodes not loadable. Ship the api-matter sync module or unset the flag.'
+            );
+        }
+        for (const targ of targets) {
+            const cityArg = targ.kind === 'city' ? [targ.key] : [];
+            const stateArg = targ.kind === 'state' ? [targ.key] : [];
+            const rows = await resolverMod.resolveClientCodes({
+                cityKeys: cityArg,
+                stateKeys: stateArg
+            });
+            const codes = rows.map((r) => String(r.code).toUpperCase());
+            codesByTarget.set(`${targ.kind}:${targ.key}`, codes);
+        }
+    }
+
+    /** @type {object[]} Legacy-path payload list (only populated when useByCodes is false). */
     const buPayloadList = [];
 
     /** @type {{ bu: string, state: string, runIds: Record<string,string>, error: string|null, lastOutMainPath: string|null, lastOutPackagesPath: string|null }[]} */
@@ -650,7 +803,11 @@ async function runTracerBatch(opts) {
     for (const it of items) onProgress({ ...it });
 
     if (hasBu) {
-        const geoKeysForFetch = hasReg ? { cityKeys, stateKeys } : { cityKeys: [], stateKeys: [] };
+        // Bucket-region params on the legacy /packages endpoint are only
+        // needed when the synthetic-region merge will consume them. The new
+        // by-codes path filters at the SP, so the BU pass can stay minimal.
+        const geoKeysForFetch =
+            hasReg && !useByCodes ? { cityKeys, stateKeys } : { cityKeys: [], stateKeys: [] };
 
         const tasks = businessUnits.map((bu, i) => async () => {
             const item = items[i];
@@ -666,8 +823,14 @@ async function runTracerBatch(opts) {
                     cityKeys: geoKeysForFetch.cityKeys,
                     stateKeys: geoKeysForFetch.stateKeys
                 });
-                assertTracerPayload(payload, { needGeo: hasReg, label: `BU=${bu}` });
-                buPayloadList.push(payload);
+                // Geo bucketing is needed only when the legacy synthetic-merge
+                // path will consume it (i.e. region targets exist AND we are
+                // NOT using by-codes).
+                assertTracerPayload(payload, {
+                    needGeo: hasReg && !useByCodes,
+                    label: `BU=${bu}`
+                });
+                if (!useByCodes) buPayloadList.push(payload);
                 const w = writeSixModesForPayload(payload, {
                     tracerTarget: { type: 'bu', bu },
                     fromDate: opts.fromDate,
@@ -696,8 +859,8 @@ async function runTracerBatch(opts) {
         await runWithConcurrency(tasks, concurrency);
     }
 
-    /** Single global fetch — region-only (no BU filter) — only if no BU list */
-    if (!hasBu && hasReg) {
+    /** Legacy global region-only fetch, only used when by-codes is OFF. */
+    if (!hasBu && hasReg && !useByCodes) {
         const { url, payload } = await fetchTracerPayload(apiBase, {
             bu: undefined,
             fromDate: opts.fromDate,
@@ -709,7 +872,6 @@ async function runTracerBatch(opts) {
         });
         assertTracerPayload(payload, { needGeo: true, label: 'global-region' });
         buPayloadList.push(payload);
-        // BU items empty — region loops below consume buPayloadList
     }
 
     const completed = items.filter((it) => it.state === 'done').map((it) => it.bu);
@@ -724,41 +886,133 @@ async function runTracerBatch(opts) {
     const regionFailed = [];
 
     if (hasReg) {
-        if (buPayloadList.length === 0) {
-            for (const targ of targets) {
-                const progressLabel =
-                    targ.kind === 'city' ? `City · ${targ.label}` : `State · ${targ.label}`;
-                regionItems.push({
-                    bu: progressLabel,
-                    regionKind: targ.kind,
-                    regionKey: targ.key,
-                    state: 'failed',
-                    runIds: {},
-                    error: 'No Listec payloads succeeded for this batch — expand geo stats after BU runs succeed.',
-                    lastOutMainPath: null,
-                    lastOutPackagesPath: null
-                });
-                regionFailed.push(progressLabel);
-            }
-            for (const rit of regionItems) onProgress({ ...rit });
-        } else {
-            let rIdx = 0;
-            for (const targ of targets) {
-                const progressLabel =
-                    targ.kind === 'city' ? `City · ${targ.label}` : `State · ${targ.label}`;
-                regionItems.push({
-                    bu: progressLabel,
-                    regionKind: targ.kind,
-                    regionKey: targ.key,
-                    state: 'queued',
-                    runIds: {},
-                    error: null,
-                    lastOutMainPath: null,
-                    lastOutPackagesPath: null
-                });
-            }
-            for (const rit of regionItems) onProgress({ ...rit });
+        for (const targ of targets) {
+            const progressLabel =
+                targ.kind === 'city' ? `City · ${targ.label}` : `State · ${targ.label}`;
+            regionItems.push({
+                bu: progressLabel,
+                regionKind: targ.kind,
+                regionKey: targ.key,
+                state: 'queued',
+                runIds: {},
+                error: null,
+                lastOutMainPath: null,
+                lastOutPackagesPath: null
+            });
+        }
+        for (const rit of regionItems) onProgress({ ...rit });
 
+        if (useByCodes) {
+            // Phase 12 path. For each region target:
+            //  1. Look up the codes resolved upstream.
+            //  2. If BUs are also selected, fan out one /packages-by-codes
+            //     call per BU (passing businessUnitId + codes) and merge.
+            //     Otherwise issue a single call without BU filter.
+            //  3. Write the artefact straight from the response — no
+            //     synthetic-merge step needed because the SP already
+            //     filtered by code.
+            let rIdx = 0;
+            for (let i = 0; i < targets.length; i++) {
+                const targ = targets[i];
+                const rit = regionItems[i];
+                rit.state = 'running';
+                onProgress({ ...rit });
+                const progressLabel =
+                    targ.kind === 'city' ? `City · ${targ.label}` : `State · ${targ.label}`;
+                try {
+                    const codes = codesByTarget.get(`${targ.kind}:${targ.key}`) || [];
+                    if (codes.length === 0) {
+                        throw new Error(
+                            `No client codes mapped to ${progressLabel} in client_locations — run sync (POST /api/admin/client-locations/sync) or check region_aliases.`
+                        );
+                    }
+                    let payload;
+                    let lastUrl;
+                    if (hasBu) {
+                        const perBu = await Promise.all(
+                            businessUnits.map((bu) =>
+                                fetchTracerPayloadByCodes(apiBase, {
+                                    bu,
+                                    fromDate: opts.fromDate,
+                                    toDate: opts.toDate,
+                                    fromHour: opts.fromHour,
+                                    toHour: opts.toHour,
+                                    codes
+                                })
+                            )
+                        );
+                        const successful = perBu.filter((r) => r && r.payload);
+                        if (successful.length === 0) {
+                            throw new Error(
+                                `Listec by-codes returned no payloads for any BU (${progressLabel}).`
+                            );
+                        }
+                        payload = mergeByCodesPayloads(successful.map((r) => r.payload));
+                        lastUrl = successful[successful.length - 1].url;
+                    } else {
+                        const r = await fetchTracerPayloadByCodes(apiBase, {
+                            bu: undefined,
+                            fromDate: opts.fromDate,
+                            toDate: opts.toDate,
+                            fromHour: opts.fromHour,
+                            toHour: opts.toHour,
+                            codes
+                        });
+                        payload = r.payload;
+                        lastUrl = r.url;
+                    }
+                    assertTracerPayload(payload, {
+                        needGeo: false,
+                        label: `Region ${progressLabel}`
+                    });
+                    const tracerTarget = {
+                        type: 'region',
+                        kind: targ.kind,
+                        key: targ.key,
+                        label: targ.label
+                    };
+                    const baseMsOffset = Date.now() + rIdx * 60000;
+                    rIdx++;
+                    const w = writeSixModesForPayload(payload, {
+                        tracerTarget,
+                        fromDate: opts.fromDate,
+                        toDate: opts.toDate,
+                        fromHour: opts.fromHour,
+                        toHour: opts.toHour,
+                        listecApiBase: apiBase,
+                        url: lastUrl,
+                        orgId,
+                        outDir,
+                        baseMsOffset
+                    });
+                    rit.runIds = w.runIds;
+                    rit.lastOutMainPath = w.lastOutMainPath;
+                    rit.lastOutPackagesPath = w.lastOutPackagesPath;
+                    rit.state = 'done';
+                    rit.error = null;
+                    regionCompleted.push(progressLabel);
+                } catch (e) {
+                    rit.state = 'failed';
+                    rit.error = String(e && e.message ? e.message : e);
+                    regionFailed.push(String(rit.bu));
+                }
+                onProgress({ ...rit });
+            }
+        } else if (buPayloadList.length === 0) {
+            // Legacy path: BU calls all failed and we have no global payload
+            // either, so synthetic merge can't run. Mark every region failed.
+            for (const rit of regionItems) {
+                rit.state = 'failed';
+                rit.error =
+                    'No Listec payloads succeeded for this batch — expand geo stats after BU runs succeed.';
+                regionFailed.push(String(rit.bu));
+                onProgress({ ...rit });
+            }
+        } else {
+            // Legacy synthetic-merge path (TRACER_RESOLVE_CODES_VIA_PG off).
+            // Kept until cleanup PR removes buildSyntheticRegionalPayload +
+            // bucketCities/bucketStates plumbing entirely.
+            let rIdx = 0;
             for (let i = 0; i < targets.length; i++) {
                 const targ = targets[i];
                 const rit = regionItems[i];

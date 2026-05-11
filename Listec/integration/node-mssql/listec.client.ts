@@ -180,3 +180,82 @@ export async function fetchAllWorksheetReports(
   }
   return out;
 }
+
+/**
+ * Build the dbo.ClientCodeList TVP from a deduped uppercased code list.
+ * Returns an mssql.Table ready to be passed to req.input(name, table).
+ */
+function buildClientCodeListTvp(codes: string[]): sql.Table {
+  const table = new sql.Table('dbo.ClientCodeList');
+  table.create = false;
+  table.columns.add('code', sql.NVarChar(50), { nullable: false, primary: true });
+  const seen = new Set<string>();
+  for (const raw of codes) {
+    const c = String(raw ?? '').trim();
+    if (!c) continue;
+    const upper = c.toUpperCase();
+    if (seen.has(upper)) continue;
+    seen.add(upper);
+    table.rows.add(upper);
+  }
+  return table;
+}
+
+/**
+ * Phase 12: client_codes-filtered worksheet pull. Calls
+ * dbo.usp_listec_worksheet_report_by_codes — same row shape as
+ * fetchWorksheetReports, except the per-call `clientCode LIKE` filter is
+ * replaced with an exact-match list (TVP). Pass an empty array to fall back
+ * to "no filter" semantics (matches the SP's @codeCount = 0 branch).
+ */
+export async function fetchWorksheetReportsByCodes(
+  f: Omit<WorksheetReportFilters, 'clientCode'>,
+  codes: string[],
+): Promise<WorksheetReportRow[]> {
+  const pool = await getListecPool();
+  return withRetry(async () => {
+    const req = pool.request();
+    req.input('from_date', sql.Date, f.fromDate);
+    req.input('to_date', sql.Date, f.toDate);
+    req.input('from_hour', sql.TinyInt, f.fromHour ?? 0);
+    req.input('to_hour', sql.TinyInt, f.toHour ?? 24);
+    req.input('patient_name', sql.NVarChar(200), f.patientName ?? null);
+    req.input('status_id', sql.Int, f.statusId ?? null);
+    req.input('sid', sql.NVarChar(50), f.sid ?? null);
+    req.input('department_id', sql.Int, f.departmentId ?? null);
+    req.input('business_unit_id', sql.Int, f.businessUnitId ?? null);
+    req.input('test_code', sql.NVarChar(50), f.testCode ?? null);
+    req.input('pid', sql.Int, f.pid ?? null);
+    req.input('tat_only', sql.Bit, f.tatOnly ? 1 : 0);
+    req.input('include_unauthorized', sql.Bit, f.includeUnauthorized === false ? 0 : 1);
+    req.input('page', sql.Int, f.page ?? 1);
+    req.input('page_size', sql.Int, f.pageSize ?? 500);
+    req.input('client_codes', buildClientCodeListTvp(codes));
+
+    const result = await req.execute<Record<string, unknown>>(
+      'dbo.usp_listec_worksheet_report_by_codes',
+    );
+    const set = result.recordsets[0];
+    if (!set) return [];
+    return [...set].map((row) => rowToReportRow(row as Record<string, unknown>));
+  });
+}
+
+/**
+ * Drain every page for the by-codes SP. Mirrors fetchAllWorksheetReports.
+ */
+export async function fetchAllWorksheetReportsByCodes(
+  filters: Omit<WorksheetReportFilters, 'clientCode'>,
+  codes: string[],
+  opts: { pageSize?: number; maxPages?: number } = {},
+): Promise<WorksheetReportRow[]> {
+  const pageSize = Math.min(Math.max(opts.pageSize ?? filters.pageSize ?? 1000, 1), 5000);
+  const maxPages = opts.maxPages ?? 100;
+  const out: WorksheetReportRow[] = [];
+  for (let page = 1; page <= maxPages; page++) {
+    const batch = await fetchWorksheetReportsByCodes({ ...filters, page, pageSize }, codes);
+    out.push(...batch);
+    if (batch.length < pageSize) break;
+  }
+  return out;
+}

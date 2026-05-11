@@ -14,6 +14,23 @@ loadLisNavBotEnv(__dirname);
 const { runLisNavBot } = require('../../cli/lib/run');
 const { runTracerBatch, parseTracerRegions, ALL_SPECIALTY_CODES } = require('../../cli/lib/sql-tracer-source');
 
+// Phase 8 + Phase 12 share the same Postgres pool. We require it here once
+// so /api/regions, /api/runs/:id authz, and tracer can all query without
+// each call site repeating the require + null-check dance.
+let pgPoolMod = null;
+try {
+    pgPoolMod = require('../../server/db/pool');
+} catch {
+    /* db helpers absent in pre-Phase-8 environments */
+}
+function useDatabase() {
+    return Boolean(pgPoolMod && pgPoolMod.useDatabase && pgPoolMod.useDatabase());
+}
+function getPool() {
+    if (!pgPoolMod) throw new Error('server/db/pool is unavailable');
+    return pgPoolMod.getPool();
+}
+
 const app = express();
 const PORT = Number(process.env.LIS_UI_PORT || 4377);
 
@@ -428,6 +445,10 @@ let auditLog = null;
 // the tile wall reads from `runs` instead of `fs.readdirSync(outDir)`. The
 // disk JSON is still the canonical artefact — Postgres is a derived index.
 let runsDb = null;
+// Phase 12: client_locations sync. Mirrors Noble.dbo.tbl_med_mcc_unit_master
+// into Postgres so Tracer Region chips + chip-to-client_codes resolution can
+// answer from db-1 instead of round-tripping to MSSQL on every page load.
+let clientLocationsSync = null;
 try {
     const serverDir = path.resolve(__dirname, '..', '..', 'server');
     auth = require(path.join(serverDir, 'auth'));
@@ -436,6 +457,7 @@ try {
     runMigrate = require(path.join(serverDir, 'db', 'migrate')).migrate;
     auditLog = require(path.join(serverDir, 'audit')).logAudit;
     runsDb = require(path.join(serverDir, 'db', 'runs'));
+    clientLocationsSync = require(path.join(serverDir, 'sync', 'syncClientLocations'));
 } catch (e) {
     // Auth deps not installed yet — fall through and serve the legacy open dashboard.
     if (process.env.DATABASE_URL) {
@@ -471,6 +493,21 @@ if (runMigrate) {
                     console.warn('[stellar-matter] runs backfill failed:', err && err.message ? err.message : err);
                 });
             }
+        })
+        .then(() => {
+            // Phase 12: refresh client_locations once on boot so the Region
+            // chips have up-to-date geography even if Listec was offline at
+            // last cycle. Fire-and-forget; the manual POST endpoint and the
+            // optional CLIENT_LOCATIONS_SYNC_INTERVAL_MIN cover the recovery
+            // case if this fails (e.g. listec service still booting).
+            if (!clientLocationsSync) return;
+            clientLocationsSync.startClientLocationsSyncInterval({});
+            return clientLocationsSync.runClientLocationsSync({}).catch((err) => {
+                console.warn(
+                    '[stellar-matter] client_locations boot sync failed:',
+                    err && err.message ? err.message : err
+                );
+            });
         })
         .catch((err) => console.error('[stellar-matter] migration failed:', err));
 }
@@ -536,7 +573,75 @@ app.get('/api/bu', async (_req, res) => {
     res.json(data);
 });
 
+/**
+ * Build the same { states: [...] } tree the Listec /api/regions endpoint
+ * returns, but sourced from Postgres `client_locations`. Keys (city_key /
+ * state_key) are byte-identical because syncClientLocations populates them
+ * via the same `normaliseCity` / `normaliseState` helpers Listec uses, so
+ * persisted chip selections in LS_TRACER_REGION_SELECTION keep working.
+ */
+async function regionsFromPostgres() {
+    if (!useDatabase()) return null;
+    const pool = getPool();
+    const r = await pool.query(
+        `SELECT state_key, state_label, city_key, city_label, COUNT(*)::int AS mcc_count
+         FROM client_locations
+         WHERE active = true
+         GROUP BY state_key, state_label, city_key, city_label`
+    );
+    if (r.rows.length === 0) return null;
+
+    /** @type {Map<string, { label: string, mccCount: number, cities: Map<string, { label: string, mccCount: number }> }>} */
+    const stateMap = new Map();
+    for (const row of r.rows) {
+        const sk = String(row.state_key || '');
+        if (!sk) continue;
+        let sn = stateMap.get(sk);
+        if (!sn) {
+            sn = { label: String(row.state_label || sk), mccCount: 0, cities: new Map() };
+            stateMap.set(sk, sn);
+        }
+        const ck = String(row.city_key || '');
+        const cn = sn.cities.get(ck) || { label: String(row.city_label || ck), mccCount: 0 };
+        cn.mccCount += Number(row.mcc_count) || 0;
+        sn.cities.set(ck, cn);
+        sn.mccCount += Number(row.mcc_count) || 0;
+    }
+
+    const states = [];
+    for (const [sk, sd] of stateMap) {
+        const cities = [];
+        for (const [ck, cd] of sd.cities) {
+            cities.push({ key: ck, label: cd.label, mccCount: cd.mccCount });
+        }
+        cities.sort((a, b) =>
+            b.mccCount !== a.mccCount ? b.mccCount - a.mccCount : a.label.localeCompare(b.label)
+        );
+        states.push({ key: sk, label: sd.label, mccCount: sd.mccCount, cities });
+    }
+    states.sort((a, b) =>
+        b.mccCount !== a.mccCount ? b.mccCount - a.mccCount : a.label.localeCompare(b.label)
+    );
+    return { states };
+}
+
 app.get('/api/regions', async (_req, res) => {
+    // Phase 12: prefer Postgres (client_locations) so the chip wall doesn't
+    // round-trip MSSQL on every page load. Listec stays the fallback for
+    // (a) fresh deploys where the boot sync hasn't completed yet, and
+    // (b) the case where DATABASE_URL is unset.
+    try {
+        const fromPg = await regionsFromPostgres();
+        if (fromPg) {
+            return res.json(fromPg);
+        }
+    } catch (e) {
+        console.warn(
+            '[stellar-matter] /api/regions Postgres path failed, falling through to Listec:',
+            e && e.message ? e.message : e
+        );
+    }
+
     try {
         const base = listecApiBase();
         const url = `${base}/api/regions`;

@@ -12,7 +12,13 @@ import path from 'path';
 loadEnv({ path: path.resolve(__dirname, '..', '..', '.env') });
 loadEnv();
 import express from 'express';
-import { fetchWorksheetReports, closeListecPool, fetchAllWorksheetReports } from './listec.client';
+import {
+    fetchWorksheetReports,
+    closeListecPool,
+    fetchAllWorksheetReports,
+    fetchAllWorksheetReportsByCodes,
+    getListecPool,
+} from './listec.client';
 import type { WorksheetReportFilters } from './listec.types';
 import { aggregatePackages } from './listec.aggregate';
 import {
@@ -22,6 +28,7 @@ import {
     dumpLookups,
     loadMccGeoMap,
     dumpRegionsHierarchy,
+    dumpMccUnits,
 } from './listec.lookups';
 
 const app = express();
@@ -194,9 +201,86 @@ app.get('/api/worksheet-reports/packages', async (req, res) => {
   }
 });
 
+/**
+ * Phase 12: by-codes variant of /api/worksheet-reports/packages.
+ *
+ * Caller resolves Tracer city/state chips into a list of MCCUnitCode values
+ * via the api-matter Postgres mirror, then hits this route. The SP filters
+ * SIDs by exact match against the TVP, so geography bucketing
+ * (`bucketCities` / `bucketStates`) is no longer needed — we keep the same
+ * `aggregatePackages` test-code bucketing for parity with the legacy
+ * endpoint.
+ */
+app.get('/api/worksheet-reports/packages-by-codes', async (req, res) => {
+  try {
+    const codesRaw = req.query.clientCodes;
+    if (typeof codesRaw !== 'string' || !codesRaw.trim()) {
+      return res.status(400).json({ error: 'clientCodes (CSV) is required' });
+    }
+    const codes = [
+      ...new Set(
+        codesRaw
+          .split(',')
+          .map((s) => s.trim().toUpperCase())
+          .filter(Boolean),
+      ),
+    ];
+    if (codes.length === 0) {
+      return res.status(400).json({ error: 'clientCodes (CSV) is required' });
+    }
+    if (codes.length > 5000) {
+      return res.status(400).json({ error: `Too many clientCodes (got ${codes.length}, max 5000).` });
+    }
+
+    // Reuse filtersFromQuery for date/hour/business_unit/etc. but ignore the
+    // legacy clientCode field (the SP doesn't accept it).
+    const { filters, resolved, unresolved } = await filtersFromQuery(req.query);
+    const byCodesFilters = { ...filters };
+    delete (byCodesFilters as Partial<WorksheetReportFilters>).clientCode;
+
+    const bucketRaw = req.query.bucketTestCodes;
+    const bucketCodes =
+      typeof bucketRaw === 'string' && bucketRaw.trim().length > 0
+        ? bucketRaw
+            .split(',')
+            .map((s) => s.trim())
+            .filter(Boolean)
+        : [];
+
+    const rows = await fetchAllWorksheetReportsByCodes(byCodesFilters, codes);
+    const summary = aggregatePackages(rows, { bucketCodes });
+    res.json({
+      ...summary,
+      resolved,
+      unresolved,
+      filters: byCodesFilters,
+      clientCodesUsed: codes,
+    });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    res.status(400).json({ error: msg });
+  }
+});
+
 app.get('/api/regions', async (_req, res) => {
   try {
     res.json(await dumpRegionsHierarchy());
+  } catch (e) {
+    res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+  }
+});
+
+/**
+ * Full MCC-unit dump consumed by api-matter's syncClientLocations job to
+ * populate the Postgres `client_locations` mirror in db-1. Read-only —
+ * exposes whatever subset of columns introspection finds on
+ * tbl_med_mcc_unit_master so installations with extra/missing columns don't
+ * 500 the dump.
+ */
+app.get('/api/mcc-units', async (_req, res) => {
+  try {
+    const rows = await dumpMccUnits();
+    res.json({ count: rows.length, rows });
   } catch (e) {
     res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
   }
@@ -214,8 +298,39 @@ app.get('/health', (_req, res) => {
   res.json({ ok: true });
 });
 
+/**
+ * One-shot, read-only probe at startup. Logs whether the by-codes SP and
+ * TVP are deployed so operators see it in the boot log instead of finding
+ * out from a 500 on /api/worksheet-reports/packages-by-codes. No remediation
+ * here — re-run `npm run deploy:sp` to install.
+ */
+async function probeByCodesArtifacts(): Promise<void> {
+  try {
+    const pool = await getListecPool();
+    const r = await pool.request().query<{ name: string; kind: string }>(`
+      SELECT name, 'PROC' AS kind FROM sys.objects
+      WHERE name = N'usp_listec_worksheet_report_by_codes' AND type IN ('P','PC')
+      UNION ALL
+      SELECT name, 'TYPE' AS kind FROM sys.types
+      WHERE name = N'ClientCodeList' AND is_table_type = 1
+    `);
+    const have = new Set(r.recordset.map((x) => `${x.kind}:${x.name}`));
+    const spOk = have.has('PROC:usp_listec_worksheet_report_by_codes');
+    const tvpOk = have.has('TYPE:ClientCodeList');
+    console.log(
+      `[listec] by-codes artefacts: SP=${spOk ? 'present' : 'MISSING'}, TVP=${tvpOk ? 'present' : 'MISSING'}` +
+        (spOk && tvpOk ? '' : ' — run `npm run deploy:sp` to install (read-only DDL, no data writes).'),
+    );
+  } catch (e) {
+    console.warn(
+      `[listec] by-codes artefact probe failed: ${e instanceof Error ? e.message : String(e)}`,
+    );
+  }
+}
+
 const server = app.listen(port, host, () => {
   console.log(`Worksheet API listening on http://${host}:${port}`);
+  void probeByCodesArtifacts();
 });
 
 async function shutdown() {
