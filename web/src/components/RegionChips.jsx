@@ -48,6 +48,12 @@ export function RegionChips({
             {loading && <p className="muted small">Loading regions…</p>}
             {!loading && states.length > 0 && (
                 <>
+                    <p className="muted small region-help-text">
+                        Selecting a <strong>state</strong> runs the whole state as one report.
+                        To run only specific <strong>cities</strong>, select the state to reveal
+                        its cities, click the cities you want, then click the state again to
+                        unselect it — the chosen cities stay selected and run on their own.
+                    </p>
                     <div className="chip-grid" role="group" aria-label="State chips">
                         {states.map((st) => (
                             <button
@@ -64,33 +70,49 @@ export function RegionChips({
                         ))}
                     </div>
                     {states
-                        .filter((st) => selectedStates.has(st.key))
-                        .map((st) => (
-                            <div key={`cities-${st.key}`} className="region-city-block">
-                                <p className="eyebrow-lite field-label region-city-heading">
-                                    Cities in {st.label}
-                                </p>
-                                <div
-                                    className="chip-grid region-city-grid"
-                                    role="group"
-                                    aria-label={`Cities in ${st.label}`}
-                                >
-                                    {(st.cities || []).map((c) => (
-                                        <button
-                                            key={c.key}
-                                            type="button"
-                                            className="chip bu-chip region-city-chip"
-                                            aria-pressed={selectedCities.has(c.key) ? 'true' : 'false'}
-                                            title={`${c.mccCount ?? 0} MCC units`}
-                                            onClick={() => onToggleCity(c.key)}
-                                        >
-                                            {c.label}
-                                            <span className="muted small region-chip-count">{c.mccCount ?? 0}</span>
-                                        </button>
-                                    ))}
+                        .filter(
+                            (st) =>
+                                selectedStates.has(st.key) ||
+                                (st.cities || []).some((c) => selectedCities.has(c.key))
+                        )
+                        .map((st) => {
+                            const stateSelected = selectedStates.has(st.key);
+                            const citySelectedCount = (st.cities || []).filter((c) =>
+                                selectedCities.has(c.key)
+                            ).length;
+                            return (
+                                <div key={`cities-${st.key}`} className="region-city-block">
+                                    <p className="eyebrow-lite field-label region-city-heading">
+                                        Cities in {st.label}
+                                        {!stateSelected && citySelectedCount > 0 && (
+                                            <span className="muted small region-city-subnote">
+                                                {' '}
+                                                — state unselected; {citySelectedCount === 1 ? '1 city' : `${citySelectedCount} cities`} will run
+                                            </span>
+                                        )}
+                                    </p>
+                                    <div
+                                        className="chip-grid region-city-grid"
+                                        role="group"
+                                        aria-label={`Cities in ${st.label}`}
+                                    >
+                                        {(st.cities || []).map((c) => (
+                                            <button
+                                                key={c.key}
+                                                type="button"
+                                                className="chip bu-chip region-city-chip"
+                                                aria-pressed={selectedCities.has(c.key) ? 'true' : 'false'}
+                                                title={`${c.mccCount ?? 0} MCC units`}
+                                                onClick={() => onToggleCity(c.key)}
+                                            >
+                                                {c.label}
+                                                <span className="muted small region-chip-count">{c.mccCount ?? 0}</span>
+                                            </button>
+                                        ))}
+                                    </div>
                                 </div>
-                            </div>
-                        ))}
+                            );
+                        })}
                 </>
             )}
         </div>

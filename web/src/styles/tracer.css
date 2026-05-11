@@ -51,6 +51,16 @@
     margin: 0.35rem 0 0.4rem !important;
 }
 
+.region-help-text {
+    margin: 0.25rem 0 0.5rem;
+    line-height: 1.45;
+}
+
+.region-city-subnote {
+    font-style: italic;
+    opacity: 0.85;
+}
+
 .region-chip-count {
     margin-left: 0.35rem;
     font-size: 0.72em;
