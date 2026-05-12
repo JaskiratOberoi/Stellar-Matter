@@ -25,6 +25,11 @@ export interface RegionCityNode {
   key: string;
   label: string;
   mccCount: number;
+  /**
+   * Sorted, deduped list of MCCUnitCode values that contribute to this city.
+   * Surfaced in the UI tooltip for human verification.
+   */
+  codes: string[];
 }
 
 export interface RegionStateNode {
@@ -477,11 +482,11 @@ export async function dumpRegionsHierarchy(): Promise<{ states: RegionStateNode[
   const mcc = mccGeoCache;
   const stateMap = new Map<
     string,
-    { label: string; mccCount: number; cities: Map<string, { label: string; mccCount: number }> }
+    { label: string; mccCount: number; cities: Map<string, { label: string; mccCount: number; codes: Set<string> }> }
   >();
 
   if (mcc) {
-    for (const g of mcc.values()) {
+    for (const [code, g] of mcc) {
       const sk = g.stateKey;
       if (!stateMap.has(sk)) {
         stateMap.set(sk, {
@@ -494,10 +499,11 @@ export async function dumpRegionsHierarchy(): Promise<{ states: RegionStateNode[
       sn.mccCount += 1;
       const ck = g.cityKey;
       if (!sn.cities.has(ck)) {
-        sn.cities.set(ck, { label: g.cityLabel, mccCount: 0 });
+        sn.cities.set(ck, { label: g.cityLabel, mccCount: 0, codes: new Set() });
       }
       const cn = sn.cities.get(ck)!;
       cn.mccCount += 1;
+      cn.codes.add(code);
     }
   }
 
@@ -505,7 +511,12 @@ export async function dumpRegionsHierarchy(): Promise<{ states: RegionStateNode[
   for (const [sk, sd] of stateMap) {
     const cities: RegionCityNode[] = [];
     for (const [ck, cd] of sd.cities) {
-      cities.push({ key: ck, label: cd.label, mccCount: cd.mccCount });
+      cities.push({
+        key: ck,
+        label: cd.label,
+        mccCount: cd.mccCount,
+        codes: [...cd.codes].sort(),
+      });
     }
     cities.sort((a, b) => (b.mccCount !== a.mccCount ? b.mccCount - a.mccCount : a.label.localeCompare(b.label)));
     states.push({

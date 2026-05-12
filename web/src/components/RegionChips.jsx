@@ -1,7 +1,22 @@
 /**
- * @typedef {{ key: string, label: string, mccCount: number }} RegionCityNode
+ * @typedef {{ key: string, label: string, mccCount: number, codes?: string[] }} RegionCityNode
  * @typedef {{ key: string, label: string, mccCount: number, cities: RegionCityNode[] }} RegionStateNode
  */
+
+const CITY_CODE_TOOLTIP_LIMIT = 40;
+
+/** Build the city chip tooltip text: count + sorted MCC codes (capped). */
+function buildCityTitle(city) {
+    const count = city.mccCount ?? 0;
+    const codes = Array.isArray(city.codes) ? city.codes : [];
+    const head = `${count} MCC unit${count === 1 ? '' : 's'}`;
+    if (codes.length === 0) return head;
+    if (codes.length <= CITY_CODE_TOOLTIP_LIMIT) {
+        return `${head}\n${codes.join(', ')}`;
+    }
+    const shown = codes.slice(0, CITY_CODE_TOOLTIP_LIMIT).join(', ');
+    return `${head}\n${shown}\n+ ${codes.length - CITY_CODE_TOOLTIP_LIMIT} more`;
+}
 
 /**
  * @param {{
@@ -102,7 +117,7 @@ export function RegionChips({
                                                 type="button"
                                                 className="chip bu-chip region-city-chip"
                                                 aria-pressed={selectedCities.has(c.key) ? 'true' : 'false'}
-                                                title={`${c.mccCount ?? 0} MCC units`}
+                                                title={buildCityTitle(c)}
                                                 onClick={() => onToggleCity(c.key)}
                                             >
                                                 {c.label}

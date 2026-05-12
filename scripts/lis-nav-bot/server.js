@@ -584,14 +584,16 @@ async function regionsFromPostgres() {
     if (!useDatabase()) return null;
     const pool = getPool();
     const r = await pool.query(
-        `SELECT state_key, state_label, city_key, city_label, COUNT(*)::int AS mcc_count
+        `SELECT state_key, state_label, city_key, city_label,
+                COUNT(*)::int AS mcc_count,
+                array_agg(code ORDER BY code) AS codes
          FROM client_locations
          WHERE active = true
          GROUP BY state_key, state_label, city_key, city_label`
     );
     if (r.rows.length === 0) return null;
 
-    /** @type {Map<string, { label: string, mccCount: number, cities: Map<string, { label: string, mccCount: number }> }>} */
+    /** @type {Map<string, { label: string, mccCount: number, cities: Map<string, { label: string, mccCount: number, codes: string[] }> }>} */
     const stateMap = new Map();
     for (const row of r.rows) {
         const sk = String(row.state_key || '');
@@ -602,8 +604,14 @@ async function regionsFromPostgres() {
             stateMap.set(sk, sn);
         }
         const ck = String(row.city_key || '');
-        const cn = sn.cities.get(ck) || { label: String(row.city_label || ck), mccCount: 0 };
+        const codes = Array.isArray(row.codes) ? row.codes.filter(Boolean).map(String) : [];
+        const cn = sn.cities.get(ck) || {
+            label: String(row.city_label || ck),
+            mccCount: 0,
+            codes: []
+        };
         cn.mccCount += Number(row.mcc_count) || 0;
+        for (const c of codes) cn.codes.push(c);
         sn.cities.set(ck, cn);
         sn.mccCount += Number(row.mcc_count) || 0;
     }
@@ -612,7 +620,12 @@ async function regionsFromPostgres() {
     for (const [sk, sd] of stateMap) {
         const cities = [];
         for (const [ck, cd] of sd.cities) {
-            cities.push({ key: ck, label: cd.label, mccCount: cd.mccCount });
+            cities.push({
+                key: ck,
+                label: cd.label,
+                mccCount: cd.mccCount,
+                codes: [...new Set(cd.codes)].sort()
+            });
         }
         cities.sort((a, b) =>
             b.mccCount !== a.mccCount ? b.mccCount - a.mccCount : a.label.localeCompare(b.label)
