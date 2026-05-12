@@ -564,8 +564,33 @@ async function fetchTracerPayloadByCodes(
 
     const url = `${apiBase}/api/worksheet-reports/packages-by-codes?${params.toString()}`;
     console.log(`[tracer-sql] GET ${url} (${codes.length} client codes)`);
-    const res = await fetch(url, { headers: { Accept: 'application/json' } });
-    const text = await res.text();
+    // Bound the call so a wedged MSSQL session surfaces as a tile-level error
+    // instead of an indefinite "Running..." spinner. Default 4 minutes, tuneable
+    // via TRACER_BY_CODES_TIMEOUT_MS in case a wide window genuinely needs more.
+    const timeoutMs = Math.max(
+        30_000,
+        Number(process.env.TRACER_BY_CODES_TIMEOUT_MS) || 240_000
+    );
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    let res;
+    let text;
+    try {
+        res = await fetch(url, {
+            headers: { Accept: 'application/json' },
+            signal: ctrl.signal
+        });
+        text = await res.text();
+    } catch (e) {
+        if (e && (e.name === 'AbortError' || /aborted/i.test(String(e.message)))) {
+            throw new Error(
+                `Listec by-codes timeout after ${timeoutMs}ms (${bu || 'no-bu'}, ${codes.length} codes)`
+            );
+        }
+        throw e;
+    } finally {
+        clearTimeout(timer);
+    }
     if (!res.ok) {
         throw new Error(
             `Listec by-codes API ${res.status} (${bu || 'no-bu'}): ${text.slice(0, 500)}`
@@ -911,9 +936,18 @@ async function runTracerBatch(opts) {
             //  3. Write the artefact straight from the response — no
             //     synthetic-merge step needed because the SP already
             //     filtered by code.
-            let rIdx = 0;
-            for (let i = 0; i < targets.length; i++) {
-                const targ = targets[i];
+            // Region targets used to run sequentially; with the by-codes SP
+            // each call is small (filtered to a city's codes at MSSQL) so we
+            // fan them out with bounded concurrency. The cap matches the
+            // BU-pass concurrency so we don't double the load on the listec
+            // pool / MSSQL connection budget.
+            const regionConcurrency = Math.max(
+                1,
+                Number(opts.regionConcurrency) ||
+                    Number(process.env.TRACER_REGION_CONCURRENCY) ||
+                    Math.min(4, Math.max(2, concurrency))
+            );
+            const regionTasks = targets.map((targ, i) => async () => {
                 const rit = regionItems[i];
                 rit.state = 'running';
                 onProgress({ ...rit });
@@ -971,8 +1005,9 @@ async function runTracerBatch(opts) {
                         key: targ.key,
                         label: targ.label
                     };
-                    const baseMsOffset = Date.now() + rIdx * 60000;
-                    rIdx++;
+                    // Use the stable target index to space artefact timestamps;
+                    // parallel execution would race on a shared counter.
+                    const baseMsOffset = Date.now() + i * 60000;
                     const w = writeSixModesForPayload(payload, {
                         tracerTarget,
                         fromDate: opts.fromDate,
@@ -997,7 +1032,8 @@ async function runTracerBatch(opts) {
                     regionFailed.push(String(rit.bu));
                 }
                 onProgress({ ...rit });
-            }
+            });
+            await runWithConcurrency(regionTasks, regionConcurrency);
         } else if (buPayloadList.length === 0) {
             // Legacy path: BU calls all failed and we have no global payload
             // either, so synthetic merge can't run. Mark every region failed.

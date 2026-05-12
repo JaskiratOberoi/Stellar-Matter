@@ -56,6 +56,12 @@ services:
       # writes land in /app/out (cwd-relative), reads scan /app/scripts/lis-nav-bot/out
       # (__dirname-relative) and the tile wall never sees new runs.
       LIS_OUT_DIR: /app/out
+      # Phase 12: route Tracer region chips through Postgres client_locations
+      # -> dbo.usp_listec_worksheet_report_by_codes (TVP filter at MSSQL).
+      # Without this the legacy /packages?bucketCities=... drain runs, which
+      # streams every SID for the whole window across the LIS DB and filters
+      # in JS — a 30-day multi-city run hangs and times out.
+      TRACER_RESOLVE_CODES_VIA_PG: ${TRACER_RESOLVE_CODES_VIA_PG:-1}
       CORS_ORIGINS: ${CORS_ORIGINS:-https://matter.stellarinfomatica.com}
       TZ: ${TZ:-Asia/Kolkata}
     extra_hosts:
