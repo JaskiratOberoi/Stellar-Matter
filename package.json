@@ -13,6 +13,7 @@
     "dev": "concurrently -k -n server,web -c cyan,magenta \"npm run dev -w server\" \"npm run dev -w web\"",
     "dev:server": "npm run dev -w server",
     "dev:web": "npm run dev -w web",
+    "dev:web-docker": "npm run dev -w web",
     "build": "npm run build -w web",
     "start": "node server/index.js",
     "migrate": "node server/db/migrate.js",

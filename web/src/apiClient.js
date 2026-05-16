@@ -2,11 +2,17 @@
 const TOKEN_KEY = 'stellar_matter_token';
 
 /**
- * Empty in dev (Vite proxy forwards /api/* to localhost:4378) and same-origin Docker.
- * Set to https://api-matter.stellarinfomatica.com via VITE_API_BASE_URL when the SPA
- * is deployed cross-origin (Hostinger).
+ * In Vite dev (`npm run dev`), always use relative `/api/*` so the dev-server proxy
+ * (vite.config.js → Matter on LIS_UI_PORT / 4377) is used. Otherwise a stray
+ * VITE_API_BASE_URL in .env.local can point at production, which may not ship newer
+ * routes (JSON 404/HTML) while `/api/bu` still works — a confusing split.
+ *
+ * Production and `vite preview` of a production build still use VITE_API_BASE_URL
+ * from web/.env.production (see web/package.json build).
  */
-const API_BASE = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/+$/, '');
+const API_BASE = import.meta.env.DEV
+    ? ''
+    : (import.meta.env.VITE_API_BASE_URL || '').replace(/\/+$/, '');
 
 export function apiUrl(path) {
     if (!path) return API_BASE;

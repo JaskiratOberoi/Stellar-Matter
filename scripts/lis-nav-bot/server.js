@@ -12,7 +12,7 @@ const { loadLisNavBotEnv } = require('../../cli/lib/load-env');
 loadLisNavBotEnv(__dirname);
 
 const { runLisNavBot } = require('../../cli/lib/run');
-const { runTracerBatch, parseTracerRegions, ALL_SPECIALTY_CODES } = require('../../cli/lib/sql-tracer-source');
+const { runTracerBatch, parseTracerRegions, parseTracerSalesPeople, ALL_SPECIALTY_CODES } = require('../../cli/lib/sql-tracer-source');
 
 // Phase 8 + Phase 12 share the same Postgres pool. We require it here once
 // so /api/regions, /api/runs/:id authz, and tracer can all query without
@@ -675,6 +675,43 @@ app.get('/api/regions', async (_req, res) => {
     }
 });
 
+app.get('/api/tracer/sales-marketing-users', async (_req, res) => {
+    try {
+        const base = listecApiBase();
+        const url = `${base}/api/tracer/sales-marketing-users`;
+        const r = await fetch(url);
+        if (!r.ok) {
+            const text = await r.text();
+            return res.status(502).json({
+                error: `Listec ${r.status}: ${text.slice(0, 300)}`,
+                users: []
+            });
+        }
+        res.json(await r.json());
+    } catch (e) {
+        res.status(502).json({ error: String(e && e.message ? e.message : e), users: [] });
+    }
+});
+
+app.get('/api/tracer/sales-marketing-users/codes', async (req, res) => {
+    try {
+        const ids = req.query.ids;
+        if (typeof ids !== 'string' || !ids.trim()) {
+            return res.status(400).json({ error: 'ids query parameter is required' });
+        }
+        const base = listecApiBase();
+        const url = `${base}/api/tracer/sales-marketing-users/codes?ids=${encodeURIComponent(ids)}`;
+        const r = await fetch(url);
+        const text = await r.text();
+        if (!r.ok) {
+            return res.status(502).json({ error: `Listec ${r.status}: ${text.slice(0, 300)}` });
+        }
+        res.type('application/json').send(text);
+    } catch (e) {
+        res.status(502).json({ error: String(e && e.message ? e.message : e) });
+    }
+});
+
 app.get('/api/runs/tiles', async (req, res) => {
     const outDir = resolveOutDir();
     // Org scoping: caller's active_org_id from JWT, with 'org-default' as the
@@ -1075,10 +1112,11 @@ app.post('/api/tracer-run', requireRunStarter, async (req, res) => {
         if (single) businessUnits.push(single);
     }
     const regInfo = parseTracerRegions(body.regions);
-    if (businessUnits.length === 0 && regInfo.targets.length === 0) {
-        return res
-            .status(400)
-            .json({ error: 'Select at least one business unit and/or region (state/city).' });
+    const salesInfo = parseTracerSalesPeople(body.salesPeople);
+    if (businessUnits.length === 0 && regInfo.targets.length === 0 && salesInfo.targets.length === 0) {
+        return res.status(400).json({
+            error: 'Select at least one business unit, region (state/city), and/or salesperson.'
+        });
     }
 
     const fromDate = trimOrNullStr(body.fromDate);
@@ -1089,26 +1127,71 @@ app.post('/api/tracer-run', requireRunStarter, async (req, res) => {
 
     const fromHour = body.fromHour != null && String(body.fromHour).trim() !== '' ? Number(body.fromHour) : undefined;
     const toHour = body.toHour != null && String(body.toHour).trim() !== '' ? Number(body.toHour) : undefined;
+    // Collate flag flips the tracer wall from per-BU + per-region rows into a
+    // single "Collated" row whose tile counts dedupe by SID. Treated truthy
+    // for any of: true, "true", 1, "1", "on", "yes" (matches our other env
+    // toggle parsers; the UI sends a real boolean).
+    const collate = (() => {
+        const v = body.collate;
+        if (v === true || v === 1) return true;
+        if (typeof v === 'string') {
+            const s = v.trim().toLowerCase();
+            return s === '1' || s === 'true' || s === 'yes' || s === 'on';
+        }
+        return false;
+    })();
 
     const startedAt = new Date().toISOString();
     const runId = startedAt.replace(/[:.]/g, '-');
 
-    const buProgressRows = businessUnits.map((bu) => ({
-        bu,
-        state: 'queued',
-        childRunId: null,
-        error: null
-    }));
+    const collatedLabel = (() => {
+        if (!collate) return null;
+        const parts = [];
+        if (regInfo.targets.length) {
+            parts.push(`${regInfo.targets.length} region${regInfo.targets.length === 1 ? '' : 's'}`);
+        }
+        if (salesInfo.targets.length) {
+            parts.push(`${salesInfo.targets.length} sales`);
+        }
+        const tail = parts.length ? ` + ${parts.join(' + ')}` : '';
+        return `Collated · ${businessUnits.length} BU${businessUnits.length === 1 ? '' : 's'}${tail}`;
+    })();
+
+    const buProgressRows = collate
+        ? []
+        : businessUnits.map((bu) => ({
+              bu,
+              state: 'queued',
+              childRunId: null,
+              error: null
+          }));
     /** @type {{ bu: string, state: string, childRunId: null, error: null }[]} */
-    const regionProgressRows = regInfo.targets.map((t) => ({
-        bu: t.kind === 'city' ? `City · ${t.label}` : `State · ${t.label}`,
-        state: 'queued',
-        childRunId: null,
-        error: null
-    }));
+    const regionProgressRows = collate
+        ? []
+        : regInfo.targets.map((t) => ({
+              bu: t.kind === 'city' ? `City · ${t.label}` : `State · ${t.label}`,
+              state: 'queued',
+              childRunId: null,
+              error: null
+          }));
+    /** @type {{ bu: string, state: string, childRunId: null, error: null }[]} */
+    const salesProgressRows = collate
+        ? []
+        : salesInfo.targets.map((t) => ({
+              bu: `Sales · ${t.label}`,
+              state: 'queued',
+              childRunId: null,
+              error: null
+          }));
+    /** @type {{ bu: string, state: string, childRunId: null, error: null }[]} */
+    const collatedProgressRows = collate
+        ? [{ bu: collatedLabel, state: 'queued', childRunId: null, error: null }]
+        : [];
 
     /** @type {string[]} */
-    const queuedFanOutLabels = [...businessUnits, ...regionProgressRows.map((r) => r.bu)];
+    const queuedFanOutLabels = collate
+        ? [collatedLabel]
+        : [...businessUnits, ...regionProgressRows.map((r) => r.bu), ...salesProgressRows.map((r) => r.bu)];
 
     jobState = {
         state: 'running',
@@ -1126,7 +1209,7 @@ app.post('/api/tracer-run', requireRunStarter, async (req, res) => {
             queued: queuedFanOutLabels,
             completed: [],
             failed: [],
-            items: [...buProgressRows, ...regionProgressRows]
+            items: [...buProgressRows, ...regionProgressRows, ...salesProgressRows, ...collatedProgressRows]
         },
         lastFanOut: null
     };
@@ -1144,10 +1227,12 @@ app.post('/api/tracer-run', requireRunStarter, async (req, res) => {
                 org_id: orgId,
                 business_units: businessUnits,
                 regions: body.regions || null,
+                sales_people: body.salesPeople || null,
                 from_date: fromDate,
                 to_date: toDate,
                 bucket_test_codes: ALL_SPECIALTY_CODES,
-                fan_out: queuedFanOutLabels.length > 1
+                fan_out: queuedFanOutLabels.length > 1,
+                collate
             }
         }).catch(() => {});
     }
@@ -1175,6 +1260,7 @@ app.post('/api/tracer-run', requireRunStarter, async (req, res) => {
             const result = await runTracerBatch({
                 businessUnits,
                 regions: body.regions,
+                salesPeople: body.salesPeople,
                 fromDate,
                 toDate,
                 fromHour,
@@ -1183,10 +1269,13 @@ app.post('/api/tracer-run', requireRunStarter, async (req, res) => {
                 outDir: resolveOutDir(),
                 concurrency: 3,
                 listecApiBase: listecApiBase(),
-                onProgress
+                onProgress,
+                collate,
+                collateLabel: collatedLabel
             });
 
-            const allWrites = [...result.items, ...result.regionItems];
+            const collatedItems = Array.isArray(result.collatedItems) ? result.collatedItems : [];
+            const allWrites = [...result.items, ...result.regionItems, ...collatedItems];
 
             // Ingest every per-mode artefact into Postgres so the tile wall
             // sees them on the next /api/runs/tiles poll without waiting for
@@ -1208,21 +1297,33 @@ app.post('/api/tracer-run', requireRunStarter, async (req, res) => {
                 error: it.error || null
             });
 
+            const collatedCompleted = Array.isArray(result.collatedCompleted)
+                ? result.collatedCompleted
+                : [];
+            const collatedFailed = Array.isArray(result.collatedFailed)
+                ? result.collatedFailed
+                : [];
+
             const fanOutSnapshot = {
                 batchRunId: runId,
                 kind: 'tracer',
                 queued: queuedFanOutLabels.slice(),
-                completed: [...result.completed, ...result.regionCompleted],
-                failed: [...result.failed, ...result.regionFailed],
-                items: [...result.items.map(mapSnap), ...result.regionItems.map(mapSnap)]
+                completed: [...result.completed, ...result.regionCompleted, ...collatedCompleted],
+                failed: [...result.failed, ...result.regionFailed, ...collatedFailed],
+                items: [
+                    ...result.items.map(mapSnap),
+                    ...result.regionItems.map(mapSnap),
+                    ...collatedItems.map(mapSnap)
+                ]
             };
 
             const anyFail =
                 result.failed.length > 0 ||
-                result.regionFailed.length > 0;
+                result.regionFailed.length > 0 ||
+                collatedFailed.length > 0;
             const errTxt =
                 anyFail ?
-                    `Failed: ${[...result.failed, ...result.regionFailed].join('; ')}`
+                    `Failed: ${[...result.failed, ...result.regionFailed, ...collatedFailed].join('; ')}`
                 :   null;
             jobState = {
                 state: 'idle',

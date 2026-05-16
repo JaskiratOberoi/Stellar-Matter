@@ -23,7 +23,9 @@ function buildApiProxy(env) {
 }
 
 export default defineConfig(({ mode }) => {
-    const env = loadEnv(mode, repoRoot, '');
+    // Root `.env` (DATABASE_URL, etc.) + `web/.env*` so devs can set MATTER_APP_PORT
+    // in web/.env.development when the Matter API runs in Docker on :4378 instead of :4377.
+    const env = { ...loadEnv(mode, repoRoot, ''), ...loadEnv(mode, __dirname, '') };
     const apiProxy = buildApiProxy(env);
 
     return {

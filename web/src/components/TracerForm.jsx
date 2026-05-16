@@ -1,19 +1,21 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { DateChips } from './DateChips.jsx';
 import { BuChips } from './BuChips.jsx';
-import { RegionChips } from './RegionChips.jsx';
+import { SalesChips } from './SalesChips.jsx';
+
+/** localStorage key for the Collate toggle. Survives reload. */
+const LS_TRACER_COLLATE = 'lis-nav-bot.tracer.collate';
 
 /**
  * @param {{
  *   buOptions: { options: { id: string, label: string }[], error: string | null },
  *   buSelected: Set<string>,
  *   buActions: { toggle: (label: string) => void, selectAll: () => void, clear: () => void },
- *   regionStates: { key: string, label: string, cities?: { key: string, label: string, mccCount?: number }[], mccCount?: number }[],
- *   regionLoading: boolean,
- *   regionLookupError: string | null,
- *   regionSelectedStates: Set<string>,
- *   regionSelectedCities: Set<string>,
- *   regionActions: { toggleState: (k: string) => void, toggleCity: (k: string) => void, clearRegions: () => void },
+ *   salesUsers: { userId: number, label: string, codeCount?: number }[],
+ *   salesLoading: boolean,
+ *   salesLookupError: string | null,
+ *   salesSelectedIds: Set<string>,
+ *   salesActions: { toggle: (userId: string, label: string) => void, clear: () => void },
  *   busy: boolean,
  *   viewerDisabled: boolean,
  *   onRun: (form: {
@@ -23,8 +25,8 @@ import { RegionChips } from './RegionChips.jsx';
  *     toHour: string,
  *     bu: string,
  *     businessUnits: string[],
- *     regionStatesTree: unknown[],
- *     selectedRegions: { states: Set<string>, cities: Set<string> }
+ *     salesPeople: { id: string | number, label: string }[],
+ *     collate: boolean,
  *   }) => void | Promise<void>,
  * }} props
  */
@@ -32,12 +34,11 @@ export function TracerForm({
     buOptions,
     buSelected,
     buActions,
-    regionStates,
-    regionLoading,
-    regionLookupError,
-    regionSelectedStates,
-    regionSelectedCities,
-    regionActions,
+    salesUsers,
+    salesLoading,
+    salesLookupError,
+    salesSelectedIds,
+    salesActions,
     busy,
     viewerDisabled,
     onRun
@@ -47,19 +48,40 @@ export function TracerForm({
     const [fromHour, setFromHour] = useState('');
     const [toHour, setToHour] = useState('');
     const [bu, setBu] = useState('');
+    const [collate, setCollate] = useState(() => {
+        try {
+            return localStorage.getItem(LS_TRACER_COLLATE) === '1';
+        } catch {
+            return false;
+        }
+    });
+
+    useEffect(() => {
+        try {
+            if (collate) localStorage.setItem(LS_TRACER_COLLATE, '1');
+            else localStorage.removeItem(LS_TRACER_COLLATE);
+        } catch {
+            // localStorage may be unavailable (private mode); just skip persistence.
+        }
+    }, [collate]);
 
     const datesOk = String(fromDate || '').trim() !== '' && String(toDate || '').trim() !== '';
     const hasBuPick = buSelected.size > 0;
     const hasBuFallback = buOptions.options.length === 0 && String(bu || '').trim() !== '';
-    const hasRegionPick = regionSelectedStates.size > 0 || regionSelectedCities.size > 0;
+    const hasSalesPick = salesSelectedIds.size > 0;
 
-    /** At least one of BU chips / BU text fallback / geography chips — matches server validation */
-    const canRun = datesOk && (hasBuPick || hasBuFallback || hasRegionPick) && !viewerDisabled;
+    /** At least one of BU chips / BU text fallback / salesperson — matches server validation */
+    const canRun = datesOk && (hasBuPick || hasBuFallback || hasSalesPick) && !viewerDisabled;
 
     async function handleSubmit(e) {
         e.preventDefault();
         if (!canRun || busy) return;
         const businessUnits = hasBuPick ? [...buSelected] : [];
+        const salesPeople = [];
+        for (const id of salesSelectedIds) {
+            const meta = salesUsers.find((u) => String(u.userId) === id);
+            salesPeople.push({ id, label: meta ? meta.label : id });
+        }
         await onRun({
             fromDate,
             toDate,
@@ -67,8 +89,8 @@ export function TracerForm({
             toHour,
             bu,
             businessUnits,
-            regionStatesTree: regionStates,
-            selectedRegions: { states: regionSelectedStates, cities: regionSelectedCities }
+            salesPeople,
+            collate
         });
     }
 
@@ -145,20 +167,32 @@ export function TracerForm({
                 }
             />
 
-            <RegionChips
-                states={regionStates}
-                loading={regionLoading}
-                selectedStates={regionSelectedStates}
-                selectedCities={regionSelectedCities}
-                onToggleState={regionActions.toggleState}
-                onToggleCity={regionActions.toggleCity}
-                onClear={regionActions.clearRegions}
-                lookupError={regionLookupError}
+            <SalesChips
+                users={salesUsers}
+                loading={salesLoading}
+                lookupError={salesLookupError}
+                selectedIds={salesSelectedIds}
+                onToggle={salesActions.toggle}
+                onClear={salesActions.clear}
             />
 
             <div className="tracer-form-actions">
                 <button type="submit" className="btn-primary" disabled={!canRun || busy}>
                     {busy ? 'Running…' : 'Run tracer'}
+                </button>
+                <button
+                    type="button"
+                    className={`btn-secondary tracer-collate-toggle${collate ? ' is-on' : ''}`}
+                    aria-pressed={collate}
+                    onClick={() => setCollate((v) => !v)}
+                    disabled={busy}
+                    title={
+                        collate
+                            ? 'Collate ON — all selected BUs and sales scopes merge into one SID-deduped tile-row.'
+                            : 'Collate OFF — each BU and each salesperson gets its own tile-row.'
+                    }
+                >
+                    {collate ? 'Collate: On' : 'Collate: Off'}
                 </button>
                 {viewerDisabled && <p className="muted small">Viewer role cannot start runs.</p>}
             </div>

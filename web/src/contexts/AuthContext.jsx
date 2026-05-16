@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { apiFetch, setToken, getToken } from '../apiClient.js';
+import { apiFetch, apiUrl, setToken, getToken } from '../apiClient.js';
 
 const AuthContext = createContext({
     user: null,
@@ -51,8 +51,11 @@ export function AuthProvider({ children }) {
     }, [refresh]);
 
     const login = useCallback(async (username, password) => {
-        const r = await apiFetch('/api/auth/login', {
+        // Do not send a stale Bearer token — `apiFetch` always attaches one if present,
+        // which can confuse proxies / rate-limit IP logic on shared dev setups.
+        const r = await fetch(apiUrl('/api/auth/login'), {
             method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ username, password })
         });
         let body = null;

@@ -30,6 +30,7 @@ import {
     dumpRegionsHierarchy,
     dumpMccUnits,
 } from './listec.lookups';
+import { listClientCodesForUsers, listSalesMarketingUsers } from './listec.salesUsers';
 
 const app = express();
 const port = Number(process.env.LISTEC_API_PORT ?? process.env.PORT ?? 3100);
@@ -267,6 +268,53 @@ app.get('/api/regions', async (_req, res) => {
     res.json(await dumpRegionsHierarchy());
   } catch (e) {
     res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+  }
+});
+
+/**
+ * Tracer: users with LIS type "Sales and Marketing" and their mapped MCC client code counts.
+ */
+app.get('/api/tracer/sales-marketing-users', async (_req, res) => {
+  try {
+    const users = await listSalesMarketingUsers();
+    res.json({ users });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    res.status(500).json({ error: msg, users: [] });
+  }
+});
+
+/**
+ * Tracer: bulk resolve client codes for selected salesperson user ids (same mapping as LIS User Client Mapping).
+ * Query: ids=1,2,3
+ */
+app.get('/api/tracer/sales-marketing-users/codes', async (req, res) => {
+  try {
+    const raw = req.query.ids;
+    if (typeof raw !== 'string' || !raw.trim()) {
+      return res.status(400).json({ error: 'ids (comma-separated user ids) is required' });
+    }
+    const ids = [
+      ...new Set(
+        raw
+          .split(',')
+          .map((s) => Number(String(s).trim()))
+          .filter((n) => Number.isFinite(n) && n > 0 && n <= 2147483647),
+      ),
+    ].map((n) => Math.floor(n));
+    if (ids.length === 0) {
+      return res.status(400).json({ error: 'No valid user ids in ids' });
+    }
+    const map = await listClientCodesForUsers(ids);
+    /** @type {Record<string, string[]>} */
+    const codesByUser: Record<string, string[]> = {};
+    for (const [uid, codes] of map) {
+      codesByUser[String(uid)] = codes;
+    }
+    res.json({ codesByUser });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    res.status(400).json({ error: msg });
   }
 });
 

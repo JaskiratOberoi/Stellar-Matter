@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch } from '../apiClient.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
-import { useRegions } from '../hooks/useRegions.js';
-import { useTracerRegionSelection } from '../hooks/useTracerRegionSelection.js';
+import { useSalesMarketingUsers } from '../hooks/useSalesMarketingUsers.js';
 import {
-    buildRegionsSubmitPayload,
+    mapCollatedTileToBanner,
     mapRegionTilesToBanners,
     mapTilesToBanners,
     tracerBuKey,
@@ -51,16 +50,20 @@ export function TracerPage({
     const { authRequired, user } = useAuth();
     const viewerDisabled = Boolean(authRequired && user && user.role === 'viewer');
 
-    const { states: regionStates, error: regionsFetchErr, loading: regionsLoading } = useRegions();
-    const {
-        selectedStates: regionSelectedStates,
-        selectedCities: regionSelectedCities,
-        toggleState,
-        toggleCity,
-        clearRegions,
-        pruneStale
-    } = useTracerRegionSelection();
+    const { users: salesUsers, error: salesFetchErr, loading: salesLoading } = useSalesMarketingUsers();
 
+    const [salesSelectedIds, setSalesSelectedIds] = useState(() => new Set());
+
+    const toggleSales = useCallback((userId, label) => {
+        setSalesSelectedIds((prev) => {
+            const n = new Set(prev);
+            if (n.has(userId)) n.delete(userId);
+            else n.add(userId);
+            return n;
+        });
+    }, []);
+
+    const clearSales = useCallback(() => setSalesSelectedIds(new Set()), []);
     const [bannerRows, setBannerRows] = useState(
         /** @type {{ buKey: string, bu: string, fromDate: string, toDate: string, generalTile: object | null, urineTile: object | null, edtaTile: object | null, citrateTile: object | null, sHeparinTile: object | null, lHeparinTile: object | null }[]} */ (
             []
@@ -71,6 +74,11 @@ export function TracerPage({
             []
         )
     );
+    const [collatedBannerRow, setCollatedBannerRow] = useState(
+        /** @type {null | { bannerKey: string, label: string, fromDate: string, toDate: string, generalTile: object | null, urineTile: object | null, edtaTile: object | null, citrateTile: object | null, sHeparinTile: object | null, lHeparinTile: object | null }} */ (
+            null
+        )
+    );
     const [localError, setLocalError] = useState( /** @type {string | null} */ (null));
     const [tracerBusy, setTracerBusy] = useState(false);
     const [openTile, setOpenTile] = useState( /** @type {object | null} */ (null));
@@ -79,7 +87,7 @@ export function TracerPage({
     const [printFocusKey, setPrintFocusKey] = useState( /** @type {string | null} */ (null));
 
     const pendingBannerRef = useRef(
-        /** @type {null | { batchIso: string, from: string, to: string, bus: Set<string>, regionTargets: { kind: string, key: string, label: string }[] }} */ (
+        /** @type {null | { batchIso: string, from: string, to: string, bus: Set<string>, scopeTargets: { kind: string, key: string, label: string }[], collate: boolean }} */ (
             null
         )
     );
@@ -89,16 +97,6 @@ export function TracerPage({
     const tilesForIndex = visibleTiles ?? tiles;
 
     useEffect(() => {
-        if (!regionStates.length) return;
-        const validStateKeys = new Set(regionStates.map((s) => s.key));
-        const validCityKeys = new Set();
-        for (const s of regionStates) {
-            for (const c of s.cities || []) validCityKeys.add(c.key);
-        }
-        pruneStale(validStateKeys, validCityKeys);
-    }, [regionStates, pruneStale]);
-
-    useEffect(() => {
         const p = pendingBannerRef.current;
         if (!p) return;
         pendingBannerRef.current = null;
@@ -106,6 +104,23 @@ export function TracerPage({
         const from = p.from;
         const to = p.to;
         const batchIso = p.batchIso;
+
+        // Collate replaces the per-BU and per-region rows entirely. Reset
+        // those stacks so a previously collate-OFF batch's tiles don't keep
+        // hanging around alongside the new collated row.
+        if (p.collate) {
+            const collated = mapCollatedTileToBanner(tiles, batchIso, from, to);
+            if (collated) {
+                setCollatedBannerRow(collated);
+                setBannerRows([]);
+                setRegionBannerRows([]);
+            }
+            return;
+        }
+
+        // Non-collate batch: drop any stale collated row from a prior run so
+        // the wall doesn't show both shapes simultaneously.
+        setCollatedBannerRow(null);
 
         if (p.bus && p.bus.size > 0) {
             const incoming = mapTilesToBanners(tiles, p.bus, batchIso, from, to);
@@ -130,7 +145,7 @@ export function TracerPage({
             });
         }
 
-        const rt = p.regionTargets || [];
+        const rt = p.scopeTargets || [];
         if (rt.length > 0) {
             const incomingReg = mapRegionTilesToBanners(tiles, rt, batchIso, from, to);
             setRegionBannerRows((prev) => {
@@ -180,10 +195,9 @@ export function TracerPage({
             body.bu = String(snap.bu).trim();
             body.businessUnits = [body.bu];
         }
-        const { regions } = buildRegionsSubmitPayload(snap.regionStatesTree, snap.selectedRegions.states, snap.selectedRegions.cities);
-        if (regions.states.length > 0 || regions.cities.length > 0) {
-            body.regions = regions;
-        }
+        const sp = Array.isArray(snap.salesPeople) ? snap.salesPeople : [];
+        if (sp.length > 0) body.salesPeople = sp;
+        if (snap.collate) body.collate = true;
         return body;
     }, []);
 
@@ -196,11 +210,11 @@ export function TracerPage({
             if (bus.size === 0 && String(snap.bu || '').trim()) {
                 bus.add(String(snap.bu).trim());
             }
-            const { bannerTargets } = buildRegionsSubmitPayload(
-                snap.regionStatesTree,
-                snap.selectedRegions.states,
-                snap.selectedRegions.cities
-            );
+            const scopeTargets = (snap.salesPeople || []).map((p) => ({
+                kind: 'sales',
+                key: String(p.id),
+                label: String(p.label || p.id)
+            }));
 
             setTracerBusy(true);
             try {
@@ -215,7 +229,8 @@ export function TracerPage({
                     from: snap.fromDate,
                     to: snap.toDate,
                     bus,
-                    regionTargets: bannerTargets
+                    scopeTargets,
+                    collate: !!snap.collate
                 };
                 try {
                     await reloadTiles();
@@ -237,8 +252,9 @@ export function TracerPage({
         (row) => row.generalTile || row.urineTile || row.edtaTile || row.citrateTile || row.sHeparinTile || row.lHeparinTile
     ).length;
     const printSummaryParts = [];
+    if (collatedBannerRow) printSummaryParts.push('collated');
     if (buCount) printSummaryParts.push(`${buCount} BU${buCount === 1 ? '' : 's'}`);
-    if (regCount) printSummaryParts.push(`${regCount} region${regCount === 1 ? '' : 's'}`);
+    if (regCount) printSummaryParts.push(`${regCount} sales scope${regCount === 1 ? '' : 's'}`);
 
     return (
         <div className={`tracer-page${printFocusKey ? ' tracer-print-single' : ''}`}>
@@ -260,16 +276,11 @@ export function TracerPage({
                     buOptions={buOptions}
                     buSelected={buSelected}
                     buActions={buActions}
-                    regionStates={regionStates}
-                    regionLoading={regionsLoading}
-                    regionLookupError={regionsFetchErr}
-                    regionSelectedStates={regionSelectedStates}
-                    regionSelectedCities={regionSelectedCities}
-                    regionActions={{
-                        toggleState,
-                        toggleCity,
-                        clearRegions
-                    }}
+                    salesUsers={salesUsers}
+                    salesLoading={salesLoading}
+                    salesLookupError={salesFetchErr}
+                    salesSelectedIds={salesSelectedIds}
+                    salesActions={{ toggle: toggleSales, clear: clearSales }}
                     busy={busy}
                     viewerDisabled={viewerDisabled}
                     onRun={handleRun}
@@ -283,6 +294,37 @@ export function TracerPage({
                             `Tile load: ${errors.map((e) => `${e.file}: ${e.error}`).join(' \u00b7 ')}`}
                     </div>
                 )}
+
+                {collatedBannerRow ? (
+                    <>
+                        <div className="tracer-collated-banner-head tracer-hide-print">
+                            <span className="eyebrow-lite field-label">Collated tracer</span>
+                            <span className="muted small">SIDs deduped across selected BUs and sales scopes</span>
+                        </div>
+                        <div className="tracer-banner-stack">
+                            <TracerBanner
+                                key={collatedBannerRow.bannerKey}
+                                bu={collatedBannerRow.label}
+                                fromDate={collatedBannerRow.fromDate}
+                                toDate={collatedBannerRow.toDate}
+                                generalTile={collatedBannerRow.generalTile}
+                                urineTile={collatedBannerRow.urineTile}
+                                edtaTile={collatedBannerRow.edtaTile}
+                                citrateTile={collatedBannerRow.citrateTile}
+                                sHeparinTile={collatedBannerRow.sHeparinTile}
+                                lHeparinTile={collatedBannerRow.lHeparinTile}
+                                clientPagesByNorm={clientPagesByNorm}
+                                isPrintTarget={printFocusKey === collatedBannerRow.bannerKey}
+                                onPrintSection={() => startPrintSection(collatedBannerRow.bannerKey)}
+                                onOpenDetail={(tile, kind) => {
+                                    if (!tile) return;
+                                    setOpenTile(tile);
+                                    setOpenTileKind(kind);
+                                }}
+                            />
+                        </div>
+                    </>
+                ) : null}
 
                 <div className="tracer-banner-stack">
                     {bannerRows.map((row) => (
@@ -311,7 +353,7 @@ export function TracerPage({
 
                 {regionBannerRows.length > 0 ? (
                     <div className="tracer-region-stack-head tracer-hide-print">
-                        <span className="eyebrow-lite field-label">Region tracer</span>
+                        <span className="eyebrow-lite field-label">Sales scope tracer</span>
                     </div>
                 ) : null}
 

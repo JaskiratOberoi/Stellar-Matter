@@ -71,6 +71,28 @@
     margin: 1.25rem 0 0.5rem;
 }
 
+.tracer-collated-banner-head {
+    margin: 1.25rem 0 0.5rem;
+    display: flex;
+    align-items: baseline;
+    gap: 0.65rem;
+    flex-wrap: wrap;
+}
+
+.tracer-collate-toggle {
+    /* Pill mirrors btn-secondary footprint; aria-pressed=true highlights it
+       with the brand accent so the user can see at a glance whether the next
+       run will collate. */
+    position: relative;
+}
+
+.tracer-collate-toggle.is-on,
+.tracer-collate-toggle[aria-pressed='true'] {
+    border-color: rgb(var(--nx-accent));
+    background: rgb(var(--nx-accent) / 0.12);
+    color: rgb(var(--nx-ink));
+}
+
 .tracer-banner-stack {
     display: flex;
     flex-direction: column;

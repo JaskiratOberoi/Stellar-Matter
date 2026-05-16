@@ -40,7 +40,10 @@ const loginLimiter = rateLimit({
     limit: 5,
     standardHeaders: 'draft-7',
     legacyHeaders: false,
-    handler: buildHandler('login')
+    handler: buildHandler('login'),
+    // Vite's dev proxy sets X-Forwarded-*; express-rate-limit v7 validations can throw
+    // and surface as HTTP 500 before JSON is written. Disable validation on this route.
+    validate: false
 });
 
 const adminWriteLimiter = rateLimit({
@@ -52,7 +55,8 @@ const adminWriteLimiter = rateLimit({
     // Fall back to IP if for some reason req.user is missing — defensive only,
     // adminApi mounts requireAuth at the router level so this should not happen.
     keyGenerator: (req) => (req.user && req.user.id) || req.ip || 'anon',
-    handler: buildHandler('admin')
+    handler: buildHandler('admin'),
+    validate: { xForwardedForHeader: false }
 });
 
 module.exports = {

@@ -336,6 +336,23 @@ function writeModeArtefact(ctx) {
         };
     }
 
+    const collatedBlock =
+        target.type === 'collated'
+            ? {
+                  label: target.label || 'Collated',
+                  businessUnits: Array.isArray(target.businessUnits)
+                      ? target.businessUnits.slice()
+                      : [],
+                  regionTargets: Array.isArray(target.regionTargets)
+                      ? target.regionTargets.map((t) => ({
+                            kind: t.kind,
+                            key: t.key,
+                            label: t.label || t.key
+                        }))
+                      : []
+              }
+            : null;
+
     const filters = {
         bu: target.type === 'bu' && target.bu ? String(target.bu) : null,
         tracerScope: target.type,
@@ -343,6 +360,7 @@ function writeModeArtefact(ctx) {
             target.type === 'region'
                 ? { kind: target.kind, key: target.key, label: target.label || target.key }
                 : null,
+        collated: collatedBlock,
         status: null,
         testCode: null,
         fromDate: fromDate || null,
@@ -358,6 +376,11 @@ function writeModeArtefact(ctx) {
 
     let note = `tracer-run: bucketed ${ALL_SPECIALTY_CODES.length} test code(s) from Listec`;
     if (target.type === 'region') note += `; region=${target.kind}:${target.label || target.key}`;
+    if (target.type === 'collated') {
+        const buN = collatedBlock ? collatedBlock.businessUnits.length : 0;
+        const regN = collatedBlock ? collatedBlock.regionTargets.length : 0;
+        note += `; collated=${buN} BU(s) + ${regN} region(s) [SID-deduped]`;
+    }
 
     const filtersApplied = {
         query: requestUrl ? requestUrl.split('?')[1] || '' : '',
@@ -380,6 +403,7 @@ function writeModeArtefact(ctx) {
             target.type === 'region'
                 ? { kind: target.kind, key: target.key, label: target.label || target.key }
                 : null,
+        collated: collatedBlock,
         filtersRequested: { ...filters },
         filtersApplied,
         dryRun: false,
@@ -501,6 +525,68 @@ function parseRegions(optsRegions) {
     for (const key of stateKeys) targets.push({ kind: 'state', key, label: stateLabels[key] });
     for (const key of cityKeys) targets.push({ kind: 'city', key, label: cityLabels[key] });
     return { cityKeys, stateKeys, targets };
+}
+
+/**
+ * Tracer salesperson chips — body.salesPeople: `[{ id, label }]`.
+ * @returns {{ targets: { kind: 'sales'; key: string; label: string }[] }}
+ */
+function parseSalesPeople(raw) {
+    const arr = Array.isArray(raw) ? raw : [];
+    /** @type {{ kind: 'sales'; key: string; label: string }[]} */
+    const targets = [];
+    for (const o of arr) {
+        if (!o || typeof o !== 'object') continue;
+        const id = o.id != null ? String(o.id).trim() : '';
+        if (!id) continue;
+        const label = o.label != null ? String(o.label).trim() : id;
+        targets.push({ kind: 'sales', key: id, label: label || id });
+    }
+    return { targets };
+}
+
+/**
+ * Bulk-fetch MCC client codes for selected sales user ids via Listec.
+ * @param {string} apiBase
+ * @param {{ kind: string; key: string; label: string }[]} salesTargets
+ * @returns {Promise<Map<string, string[]>>}
+ */
+async function fetchSalesCodesByListec(apiBase, salesTargets) {
+    /** @type {Map<string, string[]>} */
+    const map = new Map();
+    if (!salesTargets.length) return map;
+    const ids = [...new Set(salesTargets.map((t) => String(t.key).trim()).filter(Boolean))].join(',');
+    if (!ids) return map;
+    const base = apiBase.replace(/\/$/, '');
+    const url = `${base}/api/tracer/sales-marketing-users/codes?ids=${encodeURIComponent(ids)}`;
+    const res = await fetch(url, { headers: { Accept: 'application/json' } });
+    const text = await res.text();
+    if (!res.ok) {
+        throw new Error(`Listec sales codes API ${res.status}: ${text.slice(0, 500)}`);
+    }
+    let payload;
+    try {
+        payload = JSON.parse(text);
+    } catch (e) {
+        throw new Error(`Listec sales codes non-JSON: ${e.message}`);
+    }
+    const cbu =
+        payload && payload.codesByUser && typeof payload.codesByUser === 'object' ? payload.codesByUser : {};
+    for (const id of ids.split(',')) {
+        const k = String(id).trim();
+        if (!k) continue;
+        const rawArr = Array.isArray(cbu[k]) ? cbu[k] : [];
+        const codes = [...new Set(rawArr.map((c) => String(c).trim().toUpperCase()).filter(Boolean))];
+        map.set(k, codes);
+    }
+    return map;
+}
+
+/** @param {{ kind: string; key: string; label: string }} targ */
+function scopeProgressLabel(targ) {
+    if (targ.kind === 'sales') return `Sales · ${targ.label}`;
+    if (targ.kind === 'city') return `City · ${targ.label}`;
+    return `State · ${targ.label}`;
 }
 
 async function fetchTracerPayload(apiBase, { bu, fromDate, toDate, fromHour, toHour, cityKeys, stateKeys }) {
@@ -659,6 +745,104 @@ function mergeByCodesPayloads(payloads) {
 }
 
 /**
+ * Merge an arbitrary mix of /packages and /packages-by-codes payloads into a
+ * single collated payload that dedupes SIDs across all sources.
+ *
+ * The crucial difference vs `mergeByCodesPayloads` is the `rows`-level dedup:
+ * when BU=AGRA and City=Haldwani both pull the same sample, the per-BU and
+ * per-region payloads each contain that row. Concatenating them would double
+ * the bracket counts (Letter Heads, Other tests) and inflate `sidsTotal`.
+ * We dedup by `sid` BEFORE feeding `aggregateBracketsFromPackageRows`, then
+ * union the per-test-code SID sets so specialty tiles also count each tube
+ * once.
+ *
+ * `resultRowsByTestCode` is the LIS row count for each test code (rows in
+ * tbl_med_mcc_patient_test_result) — it cannot be naturally deduped from
+ * payload data, so we sum it. The user-visible counts (letter heads,
+ * envelopes, urine containers, EDTA/citrate/heparin tubes) all come from
+ * the deduped row+SID sets and are dedup-correct.
+ *
+ * @param {object[]} payloads
+ */
+function mergeCollatedPayloads(payloads) {
+    const arr = (Array.isArray(payloads) ? payloads : []).filter(Boolean);
+    if (arr.length === 0) {
+        const empty = aggregateBracketsFromPackageRows([]);
+        const sidsByTestCode = {};
+        const resultRowsByTestCode = {};
+        for (const code of ALL_SPECIALTY_CODES) {
+            sidsByTestCode[code.toLowerCase()] = [];
+            resultRowsByTestCode[code.toLowerCase()] = 0;
+        }
+        return {
+            ...empty,
+            sidsByTestCode,
+            resultRowsByTestCode,
+            filters: null,
+            resolved: null,
+            rows: empty.rows
+        };
+    }
+
+    const seenSids = new Set();
+    const dedupedRows = [];
+    for (const p of arr) {
+        for (const row of Array.isArray(p.rows) ? p.rows : []) {
+            const sid = String(row && row.sid != null ? row.sid : '').trim();
+            // Rows without a SID can never collide on dedup. Keep them so
+            // bracket aggregation still reflects "Other tests" rows that may
+            // legitimately lack a sid (defensive — current LIS rows always
+            // have one).
+            if (sid) {
+                if (seenSids.has(sid)) continue;
+                seenSids.add(sid);
+            }
+            dedupedRows.push(row);
+        }
+    }
+
+    const sidsByTestCode = {};
+    for (const code of ALL_SPECIALTY_CODES) {
+        sidsByTestCode[code.toLowerCase()] = new Set();
+    }
+    const resultRowsByTestCode = {};
+    for (const code of ALL_SPECIALTY_CODES) {
+        resultRowsByTestCode[code.toLowerCase()] = 0;
+    }
+    for (const p of arr) {
+        const codeBuckets = (p && p.sidsByTestCode) || {};
+        for (const [code, sids] of Object.entries(codeBuckets)) {
+            const lc = String(code).toLowerCase();
+            if (!sidsByTestCode[lc]) sidsByTestCode[lc] = new Set();
+            for (const s of Array.isArray(sids) ? sids : []) {
+                sidsByTestCode[lc].add(String(s));
+            }
+        }
+        const rowBuckets = (p && p.resultRowsByTestCode) || {};
+        for (const [code, n] of Object.entries(rowBuckets)) {
+            const lc = String(code).toLowerCase();
+            resultRowsByTestCode[lc] = (resultRowsByTestCode[lc] || 0) + (Number(n) || 0);
+        }
+    }
+
+    const bracket = aggregateBracketsFromPackageRows(dedupedRows);
+    /** @type {Record<string,string[]>} */
+    const sidsByTestCodeOut = {};
+    for (const [code, set] of Object.entries(sidsByTestCode)) {
+        sidsByTestCodeOut[code] = [...set].sort();
+    }
+
+    return {
+        ...bracket,
+        sidsByTestCode: sidsByTestCodeOut,
+        resultRowsByTestCode,
+        filters: arr[0].filters || null,
+        resolved: arr[0].resolved || null,
+        rows: bracket.rows
+    };
+}
+
+/**
  * Phase 12 chip resolver bridge. Loads server/sync/resolveClientCodes only
  * when needed so this file stays usable from contexts where Postgres isn't
  * configured (e.g. one-off CLI runs).
@@ -729,7 +913,10 @@ function writeSixModesForPayload(payload, meta) {
         const mode = modes[mi];
         const startedAtIso = new Date(baseMsOffset + mi).toISOString();
         const runId = startedAtIso.replace(/[:.]/g, '-');
-        const dispBu = tracerTarget.type === 'bu' ? tracerTarget.bu : tracerTarget.label;
+        const dispBu =
+            tracerTarget.type === 'bu'
+                ? tracerTarget.bu
+                : tracerTarget.label || (tracerTarget.type === 'collated' ? 'Collated' : '');
         const written = writeModeArtefact({
             mode,
             blobKey: blobKeyByMode[mode],
@@ -765,11 +952,13 @@ function writeSixModesForPayload(payload, meta) {
 async function runTracerBatch(opts) {
     const businessUnits = Array.isArray(opts.businessUnits) ? opts.businessUnits.slice() : [];
     const { cityKeys, stateKeys, targets } = parseRegions(opts.regions);
+    const { targets: salesTargets } = parseSalesPeople(opts.salesPeople);
     const hasBu = businessUnits.length > 0;
     const hasReg = targets.length > 0;
+    const hasSales = salesTargets.length > 0;
 
-    if (!hasBu && !hasReg) {
-        const err = new Error('runTracerBatch: pass businessUnits and/or regions (cities/states).');
+    if (!hasBu && !hasReg && !hasSales) {
+        const err = new Error('runTracerBatch: pass businessUnits, regions (cities/states), and/or salesPeople.');
         err.code = 'TRACER_NO_SCOPE';
         throw err;
     }
@@ -781,7 +970,7 @@ async function runTracerBatch(opts) {
         : path.resolve(process.cwd(), opts.outDir || './out');
     const concurrency = opts.concurrency != null ? Number(opts.concurrency) : 3;
     const onProgress = typeof opts.onProgress === 'function' ? opts.onProgress : () => {};
-    const useByCodes = hasReg && tracerByCodesEnabled();
+    const useByCodesForRegions = hasReg && tracerByCodesEnabled();
 
     // Pre-resolve city/state -> client_codes per chip target so:
     //  - Region calls can hit the new dbo.usp_listec_worksheet_report_by_codes
@@ -791,7 +980,7 @@ async function runTracerBatch(opts) {
     //    reaches MSSQL.
     /** @type {Map<string, string[]>} key = `${kind}:${key}` -> code[] */
     const codesByTarget = new Map();
-    if (useByCodes) {
+    if (useByCodesForRegions) {
         const resolverMod = await loadResolverModule();
         if (!resolverMod) {
             throw new Error(
@@ -809,8 +998,206 @@ async function runTracerBatch(opts) {
             codesByTarget.set(`${targ.kind}:${targ.key}`, codes);
         }
     }
+    if (hasSales) {
+        const salesMap = await fetchSalesCodesByListec(apiBase, salesTargets);
+        for (const t of salesTargets) {
+            codesByTarget.set(`sales:${t.key}`, salesMap.get(String(t.key).trim()) || []);
+        }
+    }
 
-    /** @type {object[]} Legacy-path payload list (only populated when useByCodes is false). */
+    // Collate short-circuit: produce ONE artefact pair that represents the
+    // SID-deduplicated union of every selected scope (BUs and regions). This
+    // bypasses the per-BU and per-region writers entirely so the result wall
+    // shows a single "Collated" row.
+    if (opts.collate === true) {
+        const scopeBits = [];
+        if (targets.length) scopeBits.push(`${targets.length} region${targets.length === 1 ? '' : 's'}`);
+        if (salesTargets.length) scopeBits.push(`${salesTargets.length} sales`);
+        const collateLabel =
+            opts.collateLabel ||
+            `Collated · ${businessUnits.length} BU${businessUnits.length === 1 ? '' : 's'}` +
+                (scopeBits.length ? ` + ${scopeBits.join(' + ')}` : '');
+
+        const collatedItem = {
+            bu: collateLabel,
+            state: 'running',
+            runIds: {},
+            error: null,
+            lastOutMainPath: null,
+            lastOutPackagesPath: null
+        };
+        onProgress({ ...collatedItem });
+
+        try {
+            // Region resolver. We need codes for the by-codes calls; the
+            // earlier pre-resolve only ran when useByCodes was true. For
+            // collate we always prefer by-codes for region scopes because
+            // the legacy bucketCities path drains the whole DB, which is
+            // exactly what collate is meant to avoid (and we already fail
+            // multi-region runs without by-codes — see prior fix).
+            if (hasReg && codesByTarget.size === 0) {
+                const resolverMod = await loadResolverModule();
+                if (!resolverMod) {
+                    throw new Error(
+                        'Collate requires server/sync/resolveClientCodes (Postgres mirror). Set TRACER_RESOLVE_CODES_VIA_PG=1 and ensure the api-matter app is on the same compose network.'
+                    );
+                }
+                for (const targ of targets) {
+                    const cityArg = targ.kind === 'city' ? [targ.key] : [];
+                    const stateArg = targ.kind === 'state' ? [targ.key] : [];
+                    const rows = await resolverMod.resolveClientCodes({
+                        cityKeys: cityArg,
+                        stateKeys: stateArg
+                    });
+                    const codes = rows.map((r) => String(r.code).toUpperCase());
+                    codesByTarget.set(`${targ.kind}:${targ.key}`, codes);
+                }
+            }
+            if (hasSales) {
+                const salesMap = await fetchSalesCodesByListec(apiBase, salesTargets);
+                for (const t of salesTargets) {
+                    codesByTarget.set(`sales:${t.key}`, salesMap.get(String(t.key).trim()) || []);
+                }
+            }
+
+            const regionConcurrencyForCollate = Math.max(
+                1,
+                Number(opts.regionConcurrency) ||
+                    Number(process.env.TRACER_REGION_CONCURRENCY) ||
+                    Math.min(4, Math.max(2, concurrency))
+            );
+
+            // BU pass: per-BU drain (no geo filter, since we want the whole
+            // BU's SIDs and the dedup happens later).
+            const buTasks = businessUnits.map((bu) => async () => {
+                try {
+                    const { payload } = await fetchTracerPayload(apiBase, {
+                        bu,
+                        fromDate: opts.fromDate,
+                        toDate: opts.toDate,
+                        fromHour: opts.fromHour,
+                        toHour: opts.toHour,
+                        cityKeys: [],
+                        stateKeys: []
+                    });
+                    assertTracerPayload(payload, { needGeo: false, label: `BU=${bu}` });
+                    return payload;
+                } catch (e) {
+                    console.warn(
+                        `[tracer-sql] collate BU=${bu} failed: ${e && e.message ? e.message : e}`
+                    );
+                    return null;
+                }
+            });
+
+            /** @type {{ kind: string; key: string; label: string }[]} */
+            const collateScopeTargets = [];
+            for (const t of targets) collateScopeTargets.push(t);
+            for (const t of salesTargets) collateScopeTargets.push(t);
+
+            // Region / sales scopes: per-code-list by-codes call, no BU filter.
+            const regionTasks = collateScopeTargets.map((targ) => async () => {
+                const codes = codesByTarget.get(`${targ.kind}:${targ.key}`) || [];
+                if (codes.length === 0) {
+                    const hint =
+                        targ.kind === 'sales'
+                            ? 'check LIS User Client Mapping for this user'
+                            : 'run /api/admin/client-locations/sync';
+                    console.warn(`[tracer-sql] collate scope ${targ.kind}:${targ.key} has no codes — skipping (${hint}).`);
+                    return null;
+                }
+                try {
+                    const { payload } = await fetchTracerPayloadByCodes(apiBase, {
+                        bu: undefined,
+                        fromDate: opts.fromDate,
+                        toDate: opts.toDate,
+                        fromHour: opts.fromHour,
+                        toHour: opts.toHour,
+                        codes
+                    });
+                    return payload;
+                } catch (e) {
+                    console.warn(
+                        `[tracer-sql] collate scope ${targ.kind}:${targ.key} failed: ${e && e.message ? e.message : e}`
+                    );
+                    return null;
+                }
+            });
+
+            const [buPayloads, regPayloads] = await Promise.all([
+                runWithConcurrency(buTasks, concurrency),
+                runWithConcurrency(regionTasks, regionConcurrencyForCollate)
+            ]);
+
+            const collected = [...buPayloads, ...regPayloads].filter(Boolean);
+            if (collected.length === 0) {
+                throw new Error(
+                    'Collate produced no payloads (all BU + region/sales scope calls failed). Check Listec logs.'
+                );
+            }
+
+            const merged = mergeCollatedPayloads(collected);
+            const tracerTarget = {
+                type: 'collated',
+                label: collateLabel,
+                businessUnits: businessUnits.slice(),
+                regionTargets: collateScopeTargets.map((t) => ({
+                    kind: t.kind,
+                    key: t.key,
+                    label: t.label
+                }))
+            };
+            const w = writeSixModesForPayload(merged, {
+                tracerTarget,
+                fromDate: opts.fromDate,
+                toDate: opts.toDate,
+                fromHour: opts.fromHour,
+                toHour: opts.toHour,
+                listecApiBase: apiBase,
+                url: `${apiBase}/api/worksheet-reports/packages?[collated]`,
+                orgId,
+                outDir,
+                baseMsOffset: Date.now()
+            });
+            collatedItem.runIds = w.runIds;
+            collatedItem.lastOutMainPath = w.lastOutMainPath;
+            collatedItem.lastOutPackagesPath = w.lastOutPackagesPath;
+            collatedItem.state = 'done';
+            collatedItem.error = null;
+            onProgress({ ...collatedItem });
+
+            return {
+                items: [],
+                regionItems: [],
+                completed: [],
+                failed: [],
+                regionCompleted: [],
+                regionFailed: [],
+                buPayloadList: [],
+                collatedItems: [collatedItem],
+                collatedCompleted: [collatedItem.bu],
+                collatedFailed: []
+            };
+        } catch (e) {
+            collatedItem.state = 'failed';
+            collatedItem.error = String(e && e.message ? e.message : e);
+            onProgress({ ...collatedItem });
+            return {
+                items: [],
+                regionItems: [],
+                completed: [],
+                failed: [],
+                regionCompleted: [],
+                regionFailed: [],
+                buPayloadList: [],
+                collatedItems: [collatedItem],
+                collatedCompleted: [],
+                collatedFailed: [collatedItem.bu]
+            };
+        }
+    }
+
+    /** @type {object[]} Legacy-path payload list (only populated when region by-codes is off). */
     const buPayloadList = [];
 
     /** @type {{ bu: string, state: string, runIds: Record<string,string>, error: string|null, lastOutMainPath: string|null, lastOutPackagesPath: string|null }[]} */
@@ -832,7 +1219,7 @@ async function runTracerBatch(opts) {
         // needed when the synthetic-region merge will consume them. The new
         // by-codes path filters at the SP, so the BU pass can stay minimal.
         const geoKeysForFetch =
-            hasReg && !useByCodes ? { cityKeys, stateKeys } : { cityKeys: [], stateKeys: [] };
+            hasReg && !useByCodesForRegions ? { cityKeys, stateKeys } : { cityKeys: [], stateKeys: [] };
 
         const tasks = businessUnits.map((bu, i) => async () => {
             const item = items[i];
@@ -852,10 +1239,10 @@ async function runTracerBatch(opts) {
                 // path will consume it (i.e. region targets exist AND we are
                 // NOT using by-codes).
                 assertTracerPayload(payload, {
-                    needGeo: hasReg && !useByCodes,
+                    needGeo: hasReg && !useByCodesForRegions,
                     label: `BU=${bu}`
                 });
-                if (!useByCodes) buPayloadList.push(payload);
+                if (!useByCodesForRegions) buPayloadList.push(payload);
                 const w = writeSixModesForPayload(payload, {
                     tracerTarget: { type: 'bu', bu },
                     fromDate: opts.fromDate,
@@ -884,8 +1271,8 @@ async function runTracerBatch(opts) {
         await runWithConcurrency(tasks, concurrency);
     }
 
-    /** Legacy global region-only fetch, only used when by-codes is OFF. */
-    if (!hasBu && hasReg && !useByCodes) {
+    /** Legacy global region-only fetch, only used when region by-codes is OFF. */
+    if (!hasBu && hasReg && !useByCodesForRegions) {
         const { url, payload } = await fetchTracerPayload(apiBase, {
             bu: undefined,
             fromDate: opts.fromDate,
@@ -902,7 +1289,7 @@ async function runTracerBatch(opts) {
     const completed = items.filter((it) => it.state === 'done').map((it) => it.bu);
     const failed = items.filter((it) => it.state === 'failed').map((it) => it.bu);
 
-    /** Region progress rows mimic BU shape for FanOut strip */
+    /** Region / sales scope progress rows mimic BU shape for FanOut strip */
     /** @type {{ bu: string, state: string, runIds: Record<string,string>, error: string|null, lastOutMainPath: string|null, lastOutPackagesPath: string|null, regionKind?: string, regionKey?: string }[]} */
     const regionItems = [];
     /** @type {string[]} */
@@ -910,10 +1297,12 @@ async function runTracerBatch(opts) {
     /** @type {string[]} */
     const regionFailed = [];
 
-    if (hasReg) {
-        for (const targ of targets) {
-            const progressLabel =
-                targ.kind === 'city' ? `City · ${targ.label}` : `State · ${targ.label}`;
+    /** @type {{ kind: string; key: string; label: string }[]} */
+    const allScopeTargets = [...targets, ...salesTargets];
+
+    if (hasReg || hasSales) {
+        for (const targ of allScopeTargets) {
+            const progressLabel = scopeProgressLabel(targ);
             regionItems.push({
                 bu: progressLabel,
                 regionKind: targ.kind,
@@ -927,38 +1316,35 @@ async function runTracerBatch(opts) {
         }
         for (const rit of regionItems) onProgress({ ...rit });
 
-        if (useByCodes) {
-            // Phase 12 path. For each region target:
-            //  1. Look up the codes resolved upstream.
-            //  2. If BUs are also selected, fan out one /packages-by-codes
-            //     call per BU (passing businessUnitId + codes) and merge.
-            //     Otherwise issue a single call without BU filter.
-            //  3. Write the artefact straight from the response — no
-            //     synthetic-merge step needed because the SP already
-            //     filtered by code.
-            // Region targets used to run sequentially; with the by-codes SP
-            // each call is small (filtered to a city's codes at MSSQL) so we
-            // fan them out with bounded concurrency. The cap matches the
-            // BU-pass concurrency so we don't double the load on the listec
-            // pool / MSSQL connection budget.
+        if (useByCodesForRegions || hasSales) {
+            /** Region chips (PG-resolved) and/or salesperson scopes (Listec LIS mapping). */
+            const byCodeScopeTargets = [];
+            if (useByCodesForRegions) {
+                for (const t of targets) byCodeScopeTargets.push(t);
+            }
+            if (hasSales) {
+                for (const t of salesTargets) byCodeScopeTargets.push(t);
+            }
+
             const regionConcurrency = Math.max(
                 1,
                 Number(opts.regionConcurrency) ||
                     Number(process.env.TRACER_REGION_CONCURRENCY) ||
                     Math.min(4, Math.max(2, concurrency))
             );
-            const regionTasks = targets.map((targ, i) => async () => {
+            const regionTasks = byCodeScopeTargets.map((targ, i) => async () => {
                 const rit = regionItems[i];
                 rit.state = 'running';
                 onProgress({ ...rit });
-                const progressLabel =
-                    targ.kind === 'city' ? `City · ${targ.label}` : `State · ${targ.label}`;
+                const progressLabel = scopeProgressLabel(targ);
                 try {
                     const codes = codesByTarget.get(`${targ.kind}:${targ.key}`) || [];
                     if (codes.length === 0) {
-                        throw new Error(
-                            `No client codes mapped to ${progressLabel} in client_locations — run sync (POST /api/admin/client-locations/sync) or check region_aliases.`
-                        );
+                        const msg =
+                            targ.kind === 'sales'
+                                ? `No client codes mapped for salesperson ${targ.label} — check LIS User Client Mapping (Listec sales endpoint).`
+                                : `No client codes mapped to ${progressLabel} in client_locations — run sync (POST /api/admin/client-locations/sync) or check region_aliases.`;
+                        throw new Error(msg);
                     }
                     let payload;
                     let lastUrl;
@@ -995,9 +1381,11 @@ async function runTracerBatch(opts) {
                         payload = r.payload;
                         lastUrl = r.url;
                     }
+                    const assertLabel =
+                        targ.kind === 'sales' ? `Sales · ${targ.label}` : `Region ${progressLabel}`;
                     assertTracerPayload(payload, {
                         needGeo: false,
-                        label: `Region ${progressLabel}`
+                        label: assertLabel
                     });
                     const tracerTarget = {
                         type: 'region',
@@ -1005,8 +1393,6 @@ async function runTracerBatch(opts) {
                         key: targ.key,
                         label: targ.label
                     };
-                    // Use the stable target index to space artefact timestamps;
-                    // parallel execution would race on a shared counter.
                     const baseMsOffset = Date.now() + i * 60000;
                     const w = writeSixModesForPayload(payload, {
                         tracerTarget,
@@ -1034,9 +1420,8 @@ async function runTracerBatch(opts) {
                 onProgress({ ...rit });
             });
             await runWithConcurrency(regionTasks, regionConcurrency);
-        } else if (buPayloadList.length === 0) {
-            // Legacy path: BU calls all failed and we have no global payload
-            // either, so synthetic merge can't run. Mark every region failed.
+        } else if (buPayloadList.length === 0 && hasReg && !hasSales) {
+            // Legacy geo path: BU calls all failed and we have no global payload.
             for (const rit of regionItems) {
                 rit.state = 'failed';
                 rit.error =
@@ -1044,10 +1429,8 @@ async function runTracerBatch(opts) {
                 regionFailed.push(String(rit.bu));
                 onProgress({ ...rit });
             }
-        } else {
-            // Legacy synthetic-merge path (TRACER_RESOLVE_CODES_VIA_PG off).
-            // Kept until cleanup PR removes buildSyntheticRegionalPayload +
-            // bucketCities/bucketStates plumbing entirely.
+        } else if (hasReg && !useByCodesForRegions) {
+            // Legacy synthetic-merge path (TRACER_RESOLVE_CODES_VIA_PG off). Geo only — sales always use by-codes above.
             let rIdx = 0;
             for (let i = 0; i < targets.length; i++) {
                 const targ = targets[i];
@@ -1101,13 +1484,17 @@ async function runTracerBatch(opts) {
         failed,
         regionCompleted,
         regionFailed,
-        buPayloadList
+        buPayloadList,
+        collatedItems: [],
+        collatedCompleted: [],
+        collatedFailed: []
     };
 }
 
 module.exports = {
     runTracerBatch,
     parseTracerRegions: parseRegions,
+    parseTracerSalesPeople: parseSalesPeople,
     ALL_SPECIALTY_CODES,
     SPECIALTY_MODES,
     URINE_CONTAINER_TEST_CODES,

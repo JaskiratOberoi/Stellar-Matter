@@ -164,6 +164,14 @@ export function isRegionTile(tile) {
     return !!(tile.region && tile.region.key);
 }
 
+/** @param {object | null | undefined} tile */
+export function isCollatedTile(tile) {
+    if (!tile) return false;
+    if (tile.kind === 'collated') return true;
+    if (tile.tracerScope === 'collated') return true;
+    return !!(tile.collated && (tile.collated.label || tile.collated.businessUnits));
+}
+
 function buEq(a, b) {
     return tracerBuKey(a) === tracerBuKey(b);
 }
@@ -203,7 +211,12 @@ export function mapTilesToBanners(tiles, selectedBus, batchStartedIso, fromDate,
     /** @param {string} bu */
     const pick = (bu, modeKey) => {
         const list = (tiles || []).filter(
-            (t) => !isRegionTile(t) && buEq(t.bu, bu) && modeOf(t) === modeKey && inBatch(t)
+            (t) =>
+                !isRegionTile(t) &&
+                !isCollatedTile(t) &&
+                buEq(t.bu, bu) &&
+                modeOf(t) === modeKey &&
+                inBatch(t)
         );
         list.sort((a, b) => {
             const ta = Date.parse(a.startedAt) || 0;
@@ -257,6 +270,7 @@ export function mapRegionTilesToBanners(tiles, regionTargets, batchStartedIso, f
     /** @param {{ kind: string, key: string }} targ */
     const matches = (tile, targ) => {
         if (!isRegionTile(tile)) return false;
+        if (isCollatedTile(tile)) return false;
         const tr = tile.region;
         if (!tr || !tr.key) return false;
         return (
@@ -289,6 +303,73 @@ export function mapRegionTilesToBanners(tiles, regionTargets, batchStartedIso, f
         sHeparinTile: pick(targ, 's_heparin'),
         lHeparinTile: pick(targ, 'l_heparin')
     }));
+}
+
+/**
+ * Pick the newest collated tiles from this batch for each tracer mode.
+ * Returns a single banner row (or null if no collated artefacts exist yet)
+ * shaped like the BU/region banners so <TracerBanner> can render unchanged.
+ *
+ * @param {object[]} tiles
+ * @param {string} batchStartedIso
+ * @param {string} fromDate
+ * @param {string} toDate
+ * @returns {null | { bannerKey: string, label: string, fromDate: string, toDate: string, generalTile: object|null, urineTile: object|null, edtaTile: object|null, citrateTile: object|null, sHeparinTile: object|null, lHeparinTile: object|null }}
+ */
+export function mapCollatedTileToBanner(tiles, batchStartedIso, fromDate, toDate) {
+    const batchMs = (Date.parse(batchStartedIso) || 0) - 5000;
+    const fd = String(fromDate || '').trim();
+    const td = String(toDate || '').trim();
+
+    /** @param {object} tile */
+    const inBatch = (tile) => {
+        const st = Date.parse(tile.startedAt);
+        if (Number.isNaN(st) || st < batchMs) return false;
+        if (fd && String(tile.fromDate || '').trim() !== fd) return false;
+        if (td && String(tile.toDate || '').trim() !== td) return false;
+        return true;
+    };
+    /** @param {object} tile */
+    const modeOf = (tile) => {
+        const m = tile.mode;
+        if (m === 'urine_containers') return 'urine_containers';
+        if (m === 'edta_vials') return 'edta_vials';
+        if (m === 'citrate_vials') return 'citrate_vials';
+        if (m === 's_heparin') return 's_heparin';
+        if (m === 'l_heparin') return 'l_heparin';
+        return 'general';
+    };
+
+    const candidates = (tiles || []).filter((t) => isCollatedTile(t) && inBatch(t));
+    if (candidates.length === 0) return null;
+
+    /** @param {string} modeKey */
+    const pick = (modeKey) => {
+        const list = candidates.filter((t) => modeOf(t) === modeKey);
+        list.sort((a, b) => {
+            const ta = Date.parse(a.startedAt) || 0;
+            const tb = Date.parse(b.startedAt) || 0;
+            return tb - ta;
+        });
+        return list[0] || null;
+    };
+
+    const generalTile = pick('general');
+    const labelFromTile =
+        (generalTile && generalTile.collated && generalTile.collated.label) || 'Collated';
+
+    return {
+        bannerKey: 'collated:run',
+        label: labelFromTile,
+        fromDate: fd,
+        toDate: td,
+        generalTile,
+        urineTile: pick('urine_containers'),
+        edtaTile: pick('edta_vials'),
+        citrateTile: pick('citrate_vials'),
+        sHeparinTile: pick('s_heparin'),
+        lHeparinTile: pick('l_heparin')
+    };
 }
 
 /**

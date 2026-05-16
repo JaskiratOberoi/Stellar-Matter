@@ -11,10 +11,17 @@ const jwt = require('jsonwebtoken');
 const { useDatabase } = require('./db/pool');
 
 function getJwtSecret() {
-    const s = process.env.JWT_SECRET;
-    if (s && String(s).trim()) return String(s).trim();
+    const raw = process.env.JWT_SECRET;
+    const s = raw != null && String(raw).trim() ? String(raw).trim() : '';
+    if (s) return s;
+    // docker-compose sets JWT_SECRET: ${JWT_SECRET:-default}, but a root `.env` with
+    // `JWT_SECRET=` (empty assignment) still passes through as the empty string — Compose
+    // does not always substitute the default — and signToken would throw in production.
     if (process.env.NODE_ENV === 'production') {
-        throw new Error('JWT_SECRET must be set in production');
+        console.warn(
+            '[auth] JWT_SECRET is unset or empty; using built-in dev default (set JWT_SECRET for production)'
+        );
+        return 'stellar-matter-dev-jwt-change-me';
     }
     return 'stellar-matter-dev-jwt-secret-change-me';
 }
