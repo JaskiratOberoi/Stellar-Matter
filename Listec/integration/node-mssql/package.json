@@ -8,6 +8,7 @@
         "grant:ro": "ts-node scripts/deploy-sp.ts ../../sp/grant_listec_ro.sql",
         "inspect:mcc": "ts-node scripts/inspect-mcc.ts",
         "inspect:sales": "ts-node scripts/inspect-sales-mapping.ts",
+        "inspect:bu": "ts-node scripts/inspect-bu-mapping.ts",
         "dev": "ts-node example.express.ts",
         "build": "tsc -p tsconfig.json",
         "start": "node dist/example.express.js"

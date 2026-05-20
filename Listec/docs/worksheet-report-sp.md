@@ -29,7 +29,7 @@ Companion docs:
 | Client code | `@client_code` | `NVARCHAR(50)` | no filter (partial `LIKE`) |
 | Val Id (SID) | `@sid` | `NVARCHAR(50)` | no filter (`vailid` or `bill_number`) |
 | Dept. No | `@department_id` | `INT` | no filter |
-| Business Unit | `@business_unit_id` | `INT` | no filter (`S.business_unit_id`) |
+| Business Unit | `@business_unit_id` | `INT` | no filter; matches when `U.BusinessUnitCode = @business_unit_id` (client's BU) **OR** `S.business_unit_id = @business_unit_id` (processing BU) — same OR-clause as the legacy `usp_worksheet_sample02072020` SP, so centrally-processed specialty work (TB Gold, blood culture, karyotyping, etc.) still appears under the originating BU's tile counts |
 | TAT checkbox | `@tat_only` | `BIT` | **reserved** — matches legacy SP (currently unused) |
 | *(extra)* Test code | `@test_code` | `NVARCHAR(50)` | no filter |
 | *(extra)* PID | `@pid` | `INT` | no filter |

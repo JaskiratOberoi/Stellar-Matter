@@ -35,6 +35,83 @@ const S_HEPARIN_TEST_CODES = ['ky004', 'cp3257'];
 // sharing the same tube) is a one-line array edit and still SID-dedupes.
 const L_HEPARIN_TEST_CODES = ['ms091'];
 
+// LBC (blood culture) — single assay code.
+const LBC_TEST_CODES = ['hi0063'];
+
+// Flouride vials — same multi-call + SID union as EDTA/Citrate.
+const FLOURIDE_VIAL_TEST_CODES = [
+    'bi116',
+    'bi117',
+    'bi118',
+    'bi119',
+    'bi120',
+    'bi121',
+    'bi122',
+    'gtt3n',
+    'bi114',
+    'bi115'
+];
+
+// Union of every specialty code (used by serum mode bucketTestCodes call).
+const ALL_SPECIALTY_CODES = [
+    ...URINE_CONTAINER_TEST_CODES,
+    ...EDTA_VIAL_TEST_CODES,
+    ...CITRATE_VIAL_TEST_CODES,
+    ...S_HEPARIN_TEST_CODES,
+    ...L_HEPARIN_TEST_CODES,
+    ...FLOURIDE_VIAL_TEST_CODES,
+    ...LBC_TEST_CODES
+];
+
+/** Per-mode buckets for serum breakdown (SID-deduped union per group). */
+const SPECIALTY_BREAKDOWN_GROUPS = [
+    { key: 'urineContainers', codes: URINE_CONTAINER_TEST_CODES },
+    { key: 'edtaVials', codes: EDTA_VIAL_TEST_CODES },
+    { key: 'citrateVials', codes: CITRATE_VIAL_TEST_CODES },
+    { key: 'sHeparin', codes: S_HEPARIN_TEST_CODES },
+    { key: 'lHeparin', codes: L_HEPARIN_TEST_CODES },
+    { key: 'flourideVials', codes: FLOURIDE_VIAL_TEST_CODES },
+    { key: 'lbc', codes: LBC_TEST_CODES }
+];
+
+/**
+ * @param {object} payload
+ * @param {string[]} codes
+ * @returns {Set<string>}
+ */
+function unionSidsForCodes(payload, codes) {
+    const sidsByCode =
+        payload.sidsByTestCode && typeof payload.sidsByTestCode === 'object' ? payload.sidsByTestCode : {};
+    const union = new Set();
+    for (const code of codes) {
+        const lower = String(code).toLowerCase();
+        const codeSids = Array.isArray(sidsByCode[lower]) ? sidsByCode[lower] : [];
+        for (const s of codeSids) union.add(String(s));
+    }
+    return union;
+}
+
+/**
+ * @param {object} payload
+ * @returns {Set<string>}
+ */
+function unionAllSpecialtySids(payload) {
+    return unionSidsForCodes(payload, ALL_SPECIALTY_CODES);
+}
+
+/**
+ * @param {object} payload
+ * @returns {Record<string, number>}
+ */
+function specialtyBreakdownCounts(payload) {
+    /** @type {Record<string, number>} */
+    const out = {};
+    for (const { key, codes } of SPECIALTY_BREAKDOWN_GROUPS) {
+        out[key] = unionSidsForCodes(payload, codes).size;
+    }
+    return out;
+}
+
 /**
  * Merge N Listec /worksheet-reports/packages payloads into a single
  * payload-equivalent so the rest of runViaSql doesn't need to care that we
@@ -187,6 +264,10 @@ function buildQueryString(filters, notes) {
     const pid = toIntOrNull(filters.pid);
     if (pid != null) params.set('pid', String(pid));
 
+    if (Array.isArray(filters.bucketTestCodes) && filters.bucketTestCodes.length > 0) {
+        params.set('bucketTestCodes', filters.bucketTestCodes.join(','));
+    }
+
     return params.toString();
 }
 
@@ -248,6 +329,10 @@ async function runViaSql(programOpts) {
     else if (rawMode === 'citrate_vials') mode = 'citrate_vials';
     else if (rawMode === 's_heparin') mode = 's_heparin';
     else if (rawMode === 'l_heparin') mode = 'l_heparin';
+    else if (rawMode === 'lbc') mode = 'lbc';
+    else if (rawMode === 'flouride_vials') mode = 'flouride_vials';
+    else if (rawMode === 'barcode') mode = 'barcode';
+    else if (rawMode === 'serum') mode = 'serum';
 
     let testCodesToRun;
     if (mode === 'urine_containers') testCodesToRun = URINE_CONTAINER_TEST_CODES.slice();
@@ -255,15 +340,22 @@ async function runViaSql(programOpts) {
     else if (mode === 'citrate_vials') testCodesToRun = CITRATE_VIAL_TEST_CODES.slice();
     else if (mode === 's_heparin') testCodesToRun = S_HEPARIN_TEST_CODES.slice();
     else if (mode === 'l_heparin') testCodesToRun = L_HEPARIN_TEST_CODES.slice();
+    else if (mode === 'lbc') testCodesToRun = LBC_TEST_CODES.slice();
+    else if (mode === 'flouride_vials') testCodesToRun = FLOURIDE_VIAL_TEST_CODES.slice();
+    else if (mode === 'barcode') testCodesToRun = [null];
+    else if (mode === 'serum') testCodesToRun = ['__bucket__'];
     else testCodesToRun = [filters.testCode || null]; // null = no testCode filter
 
     /** @type {string[]} */
     const notes = [];
     // For the legacy single-call path qs is the literal query string we sent.
     // For multi-call (urine) we keep an array so the artefact can show every URL.
-    const qsList = testCodesToRun.map((code) =>
-        buildQueryString({ ...filters, testCode: code != null ? code : filters.testCode }, notes)
-    );
+    const qsList = testCodesToRun.map((code) => {
+        if (mode === 'serum' && code === '__bucket__') {
+            return buildQueryString({ ...filters, testCode: null, bucketTestCodes: ALL_SPECIALTY_CODES }, notes);
+        }
+        return buildQueryString({ ...filters, testCode: code != null ? code : filters.testCode }, notes);
+    });
     const qs = qsList.length === 1 ? qsList[0] : qsList;
 
     /** @type {object} */
@@ -278,7 +370,13 @@ async function runViaSql(programOpts) {
                   ? S_HEPARIN_TEST_CODES.slice()
                   : mode === 'l_heparin'
                     ? L_HEPARIN_TEST_CODES.slice()
-                    : null;
+                    : mode === 'lbc'
+                      ? LBC_TEST_CODES.slice()
+                      : mode === 'flouride_vials'
+                        ? FLOURIDE_VIAL_TEST_CODES.slice()
+                        : mode === 'barcode' || mode === 'serum'
+                          ? null
+                          : null;
 
     const result = {
         startedAt,
@@ -315,7 +413,15 @@ async function runViaSql(programOpts) {
                       ? 'S.Heparin OR-union'
                       : mode === 'l_heparin'
                         ? 'L.Heparin OR-union'
-                        : 'multi-code';
+                        : mode === 'lbc'
+                          ? 'LBC OR-union'
+                          : mode === 'flouride_vials'
+                            ? 'Flouride vial OR-union'
+                            : mode === 'barcode'
+                              ? 'Barcode (all SIDs)'
+                              : mode === 'serum'
+                                ? 'Serum derivation (bucketed)'
+                                : 'multi-code';
         result.message =
             qsList.length === 1
                 ? `dry-run: would call ${dryUrls[0]}`
@@ -476,6 +582,53 @@ async function runViaSql(programOpts) {
             byTestCode
         };
     }
+    if (mode === 'lbc') {
+        const byTestCode = {};
+        for (const { code, payload: p } of perCallResults) {
+            if (!code) continue;
+            byTestCode[code] = {
+                sids: Array.isArray(p.sids) ? p.sids.length : 0,
+                rows: Number(p.rowCount) || 0
+            };
+        }
+        result.lbc = {
+            sidsTotal: sids.length,
+            testCodes: LBC_TEST_CODES.slice(),
+            byTestCode
+        };
+    }
+    if (mode === 'flouride_vials') {
+        const byTestCode = {};
+        for (const { code, payload: p } of perCallResults) {
+            if (!code) continue;
+            byTestCode[code] = {
+                sids: Array.isArray(p.sids) ? p.sids.length : 0,
+                rows: Number(p.rowCount) || 0
+            };
+        }
+        result.flourideVials = {
+            sidsTotal: sids.length,
+            testCodes: FLOURIDE_VIAL_TEST_CODES.slice(),
+            byTestCode
+        };
+    }
+    if (mode === 'barcode') {
+        result.barcode = {
+            sidsTotal: sids.length
+        };
+    }
+    if (mode === 'serum') {
+        const barcodeCount = sids.length;
+        const unionSet = unionAllSpecialtySids(payload);
+        const unionCount = unionSet.size;
+        const serumCount = Math.max(0, barcodeCount - unionCount);
+        result.serum = {
+            sidsTotal: serumCount,
+            barcode: barcodeCount,
+            unionSpecialtySidsCount: unionCount,
+            breakdown: specialtyBreakdownCounts(payload)
+        };
+    }
 
     result.sidsFoundOnPage1 = sids;
     result.pager = { found: false, message: 'sql source — single batch, no grid pager' };
@@ -524,6 +677,10 @@ async function runViaSql(programOpts) {
             citrateVials: result.citrateVials || null,
             sHeparin: result.sHeparin || null,
             lHeparin: result.lHeparin || null,
+            lbc: result.lbc || null,
+            flourideVials: result.flourideVials || null,
+            barcode: result.barcode || null,
+            serum: result.serum || null,
             recoveryEvents: [],
             completedPagerPages: [1],
             lastCompletedPagerPage: 1,
@@ -549,7 +706,15 @@ async function runViaSql(programOpts) {
                       ? ` [s.heparin: ${result.sHeparin.sidsTotal} tube(s) from ${S_HEPARIN_TEST_CODES.join('+')}]`
                       : mode === 'l_heparin'
                         ? ` [l.heparin: ${result.lHeparin.sidsTotal} tube(s) from ${L_HEPARIN_TEST_CODES.join('+')}]`
-                        : '';
+                        : mode === 'lbc'
+                          ? ` [lbc: ${result.lbc.sidsTotal} sample(s) from ${LBC_TEST_CODES.join('+')}]`
+                          : mode === 'flouride_vials'
+                            ? ` [flouride: ${result.flourideVials.sidsTotal} vial(s) from ${FLOURIDE_VIAL_TEST_CODES.length} code(s)]`
+                            : mode === 'barcode'
+                              ? ` [barcode: ${result.barcode.sidsTotal} SID(s)]`
+                              : mode === 'serum'
+                                ? ` [serum: ${result.serum.sidsTotal} SID(s); barcode=${result.serum.barcode} union=${result.serum.unionSpecialtySidsCount}]`
+                                : '';
         console.log(
             `[sql] ${rowCount} row(s), ${sids.length} SID(s), ${uniqueLabelCount} unique label(s), ${otherTestsRowCount} Other tests row(s).${modeNote}`
         );
@@ -561,4 +726,9 @@ async function runViaSql(programOpts) {
     return { result, outMainPath, outPackagesPath, exitCode };
 }
 
-module.exports = { runViaSql };
+module.exports = {
+    runViaSql,
+    LBC_TEST_CODES,
+    FLOURIDE_VIAL_TEST_CODES,
+    ALL_SPECIALTY_CODES
+};

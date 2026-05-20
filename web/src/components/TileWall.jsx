@@ -6,9 +6,13 @@ import { Tile } from './Tile.jsx';
 const SPECIALTY_MODES = new Set([
     'urine_containers',
     'edta_vials',
+    'flouride_vials',
     'citrate_vials',
     's_heparin',
-    'l_heparin'
+    'l_heparin',
+    'lbc',
+    'barcode',
+    'serum'
 ]);
 
 function tileMatchesTab(tile, kind) {
@@ -56,6 +60,14 @@ export function TileWall({ tiles, kind, hiddenCount, onRestoreHidden, onOpen, cl
                                 Five parallel Listec calls per BU, unioned by SID.
                             </p>
                         </>
+                    ) : kind === 'flouride_vials' ? (
+                        <>
+                            <p className="tile-empty-lead">
+                                No <strong>Flouride vial</strong> runs yet. Start one from the run panel — the run will
+                                auto-pin <code>bi116–bi122, gtt3n, bi114, bi115</code> and count each SID once.
+                            </p>
+                            <p className="muted small">Ten parallel Listec calls per BU, unioned by SID.</p>
+                        </>
                     ) : kind === 'citrate_vials' ? (
                         <>
                             <p className="tile-empty-lead">
@@ -79,6 +91,28 @@ export function TileWall({ tiles, kind, hiddenCount, onRestoreHidden, onOpen, cl
                                 auto-pin <code>ms091</code> through the SID-dedup pipeline.
                             </p>
                             <p className="muted small">One Listec call per BU; same dedup contract as the multi-code modes.</p>
+                        </>
+                    ) : kind === 'lbc' ? (
+                        <>
+                            <p className="tile-empty-lead">
+                                No <strong>LBC</strong> runs yet. Start one from the run panel — the run will auto-pin{' '}
+                                <code>hi0063</code>.
+                            </p>
+                            <p className="muted small">One Listec call per BU through the SID-dedup pipeline.</p>
+                        </>
+                    ) : kind === 'barcode' ? (
+                        <>
+                            <p className="tile-empty-lead">
+                                No <strong>Barcode</strong> runs yet. Start one from the run panel — counts all unique
+                                SIDs for the BU and date window (no test-code filter).
+                            </p>
+                        </>
+                    ) : kind === 'serum' ? (
+                        <>
+                            <p className="tile-empty-lead">
+                                No <strong>Serum</strong> runs yet. Start one from the run panel — Serum = Barcode −
+                                specialty union (urine, EDTA, flouride, citrate, heparin, LBC).
+                            </p>
                         </>
                     ) : (
                         <>

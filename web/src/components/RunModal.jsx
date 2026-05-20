@@ -88,6 +88,10 @@ export function RunModal({ tile, kind, indexFromOne, clientPagesByNorm, onClose 
     const isCitrate = kind === 'citrate_vials';
     const isSHeparin = kind === 's_heparin';
     const isLHeparin = kind === 'l_heparin';
+    const isLbc = kind === 'lbc';
+    const isFlouride = kind === 'flouride_vials';
+    const isBarcode = kind === 'barcode';
+    const isSerum = kind === 'serum';
     const kindBadge = isUrine
         ? 'URINE CONTAINERS'
         : isEdta
@@ -98,7 +102,15 @@ export function RunModal({ tile, kind, indexFromOne, clientPagesByNorm, onClose 
               ? 'S.HEPARIN'
               : isLHeparin
                 ? 'L.HEPARIN'
-                : kind === 'envelopes'
+                : isLbc
+                  ? 'LBC'
+                  : isFlouride
+                    ? 'FLOURIDE VIALS'
+                    : isBarcode
+                      ? 'BARCODE'
+                      : isSerum
+                        ? 'SERUM'
+                        : kind === 'envelopes'
                   ? 'ENVELOPES'
                   : 'LETTER HEADS';
     const range = fmtDateRange(tile.fromDate, tile.toDate);
@@ -172,6 +184,46 @@ export function RunModal({ tile, kind, indexFromOne, clientPagesByNorm, onClose 
                   })
                   .join(' \u00b7 ')
             : null;
+    } else if (isLbc) {
+        const lb = tile.lbc || {};
+        totalLabel = 'LBC samples needed (unique SIDs)';
+        totalNum = (lb.sidsTotal || 0).toLocaleString('en-US');
+        const btc = lb.byTestCode && typeof lb.byTestCode === 'object' ? lb.byTestCode : {};
+        const codes = Object.keys(btc).sort();
+        totalSub = codes.length
+            ? codes
+                  .map((c) => {
+                      const row = btc[c] || { sids: 0 };
+                      return `${c}: ${(row.sids || 0).toLocaleString('en-US')}`;
+                  })
+                  .join(' \u00b7 ')
+            : null;
+    } else if (isFlouride) {
+        const fv = tile.flourideVials || {};
+        totalLabel = 'Flouride vials needed (unique SIDs)';
+        totalNum = (fv.sidsTotal || 0).toLocaleString('en-US');
+        const btc = fv.byTestCode && typeof fv.byTestCode === 'object' ? fv.byTestCode : {};
+        const codes = Object.keys(btc).sort();
+        totalSub = codes.length
+            ? codes
+                  .map((c) => {
+                      const row = btc[c] || { sids: 0 };
+                      return `${c}: ${(row.sids || 0).toLocaleString('en-US')}`;
+                  })
+                  .join(' \u00b7 ')
+            : null;
+    } else if (isBarcode) {
+        const bc = tile.barcode || {};
+        totalLabel = 'Barcode (unique SIDs in window)';
+        totalNum = (bc.sidsTotal || 0).toLocaleString('en-US');
+        totalSub = `${String(tile.bu || '\u2014')} \u00b7 ${range}`;
+    } else if (isSerum) {
+        const sr = tile.serum || {};
+        totalLabel = 'Serum samples (unique SIDs)';
+        totalNum = (sr.sidsTotal || 0).toLocaleString('en-US');
+        const barcode = Number(sr.barcode) || 0;
+        const union = Number(sr.unionSpecialtySidsCount) || 0;
+        totalSub = `Barcode ${barcode.toLocaleString('en-US')} \u2212 union ${union.toLocaleString('en-US')}`;
     } else if (kind === 'envelopes') {
         const env = aggregateEnvelopes(rows, pinned, clientPagesByNorm);
         totalLabel = 'Total envelopes (big + small)';
@@ -222,6 +274,29 @@ export function RunModal({ tile, kind, indexFromOne, clientPagesByNorm, onClose 
                 ) : isLHeparin ? (
                     <div className="packages-table-host-modal table-wrap">
                         <LHeparinBreakdownTable lHeparin={tile.lHeparin} />
+                    </div>
+                ) : isLbc ? (
+                    <div className="packages-table-host-modal table-wrap">
+                        <DedupBreakdownTable blob={tile.lbc} className="lbc-breakdown" footerLabel="Union (OR) — LBC samples" />
+                    </div>
+                ) : isFlouride ? (
+                    <div className="packages-table-host-modal table-wrap">
+                        <DedupBreakdownTable
+                            blob={tile.flourideVials}
+                            className="flouride-breakdown"
+                            footerLabel="Union (OR) — flouride vials needed"
+                        />
+                    </div>
+                ) : isBarcode ? (
+                    <div className="packages-table-host-modal table-wrap">
+                        <p className="muted small">
+                            Total unique sample IDs for this business unit and date window. No per-test-code
+                            breakdown — every SID in the window is counted once.
+                        </p>
+                    </div>
+                ) : isSerum ? (
+                    <div className="packages-table-host-modal table-wrap">
+                        <SerumBreakdownTable serum={tile.serum} />
                     </div>
                 ) : (
                     <>
@@ -411,6 +486,56 @@ function CitrateBreakdownTable({ citrateVials }) {
  * union footer (= containers needed). No filter or sort — only two test codes
  * are ever in scope so the long sortable PackagesTable is overkill.
  */
+const SERUM_BREAKDOWN_ROWS = [
+    { key: 'urineContainers', label: 'Urine Containers' },
+    { key: 'edtaVials', label: 'EDTA Vials' },
+    { key: 'flourideVials', label: 'Flouride Vials' },
+    { key: 'citrateVials', label: 'Citrate' },
+    { key: 'sHeparin', label: 'S.Heparin' },
+    { key: 'lHeparin', label: 'L.Heparin' },
+    { key: 'lbc', label: 'LBC' }
+];
+
+function SerumBreakdownTable({ serum }) {
+    const sr = serum || {};
+    const breakdown = sr.breakdown && typeof sr.breakdown === 'object' ? sr.breakdown : {};
+    const barcode = Number(sr.barcode) || 0;
+    const union = Number(sr.unionSpecialtySidsCount) || 0;
+    const serumTotal = Number(sr.sidsTotal) || 0;
+    return (
+        <table className="serum-breakdown urine-breakdown">
+            <thead>
+                <tr>
+                    <th>Material</th>
+                    <th className="num">SIDs (deduped per mode)</th>
+                </tr>
+            </thead>
+            <tbody>
+                {SERUM_BREAKDOWN_ROWS.map(({ key, label }) => (
+                    <tr key={key}>
+                        <td>{label}</td>
+                        <td className="num">{(Number(breakdown[key]) || 0).toLocaleString('en-US')}</td>
+                    </tr>
+                ))}
+            </tbody>
+            <tfoot>
+                <tr>
+                    <td>Barcode (all SIDs)</td>
+                    <td className="num">{barcode.toLocaleString('en-US')}</td>
+                </tr>
+                <tr>
+                    <td>Specialty union (deduped across modes)</td>
+                    <td className="num">{union.toLocaleString('en-US')}</td>
+                </tr>
+                <tr>
+                    <td>Serum = Barcode − Union</td>
+                    <td className="num">{serumTotal.toLocaleString('en-US')}</td>
+                </tr>
+            </tfoot>
+        </table>
+    );
+}
+
 function UrineBreakdownTable({ urineContainers }) {
     const uc = urineContainers || {};
     const cp = (uc.byTestCode && uc.byTestCode.cp004) || { sids: 0, rows: 0 };

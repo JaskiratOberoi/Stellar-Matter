@@ -129,13 +129,13 @@
 
 .tracer-stat-row {
     display: grid;
-    grid-template-columns: repeat(7, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 0.55rem;
 }
 
-@media (max-width: 1500px) {
+@media (min-width: 1600px) {
     .tracer-stat-row {
-        grid-template-columns: repeat(4, minmax(0, 1fr));
+        grid-template-columns: repeat(6, minmax(0, 1fr));
     }
 }
 
@@ -238,15 +238,35 @@
         padding: 0;
     }
 
+    .tracer-stat-row {
+        grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+        gap: 6mm !important;
+    }
+
     .tracer-banner {
-        break-inside: avoid;
-        page-break-inside: avoid;
+        break-inside: auto;
+        page-break-inside: auto;
         border: 1px solid #ddd;
         margin-bottom: 0.75rem;
     }
 
     .tracer-stat-card {
+        break-inside: avoid;
+        page-break-inside: avoid;
         border: 1px solid #ddd;
+    }
+
+    .tracer-banner-head {
+        break-inside: avoid;
+        break-after: avoid;
+        page-break-after: avoid;
+    }
+
+    .tracer-stat-card,
+    .tracer-stat-sub,
+    .tracer-stat-headline {
+        orphans: 3;
+        widows: 3;
     }
 
     .tracer-stat-link {

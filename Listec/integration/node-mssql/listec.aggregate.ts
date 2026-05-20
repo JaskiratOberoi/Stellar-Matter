@@ -20,7 +20,8 @@ export interface PackagesAggregate {
      * Tracer-only opt-in. When `bucketCodes` is passed, we walk each row's
      * `results` array and bucket SIDs / result-row counts by test_code. This
      * lets the Tracer pipeline derive every specialty mode (urine / EDTA /
-     * citrate / S.Hep / L.Hep) from a single SP execution per BU instead of
+     * citrate / flouride / LBC / S.Hep / L.Hep; barcode + serum derived) from
+     * a single SP execution per BU instead of
      * one SP execution per (mode × test_code) combination.
      *
      * Match is case-insensitive on `test_code`. SID dedupe is per-bucket.

@@ -310,9 +310,13 @@ export function TracerPage({
                                 generalTile={collatedBannerRow.generalTile}
                                 urineTile={collatedBannerRow.urineTile}
                                 edtaTile={collatedBannerRow.edtaTile}
+                                flourideTile={collatedBannerRow.flourideTile}
                                 citrateTile={collatedBannerRow.citrateTile}
                                 sHeparinTile={collatedBannerRow.sHeparinTile}
                                 lHeparinTile={collatedBannerRow.lHeparinTile}
+                                lbcTile={collatedBannerRow.lbcTile}
+                                barcodeTile={collatedBannerRow.barcodeTile}
+                                serumTile={collatedBannerRow.serumTile}
                                 clientPagesByNorm={clientPagesByNorm}
                                 isPrintTarget={printFocusKey === collatedBannerRow.bannerKey}
                                 onPrintSection={() => startPrintSection(collatedBannerRow.bannerKey)}
@@ -336,9 +340,13 @@ export function TracerPage({
                             generalTile={row.generalTile}
                             urineTile={row.urineTile}
                             edtaTile={row.edtaTile}
+                            flourideTile={row.flourideTile}
                             citrateTile={row.citrateTile}
                             sHeparinTile={row.sHeparinTile}
                             lHeparinTile={row.lHeparinTile}
+                            lbcTile={row.lbcTile}
+                            barcodeTile={row.barcodeTile}
+                            serumTile={row.serumTile}
                             clientPagesByNorm={clientPagesByNorm}
                             isPrintTarget={printFocusKey === `bu:${row.buKey}`}
                             onPrintSection={() => startPrintSection(`bu:${row.buKey}`)}
@@ -367,9 +375,13 @@ export function TracerPage({
                             generalTile={row.generalTile}
                             urineTile={row.urineTile}
                             edtaTile={row.edtaTile}
+                            flourideTile={row.flourideTile}
                             citrateTile={row.citrateTile}
                             sHeparinTile={row.sHeparinTile}
                             lHeparinTile={row.lHeparinTile}
+                            lbcTile={row.lbcTile}
+                            barcodeTile={row.barcodeTile}
+                            serumTile={row.serumTile}
                             clientPagesByNorm={clientPagesByNorm}
                             isPrintTarget={printFocusKey === row.bannerKey}
                             onPrintSection={() => startPrintSection(row.bannerKey)}

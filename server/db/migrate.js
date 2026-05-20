@@ -234,6 +234,10 @@ async function migrate() {
         await client.query(`ALTER TABLE runs ADD COLUMN IF NOT EXISTS citrate_vials JSONB`);
         await client.query(`ALTER TABLE runs ADD COLUMN IF NOT EXISTS s_heparin JSONB`);
         await client.query(`ALTER TABLE runs ADD COLUMN IF NOT EXISTS l_heparin JSONB`);
+        await client.query(`ALTER TABLE runs ADD COLUMN IF NOT EXISTS lbc JSONB`);
+        await client.query(`ALTER TABLE runs ADD COLUMN IF NOT EXISTS flouride_vials JSONB`);
+        await client.query(`ALTER TABLE runs ADD COLUMN IF NOT EXISTS barcode JSONB`);
+        await client.query(`ALTER TABLE runs ADD COLUMN IF NOT EXISTS serum JSONB`);
 
         // run_packages: one row per (run_id, label). position preserves the
         // count-desc ordering buildTileFromRunFiles() computes so the

@@ -79,6 +79,40 @@ export function projectLHeparin(tile) {
     return projectDedupBlob(tile && tile.lHeparin);
 }
 
+/** @param {object | null | undefined} tile */
+export function projectFlourideVials(tile) {
+    return projectDedupBlob(tile && tile.flourideVials);
+}
+
+/** @param {object | null | undefined} tile */
+export function projectLbc(tile) {
+    return projectDedupBlob(tile && tile.lbc);
+}
+
+/** @param {object | null | undefined} tile */
+export function projectBarcode(tile) {
+    const b = tile && tile.barcode;
+    if (!b) return { headline: '0', subline: 'No data', sidsTotal: 0 };
+    return {
+        headline: (b.sidsTotal || 0).toLocaleString('en-US'),
+        subline: 'unique SIDs',
+        sidsTotal: b.sidsTotal || 0
+    };
+}
+
+/** @param {object | null | undefined} tile */
+export function projectSerum(tile) {
+    const b = tile && tile.serum;
+    if (!b) return { headline: '0', subline: 'No data', sidsTotal: 0 };
+    const barcode = Number(b.barcode) || 0;
+    const union = Number(b.unionSpecialtySidsCount) || 0;
+    return {
+        headline: (b.sidsTotal || 0).toLocaleString('en-US'),
+        subline: `Barcode ${barcode.toLocaleString('en-US')} − union ${union.toLocaleString('en-US')}`,
+        sidsTotal: b.sidsTotal || 0
+    };
+}
+
 // Shared projection for any { sidsTotal, byTestCode } specialty blob.
 function projectDedupBlob(blob) {
     if (!blob) return { headline: '0', subline: '', sidsTotal: 0 };
@@ -205,6 +239,10 @@ export function mapTilesToBanners(tiles, selectedBus, batchStartedIso, fromDate,
         if (m === 'citrate_vials') return 'citrate_vials';
         if (m === 's_heparin') return 's_heparin';
         if (m === 'l_heparin') return 'l_heparin';
+        if (m === 'flouride_vials') return 'flouride_vials';
+        if (m === 'lbc') return 'lbc';
+        if (m === 'barcode') return 'barcode';
+        if (m === 'serum') return 'serum';
         return 'general';
     };
 
@@ -231,9 +269,13 @@ export function mapTilesToBanners(tiles, selectedBus, batchStartedIso, fromDate,
         generalTile: pick(bu, 'general'),
         urineTile: pick(bu, 'urine_containers'),
         edtaTile: pick(bu, 'edta_vials'),
+        flourideTile: pick(bu, 'flouride_vials'),
         citrateTile: pick(bu, 'citrate_vials'),
         sHeparinTile: pick(bu, 's_heparin'),
-        lHeparinTile: pick(bu, 'l_heparin')
+        lHeparinTile: pick(bu, 'l_heparin'),
+        lbcTile: pick(bu, 'lbc'),
+        barcodeTile: pick(bu, 'barcode'),
+        serumTile: pick(bu, 'serum')
     }));
 }
 
@@ -263,6 +305,10 @@ export function mapRegionTilesToBanners(tiles, regionTargets, batchStartedIso, f
         if (m === 'citrate_vials') return 'citrate_vials';
         if (m === 's_heparin') return 's_heparin';
         if (m === 'l_heparin') return 'l_heparin';
+        if (m === 'flouride_vials') return 'flouride_vials';
+        if (m === 'lbc') return 'lbc';
+        if (m === 'barcode') return 'barcode';
+        if (m === 'serum') return 'serum';
         return 'general';
     };
 
@@ -299,9 +345,13 @@ export function mapRegionTilesToBanners(tiles, regionTargets, batchStartedIso, f
         generalTile: pick(targ, 'general'),
         urineTile: pick(targ, 'urine_containers'),
         edtaTile: pick(targ, 'edta_vials'),
+        flourideTile: pick(targ, 'flouride_vials'),
         citrateTile: pick(targ, 'citrate_vials'),
         sHeparinTile: pick(targ, 's_heparin'),
-        lHeparinTile: pick(targ, 'l_heparin')
+        lHeparinTile: pick(targ, 'l_heparin'),
+        lbcTile: pick(targ, 'lbc'),
+        barcodeTile: pick(targ, 'barcode'),
+        serumTile: pick(targ, 'serum')
     }));
 }
 
@@ -337,6 +387,10 @@ export function mapCollatedTileToBanner(tiles, batchStartedIso, fromDate, toDate
         if (m === 'citrate_vials') return 'citrate_vials';
         if (m === 's_heparin') return 's_heparin';
         if (m === 'l_heparin') return 'l_heparin';
+        if (m === 'flouride_vials') return 'flouride_vials';
+        if (m === 'lbc') return 'lbc';
+        if (m === 'barcode') return 'barcode';
+        if (m === 'serum') return 'serum';
         return 'general';
     };
 
@@ -366,9 +420,13 @@ export function mapCollatedTileToBanner(tiles, batchStartedIso, fromDate, toDate
         generalTile,
         urineTile: pick('urine_containers'),
         edtaTile: pick('edta_vials'),
+        flourideTile: pick('flouride_vials'),
         citrateTile: pick('citrate_vials'),
         sHeparinTile: pick('s_heparin'),
-        lHeparinTile: pick('l_heparin')
+        lHeparinTile: pick('l_heparin'),
+        lbcTile: pick('lbc'),
+        barcodeTile: pick('barcode'),
+        serumTile: pick('serum')
     };
 }
 
@@ -376,7 +434,7 @@ export function mapCollatedTileToBanner(tiles, batchStartedIso, fromDate, toDate
  * Poll until server is not running a job.
  *
  * Default budget is 20 minutes per step. The Tracer chains six sequential
- * runs (general -> urine -> EDTA -> citrate -> S.Heparin -> L.Heparin) and
+ * runs (general + specialty + barcode + serum per BU) and
  * each can fan out across N business units * M test codes; for a multi-BU
  * full-month range the EDTA step alone can run several minutes against
  * Listec. The previous 3-minute cap caused the frontend to give up while

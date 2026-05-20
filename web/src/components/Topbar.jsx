@@ -23,9 +23,13 @@ export function Topbar({
         { id: 'envelopes', label: 'Envelopes' },
         { id: 'urine_containers', label: 'Urine Containers' },
         { id: 'edta_vials', label: 'EDTA Vials' },
+        { id: 'flouride_vials', label: 'Flouride Vials' },
         { id: 'citrate_vials', label: 'Citrate' },
         { id: 's_heparin', label: 'S.Heparin' },
         { id: 'l_heparin', label: 'L.Heparin' },
+        { id: 'lbc', label: 'LBC' },
+        { id: 'barcode', label: 'Barcode' },
+        { id: 'serum', label: 'Serum' },
         { id: 'history', label: 'History' }
     ];
     return (

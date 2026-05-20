@@ -316,6 +316,14 @@ function buildTileFromRunFiles(outDir, packagesFileName) {
         (pkg.mode === 's_heparin' && 's_heparin') ||
         (main && main.mode === 'l_heparin' && 'l_heparin') ||
         (pkg.mode === 'l_heparin' && 'l_heparin') ||
+        (main && main.mode === 'lbc' && 'lbc') ||
+        (pkg.mode === 'lbc' && 'lbc') ||
+        (main && main.mode === 'flouride_vials' && 'flouride_vials') ||
+        (pkg.mode === 'flouride_vials' && 'flouride_vials') ||
+        (main && main.mode === 'barcode' && 'barcode') ||
+        (pkg.mode === 'barcode' && 'barcode') ||
+        (main && main.mode === 'serum' && 'serum') ||
+        (pkg.mode === 'serum' && 'serum') ||
         'general';
     const urineContainers =
         mode === 'urine_containers'
@@ -336,6 +344,23 @@ function buildTileFromRunFiles(outDir, packagesFileName) {
     const lHeparin =
         mode === 'l_heparin'
             ? (main && main.lHeparin) || (pkg.lHeparin && typeof pkg.lHeparin === 'object' ? pkg.lHeparin : null)
+            : null;
+    const lbc =
+        mode === 'lbc'
+            ? (main && main.lbc) || (pkg.lbc && typeof pkg.lbc === 'object' ? pkg.lbc : null)
+            : null;
+    const flourideVials =
+        mode === 'flouride_vials'
+            ? (main && main.flourideVials) ||
+              (pkg.flourideVials && typeof pkg.flourideVials === 'object' ? pkg.flourideVials : null)
+            : null;
+    const barcode =
+        mode === 'barcode'
+            ? (main && main.barcode) || (pkg.barcode && typeof pkg.barcode === 'object' ? pkg.barcode : null)
+            : null;
+    const serum =
+        mode === 'serum'
+            ? (main && main.serum) || (pkg.serum && typeof pkg.serum === 'object' ? pkg.serum : null)
             : null;
     // org_id was added in Phase 10. Files written before that have neither key
     // — we treat them as belonging to 'org-default' so single-tenant deploys
@@ -359,6 +384,10 @@ function buildTileFromRunFiles(outDir, packagesFileName) {
         citrateVials,
         sHeparin,
         lHeparin,
+        lbc,
+        flourideVials,
+        barcode,
+        serum,
         orgId,
         bu,
         fromDate: filter.fromDate != null ? String(filter.fromDate) : req.fromDate != null ? String(req.fromDate) : null,
@@ -820,7 +849,17 @@ app.post('/api/run', requireRunStarter, async (req, res) => {
     // Unknown modes are rejected (rather than silently downgraded to 'general')
     // so a frontend/backend version mismatch surfaces immediately instead of
     // landing a useless general-mode tile under an EDTA/Citrate/etc. slot.
-    const SQL_ONLY_MODES = new Set(['urine_containers', 'edta_vials', 'citrate_vials', 's_heparin', 'l_heparin']);
+    const SQL_ONLY_MODES = new Set([
+        'urine_containers',
+        'edta_vials',
+        'citrate_vials',
+        's_heparin',
+        'l_heparin',
+        'lbc',
+        'flouride_vials',
+        'barcode',
+        'serum'
+    ]);
     const KNOWN_MODES = new Set(['general', ...SQL_ONLY_MODES]);
     const modeRaw = body && body.mode != null ? String(body.mode).trim() : 'general';
     const mode = modeRaw === '' ? 'general' : modeRaw;
@@ -835,11 +874,19 @@ app.post('/api/run', requireRunStarter, async (req, res) => {
                 ? 'Citrate vial counting'
                 : mode === 'edta_vials'
                   ? 'EDTA vial counting'
-                  : mode === 's_heparin'
-                    ? 'S.Heparin tube counting'
-                    : mode === 'l_heparin'
-                      ? 'L.Heparin tube counting'
-                      : 'Urine container counting';
+                  : mode === 'flouride_vials'
+                    ? 'Flouride vial counting'
+                    : mode === 'lbc'
+                      ? 'LBC counting'
+                      : mode === 'barcode'
+                        ? 'Barcode counting'
+                        : mode === 'serum'
+                          ? 'Serum derivation'
+                          : mode === 's_heparin'
+                            ? 'S.Heparin tube counting'
+                            : mode === 'l_heparin'
+                              ? 'L.Heparin tube counting'
+                              : 'Urine container counting';
         return res.status(400).json({
             error: `${label} requires SQL source. Switch to "SQL (Listec)".`
         });
@@ -888,7 +935,52 @@ app.post('/api/run', requireRunStarter, async (req, res) => {
                               ? ['ky004', 'cp3257']
                               : mode === 'l_heparin'
                                 ? ['ms091']
-                                : null,
+                                : mode === 'lbc'
+                                  ? ['hi0063']
+                                  : mode === 'flouride_vials'
+                                    ? [
+                                          'bi116',
+                                          'bi117',
+                                          'bi118',
+                                          'bi119',
+                                          'bi120',
+                                          'bi121',
+                                          'bi122',
+                                          'gtt3n',
+                                          'bi114',
+                                          'bi115'
+                                      ]
+                                    : mode === 'barcode'
+                                      ? []
+                                      : mode === 'serum'
+                                        ? [
+                                              'cp004',
+                                              'mb034',
+                                              'he011',
+                                              'he022',
+                                              'he006',
+                                              'he055',
+                                              'bi127',
+                                              'he030',
+                                              'he004',
+                                              'he016',
+                                              'hem001',
+                                              'ky004',
+                                              'cp3257',
+                                              'ms091',
+                                              'bi116',
+                                              'bi117',
+                                              'bi118',
+                                              'bi119',
+                                              'bi120',
+                                              'bi121',
+                                              'bi122',
+                                              'gtt3n',
+                                              'bi114',
+                                              'bi115',
+                                              'hi0063'
+                                          ]
+                                        : null,
                 business_units: businessUnits.length ? businessUnits : (body && body.bu ? [body.bu] : []),
                 from_date: body && body.fromDate ? String(body.fromDate) : null,
                 to_date: body && body.toDate ? String(body.toDate) : null,
