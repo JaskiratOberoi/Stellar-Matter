@@ -129,14 +129,9 @@ export function TracerPage({
                 for (const row of incoming) {
                     const k = tracerBuKey(row.bu);
                     m.set(k, {
+                        ...row,
                         buKey: k,
                         bu: row.bu,
-                        generalTile: row.generalTile,
-                        urineTile: row.urineTile,
-                        edtaTile: row.edtaTile,
-                        citrateTile: row.citrateTile,
-                        sHeparinTile: row.sHeparinTile,
-                        lHeparinTile: row.lHeparinTile,
                         fromDate: from,
                         toDate: to
                     });
@@ -247,9 +242,31 @@ export function TracerPage({
         [buildTracerBody, reloadTiles, submit, viewerDisabled]
     );
 
-    const buCount = bannerRows.filter((row) => row.generalTile || row.urineTile || row.edtaTile).length;
+    const buCount = bannerRows.filter(
+        (row) =>
+            row.generalTile ||
+            row.urineTile ||
+            row.edtaTile ||
+            row.flourideTile ||
+            row.citrateTile ||
+            row.sHeparinTile ||
+            row.lHeparinTile ||
+            row.lbcTile ||
+            row.barcodeTile ||
+            row.serumTile
+    ).length;
     const regCount = regionBannerRows.filter(
-        (row) => row.generalTile || row.urineTile || row.edtaTile || row.citrateTile || row.sHeparinTile || row.lHeparinTile
+        (row) =>
+            row.generalTile ||
+            row.urineTile ||
+            row.edtaTile ||
+            row.flourideTile ||
+            row.citrateTile ||
+            row.sHeparinTile ||
+            row.lHeparinTile ||
+            row.lbcTile ||
+            row.barcodeTile ||
+            row.serumTile
     ).length;
     const printSummaryParts = [];
     if (collatedBannerRow) printSummaryParts.push('collated');
