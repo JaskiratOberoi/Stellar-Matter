@@ -154,7 +154,7 @@ export function RunSidebar({
               : isLHeparin
                 ? 'L.Heparin mode is locked to SQL. Each run fires a single Listec call (ms091) through the dedup pipeline.'
                 : isLbc
-                  ? 'LBC mode is locked to SQL. Each run fires a single Listec call (hi0063) through the dedup pipeline.'
+                  ? 'LBC mode is locked to SQL. Each run fires a single Listec call (hi063) through the dedup pipeline.'
                   : isFlouride
                     ? 'Flouride vials mode is locked to SQL. Ten parallel Listec calls, unioned by SID.'
                     : isBarcode
@@ -213,7 +213,7 @@ export function RunSidebar({
                                     )}
                                     {isLbc && (
                                         <p className="muted small source-hint lbc-pin-banner">
-                                            <span className="chip chip-tool lbc-pin-chip">Pinned: hi0063</span>
+                                            <span className="chip chip-tool lbc-pin-chip">Pinned: hi063</span>
                                         </p>
                                     )}
                                     {isFlouride && (
@@ -296,7 +296,7 @@ export function RunSidebar({
                                     )}
                                     {isLbc && (
                                         <p className="muted small source-hint lbc-pin-banner">
-                                            <span className="chip chip-tool lbc-pin-chip">Pinned: hi0063</span>
+                                            <span className="chip chip-tool lbc-pin-chip">Pinned: hi063</span>
                                         </p>
                                     )}
                                     {isFlouride && (
@@ -446,7 +446,7 @@ export function RunSidebar({
                                         </span>
                                     ) : isLbc ? (
                                         <span className="chip chip-tool lbc-pin-chip" title="Locked by LBC tab">
-                                            hi0063
+                                            hi063
                                         </span>
                                     ) : isFlouride ? (
                                         <span

@@ -36,7 +36,7 @@ const S_HEPARIN_TEST_CODES = ['ky004', 'cp3257'];
 const L_HEPARIN_TEST_CODES = ['ms091'];
 
 // LBC (blood culture) — single assay code.
-const LBC_TEST_CODES = ['hi0063'];
+const LBC_TEST_CODES = ['hi063'];
 
 // Flouride vials — same multi-call + SID union as EDTA/Citrate.
 const FLOURIDE_VIAL_TEST_CODES = [

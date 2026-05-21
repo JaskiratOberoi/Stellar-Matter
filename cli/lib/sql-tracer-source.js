@@ -29,7 +29,7 @@ const EDTA_VIAL_TEST_CODES = ['he011', 'he022', 'he006', 'he055', 'bi127'];
 const CITRATE_VIAL_TEST_CODES = ['he030', 'he004', 'he016', 'hem001'];
 const S_HEPARIN_TEST_CODES = ['ky004', 'cp3257'];
 const L_HEPARIN_TEST_CODES = ['ms091'];
-const LBC_TEST_CODES = ['hi0063'];
+const LBC_TEST_CODES = ['hi063'];
 const FLOURIDE_VIAL_TEST_CODES = [
     'bi116',
     'bi117',

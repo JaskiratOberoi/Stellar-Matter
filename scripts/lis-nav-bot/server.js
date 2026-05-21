@@ -936,7 +936,7 @@ app.post('/api/run', requireRunStarter, async (req, res) => {
                               : mode === 'l_heparin'
                                 ? ['ms091']
                                 : mode === 'lbc'
-                                  ? ['hi0063']
+                                  ? ['hi063']
                                   : mode === 'flouride_vials'
                                     ? [
                                           'bi116',
@@ -978,7 +978,7 @@ app.post('/api/run', requireRunStarter, async (req, res) => {
                                               'gtt3n',
                                               'bi114',
                                               'bi115',
-                                              'hi0063'
+                                              'hi063'
                                           ]
                                         : null,
                 business_units: businessUnits.length ? businessUnits : (body && body.bu ? [body.bu] : []),

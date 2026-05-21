@@ -96,7 +96,7 @@ export function TileWall({ tiles, kind, hiddenCount, onRestoreHidden, onOpen, cl
                         <>
                             <p className="tile-empty-lead">
                                 No <strong>LBC</strong> runs yet. Start one from the run panel — the run will auto-pin{' '}
-                                <code>hi0063</code>.
+                                <code>hi063</code>.
                             </p>
                             <p className="muted small">One Listec call per BU through the SID-dedup pipeline.</p>
                         </>
