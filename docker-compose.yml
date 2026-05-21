@@ -43,13 +43,12 @@ services:
       SUPER_ADMIN_USERNAME: ${SUPER_ADMIN_USERNAME:-admin}
       SUPER_ADMIN_PASSWORD: ${SUPER_ADMIN_PASSWORD:-changeme-set-in-env}
       SUPER_ADMIN_DISPLAY_NAME: ${SUPER_ADMIN_DISPLAY_NAME:-Super Admin}
-      # Listec API base. host.docker.internal so the container can reach the
-      # Listec service running on the host (Linux host overrides via
-      # extra_hosts below).
-      # Default to the in-network listec service. Override to
-      # http://host.docker.internal:3100 if you want to run Listec on the host
-      # for local debugging.
-      LISTEC_API_BASE_URL: ${LISTEC_API_BASE_URL:-http://listec:3100}
+      # In-compose Listec is always http://listec:3100. Do NOT pass through
+      # host .env LISTEC_API_BASE_URL (often http://127.0.0.1:3100) — inside
+      # this container 127.0.0.1 is the app itself, so Listec proxy routes 500.
+      # For host-run Listec debugging, use http://host.docker.internal:3100 in
+      # a compose override file, not the repo-root .env.
+      LISTEC_API_BASE_URL: http://listec:3100
       # Pin the run-artefact dir to the bind-mounted host folder so writes
       # (lib/run.js -> cwd/out) and reads (server.js /api/runs/tiles) target
       # the same path regardless of cwd or __dirname. Without this they drift:
