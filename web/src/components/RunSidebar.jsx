@@ -50,12 +50,17 @@ export function RunSidebar({
     const isCitrate = mode === 'citrate_vials';
     const isSHeparin = mode === 's_heparin';
     const isLHeparin = mode === 'l_heparin';
-    const pinMultiCode = isUrine || isEdta || isCitrate || isSHeparin || isLHeparin;
+    const isLbc = mode === 'lbc';
+    const isFlouride = mode === 'flouride_vials';
+    const isBarcode = mode === 'barcode';
+    const isSerum = mode === 'serum';
+    const pinMultiCode = isUrine || isEdta || isCitrate || isSHeparin || isLHeparin || isLbc || isFlouride;
+    const pinInfoOnly = isBarcode || isSerum;
     const lockedSql = !!sqlOnlyLocked;
     const [form, setForm] = useState(() => ({
         ...BLANK_FORM,
         source:
-            pinMultiCode || lockedSql
+            pinMultiCode || pinInfoOnly || lockedSql
                 ? 'sql'
                 : readString(LS_SOURCE, 'scrape') === 'sql'
                   ? 'sql'
@@ -63,14 +68,14 @@ export function RunSidebar({
     }));
 
     useEffect(() => {
-        if ((pinMultiCode || lockedSql) && form.source !== 'sql') {
+        if ((pinMultiCode || pinInfoOnly || lockedSql) && form.source !== 'sql') {
             setForm((prev) => ({ ...prev, source: 'sql' }));
         }
-    }, [pinMultiCode, lockedSql, form.source]);
+    }, [pinMultiCode, pinInfoOnly, lockedSql, form.source]);
 
     useEffect(() => {
-        if (!pinMultiCode && !lockedSql) writeString(LS_SOURCE, form.source);
-    }, [form.source, pinMultiCode, lockedSql]);
+        if (!pinMultiCode && !pinInfoOnly && !lockedSql) writeString(LS_SOURCE, form.source);
+    }, [form.source, pinMultiCode, pinInfoOnly, lockedSql]);
 
     function update(name, value) {
         setForm((prev) => ({ ...prev, [name]: value }));
@@ -110,6 +115,22 @@ export function RunSidebar({
             body.mode = 'l_heparin';
             body.source = 'sql';
             delete body.testCode;
+        } else if (isLbc) {
+            body.mode = 'lbc';
+            body.source = 'sql';
+            delete body.testCode;
+        } else if (isFlouride) {
+            body.mode = 'flouride_vials';
+            body.source = 'sql';
+            delete body.testCode;
+        } else if (isBarcode) {
+            body.mode = 'barcode';
+            body.source = 'sql';
+            delete body.testCode;
+        } else if (isSerum) {
+            body.mode = 'serum';
+            body.source = 'sql';
+            delete body.testCode;
         } else if (lockedSql) {
             body.source = 'sql';
         }
@@ -121,7 +142,7 @@ export function RunSidebar({
     }
 
     const wantSql = form.source === 'sql';
-    const showScrapeOnly = !wantSql && !pinMultiCode && !lockedSql;
+    const showScrapeOnly = !wantSql && !pinMultiCode && !pinInfoOnly && !lockedSql;
     const sourceHint = isUrine
         ? 'Urine container mode is locked to SQL. Each run fires two parallel Listec calls (cp004 + mb034) and unions the SIDs.'
         : isEdta
@@ -132,7 +153,15 @@ export function RunSidebar({
               ? 'S.Heparin mode is locked to SQL. Each run fires two parallel Listec calls (ky004 + cp3257) and unions SIDs so each patient counts once.'
               : isLHeparin
                 ? 'L.Heparin mode is locked to SQL. Each run fires a single Listec call (ms091) through the dedup pipeline.'
-                : wantSql
+                : isLbc
+                  ? 'LBC mode is locked to SQL. Each run fires a single Listec call (hi0063) through the dedup pipeline.'
+                  : isFlouride
+                    ? 'Flouride vials mode is locked to SQL. Ten parallel Listec calls, unioned by SID.'
+                    : isBarcode
+                      ? 'Barcode mode is locked to SQL. One Listec call with no test-code filter — counts all unique SIDs in the window.'
+                      : isSerum
+                        ? 'Serum mode is locked to SQL. One bucketed Listec call; Serum = Barcode − specialty union.'
+                        : wantSql
           ? 'Calls the Listec service (LISTEC_API_BASE_URL, default http://127.0.0.1:3100) — multi-BU runs allowed.'
           : 'Drives the LIS web grid via headless Chromium. Multi-BU runs require SQL.';
 
@@ -182,6 +211,32 @@ export function RunSidebar({
                                             <span className="chip chip-tool l-heparin-pin-chip">Pinned: ms091</span>
                                         </p>
                                     )}
+                                    {isLbc && (
+                                        <p className="muted small source-hint lbc-pin-banner">
+                                            <span className="chip chip-tool lbc-pin-chip">Pinned: hi0063</span>
+                                        </p>
+                                    )}
+                                    {isFlouride && (
+                                        <p className="muted small source-hint flouride-pin-banner">
+                                            <span className="chip chip-tool flouride-pin-chip">
+                                                Pinned: bi116–bi122, gtt3n, bi114, bi115
+                                            </span>
+                                        </p>
+                                    )}
+                                    {isBarcode && (
+                                        <p className="muted small source-hint barcode-pin-banner">
+                                            <span className="chip chip-tool barcode-info-chip">
+                                                No test code — all SIDs in window
+                                            </span>
+                                        </p>
+                                    )}
+                                    {isSerum && (
+                                        <p className="muted small source-hint serum-pin-banner">
+                                            <span className="chip chip-tool serum-info-chip">
+                                                Serum = Barcode − specialty union
+                                            </span>
+                                        </p>
+                                    )}
                                     <p className="muted small source-hint">{sourceHint}</p>
                                 </>
                             ) : (
@@ -192,7 +247,7 @@ export function RunSidebar({
                                             name="source"
                                             value="scrape"
                                             checked={form.source === 'scrape'}
-                                            disabled={pinMultiCode}
+                                            disabled={pinMultiCode || pinInfoOnly}
                                             onChange={() => update('source', 'scrape')}
                                         />{' '}
                                         Web scrape
@@ -203,7 +258,7 @@ export function RunSidebar({
                                             name="source"
                                             value="sql"
                                             checked={form.source === 'sql'}
-                                            disabled={pinMultiCode}
+                                            disabled={pinMultiCode || pinInfoOnly}
                                             onChange={() => update('source', 'sql')}
                                         />{' '}
                                         SQL (Listec)
@@ -237,6 +292,32 @@ export function RunSidebar({
                                     {isLHeparin && (
                                         <p className="muted small source-hint l-heparin-pin-banner">
                                             <span className="chip chip-tool l-heparin-pin-chip">Pinned: ms091</span>
+                                        </p>
+                                    )}
+                                    {isLbc && (
+                                        <p className="muted small source-hint lbc-pin-banner">
+                                            <span className="chip chip-tool lbc-pin-chip">Pinned: hi0063</span>
+                                        </p>
+                                    )}
+                                    {isFlouride && (
+                                        <p className="muted small source-hint flouride-pin-banner">
+                                            <span className="chip chip-tool flouride-pin-chip">
+                                                Pinned: bi116–bi122, gtt3n, bi114, bi115
+                                            </span>
+                                        </p>
+                                    )}
+                                    {isBarcode && (
+                                        <p className="muted small source-hint barcode-pin-banner">
+                                            <span className="chip chip-tool barcode-info-chip">
+                                                No test code — all SIDs in window
+                                            </span>
+                                        </p>
+                                    )}
+                                    {isSerum && (
+                                        <p className="muted small source-hint serum-pin-banner">
+                                            <span className="chip chip-tool serum-info-chip">
+                                                Serum = Barcode − specialty union
+                                            </span>
                                         </p>
                                     )}
                                     <p className="muted small source-hint">{sourceHint}</p>
@@ -363,6 +444,25 @@ export function RunSidebar({
                                         >
                                             ms091
                                         </span>
+                                    ) : isLbc ? (
+                                        <span className="chip chip-tool lbc-pin-chip" title="Locked by LBC tab">
+                                            hi0063
+                                        </span>
+                                    ) : isFlouride ? (
+                                        <span
+                                            className="chip chip-tool flouride-pin-chip"
+                                            title="Locked by Flouride Vials tab"
+                                        >
+                                            bi116…bi115 + gtt3n
+                                        </span>
+                                    ) : isBarcode ? (
+                                        <span className="chip chip-tool barcode-info-chip" title="Barcode tab — no test code">
+                                            (all SIDs)
+                                        </span>
+                                    ) : isSerum ? (
+                                        <span className="chip chip-tool serum-info-chip" title="Serum tab — derived count">
+                                            (derived)
+                                        </span>
                                     ) : (
                                         <input
                                             type="text"
@@ -480,7 +580,15 @@ export function RunSidebar({
                                       ? 'Run S.Heparin count'
                                       : isLHeparin
                                         ? 'Run L.Heparin count'
-                                        : 'Run'}
+                                        : isLbc
+                                          ? 'Run LBC count'
+                                          : isFlouride
+                                            ? 'Run Flouride vials count'
+                                            : isBarcode
+                                              ? 'Run Barcode count'
+                                              : isSerum
+                                                ? 'Run Serum count'
+                                                : 'Run'}
                         </button>
                         <button type="button" className="btn-secondary chip-like" onClick={onClearLedger}>
                             Clear ledger

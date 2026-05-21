@@ -160,6 +160,14 @@ function projectRun(id, { main, pkg, mainPath, pkgPath }, normalizedMap) {
         (pkg && pkg.mode === 's_heparin' && 's_heparin') ||
         (main && main.mode === 'l_heparin' && 'l_heparin') ||
         (pkg && pkg.mode === 'l_heparin' && 'l_heparin') ||
+        (main && main.mode === 'lbc' && 'lbc') ||
+        (pkg && pkg.mode === 'lbc' && 'lbc') ||
+        (main && main.mode === 'flouride_vials' && 'flouride_vials') ||
+        (pkg && pkg.mode === 'flouride_vials' && 'flouride_vials') ||
+        (main && main.mode === 'barcode' && 'barcode') ||
+        (pkg && pkg.mode === 'barcode' && 'barcode') ||
+        (main && main.mode === 'serum' && 'serum') ||
+        (pkg && pkg.mode === 'serum' && 'serum') ||
         'general';
     const urineContainers =
         mode === 'urine_containers'
@@ -181,6 +189,23 @@ function projectRun(id, { main, pkg, mainPath, pkgPath }, normalizedMap) {
     const lHeparin =
         mode === 'l_heparin'
             ? (main && main.lHeparin) || (pkg && pkg.lHeparin && typeof pkg.lHeparin === 'object' ? pkg.lHeparin : null)
+            : null;
+    const lbc =
+        mode === 'lbc'
+            ? (main && main.lbc) || (pkg && pkg.lbc && typeof pkg.lbc === 'object' ? pkg.lbc : null)
+            : null;
+    const flourideVials =
+        mode === 'flouride_vials'
+            ? (main && main.flourideVials) ||
+              (pkg && pkg.flourideVials && typeof pkg.flourideVials === 'object' ? pkg.flourideVials : null)
+            : null;
+    const barcode =
+        mode === 'barcode'
+            ? (main && main.barcode) || (pkg && pkg.barcode && typeof pkg.barcode === 'object' ? pkg.barcode : null)
+            : null;
+    const serum =
+        mode === 'serum'
+            ? (main && main.serum) || (pkg && pkg.serum && typeof pkg.serum === 'object' ? pkg.serum : null)
             : null;
     const orgId = String(
         (main && main.org_id != null && main.org_id) ||
@@ -225,6 +250,10 @@ function projectRun(id, { main, pkg, mainPath, pkgPath }, normalizedMap) {
         citrateVials,
         sHeparin,
         lHeparin,
+        lbc,
+        flourideVials,
+        barcode,
+        serum,
         filter,
         filtersApplied,
         filtersRequested: req,
@@ -283,6 +312,7 @@ async function ingestRun(client, outDir, id, opts = {}) {
             errors_count, sids_count, unique_label_count, other_tests_row_count,
             total_printed_pages, envelopes_big, envelopes_small, envelopes_unknown,
             urine_containers, edta_vials, citrate_vials, s_heparin, l_heparin,
+            lbc, flouride_vials, barcode, serum,
             filter, filters_applied, filters_requested, paths,
             source_file_mtime
          )
@@ -293,7 +323,8 @@ async function ingestRun(client, outDir, id, opts = {}) {
             $18, $19, $20, $21,
             $22, $23, $24, $25, $26,
             $27, $28, $29, $30,
-            $31
+            $31, $32, $33, $34,
+            $35
          )
          ON CONFLICT (id) DO UPDATE SET
             org_id = EXCLUDED.org_id,
@@ -321,6 +352,10 @@ async function ingestRun(client, outDir, id, opts = {}) {
             citrate_vials = EXCLUDED.citrate_vials,
             s_heparin = EXCLUDED.s_heparin,
             l_heparin = EXCLUDED.l_heparin,
+            lbc = EXCLUDED.lbc,
+            flouride_vials = EXCLUDED.flouride_vials,
+            barcode = EXCLUDED.barcode,
+            serum = EXCLUDED.serum,
             filter = EXCLUDED.filter,
             filters_applied = EXCLUDED.filters_applied,
             filters_requested = EXCLUDED.filters_requested,
@@ -353,6 +388,10 @@ async function ingestRun(client, outDir, id, opts = {}) {
             projected.citrateVials ? JSON.stringify(projected.citrateVials) : null,
             projected.sHeparin ? JSON.stringify(projected.sHeparin) : null,
             projected.lHeparin ? JSON.stringify(projected.lHeparin) : null,
+            projected.lbc ? JSON.stringify(projected.lbc) : null,
+            projected.flourideVials ? JSON.stringify(projected.flourideVials) : null,
+            projected.barcode ? JSON.stringify(projected.barcode) : null,
+            projected.serum ? JSON.stringify(projected.serum) : null,
             JSON.stringify(projected.filter || {}),
             projected.filtersApplied ? JSON.stringify(projected.filtersApplied) : null,
             JSON.stringify(projected.filtersRequested || {}),
@@ -542,6 +581,10 @@ function tileFromRow(r, labelRows) {
         citrateVials: r.citrate_vials || null,
         sHeparin: r.s_heparin || null,
         lHeparin: r.l_heparin || null,
+        lbc: r.lbc || null,
+        flourideVials: r.flouride_vials || null,
+        barcode: r.barcode || null,
+        serum: r.serum || null,
         orgId: r.org_id,
         bu: r.bu || '—',
         fromDate: r.from_date,

@@ -111,8 +111,19 @@ BEGIN
                 OR P.name LIKE '%' + @patient_name + '%'
                 OR P.MRNID = @patient_name
               )
+          -- BU filter mirrors the legacy `usp_worksheet_sample02072020` SP
+          -- that LIS Sample Worksheet uses: a sample matches the BU dropdown
+          -- when its CLIENT belongs to that BU (U.BusinessUnitCode) OR when
+          -- the sample is currently being processed by that BU
+          -- (S.business_unit_id). Without the U.BusinessUnitCode arm,
+          -- specialty work routed to the central QUGEN lab (TB Gold,
+          -- blood culture, karyotyping, etc.) silently disappears from
+          -- the originating BU's tile counts. tbl_med_mcc_unit_master
+          -- has an FK column literally named `BusinessUnitCode` (INT)
+          -- that points to tbl_med_business_unit_master.id.
           AND (
                 @business_unit_id IS NULL
+                OR U.BusinessUnitCode = @business_unit_id
                 OR S.business_unit_id = @business_unit_id
               )
           AND (

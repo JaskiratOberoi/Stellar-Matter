@@ -7,10 +7,34 @@ import { fmtDateRange, tileEyebrow } from '../lib/format.js';
 // blob in buildTileFromRunFiles / projectRun.
 const SPECIALTY_BLOB_BY_KIND = {
     edta_vials: 'edtaVials',
+    flouride_vials: 'flourideVials',
     citrate_vials: 'citrateVials',
     s_heparin: 'sHeparin',
-    l_heparin: 'lHeparin'
+    l_heparin: 'lHeparin',
+    lbc: 'lbc'
 };
+
+function barcodeMetric(blob) {
+    const b = blob || {};
+    return {
+        num: (b.sidsTotal || 0).toLocaleString('en-US'),
+        label: 'unique SIDs in window',
+        estimated: false,
+        estimatedLabel: null
+    };
+}
+
+function serumMetric(blob) {
+    const b = blob || {};
+    const barcode = Number(b.barcode) || 0;
+    const union = Number(b.unionSpecialtySidsCount) || 0;
+    return {
+        num: (b.sidsTotal || 0).toLocaleString('en-US'),
+        label: `Barcode ${barcode.toLocaleString('en-US')} − specialty union ${union.toLocaleString('en-US')}`,
+        estimated: false,
+        estimatedLabel: null
+    };
+}
 
 function specialtyMetric(blob) {
     const b = blob || {};
@@ -33,6 +57,8 @@ function specialtyMetric(blob) {
 }
 
 function metricFor(kind, tile, clientPagesByNorm) {
+    if (kind === 'barcode') return barcodeMetric(tile.barcode);
+    if (kind === 'serum') return serumMetric(tile.serum);
     const specialtyKey = SPECIALTY_BLOB_BY_KIND[kind];
     if (specialtyKey) return specialtyMetric(tile[specialtyKey]);
     if (kind === 'urine_containers') {

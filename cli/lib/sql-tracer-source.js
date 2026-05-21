@@ -5,8 +5,8 @@
  * N today = 1 general + 5 specialty modes × per-mode test-code count). The
  * Listec service returns every SID for the window plus per-test-code SID
  * buckets (sidsByTestCode) when called with `bucketTestCodes=...`. We then
- * synthesise 6 mode-specific artefact pairs (general / urine_containers /
- * edta_vials / citrate_vials / s_heparin / l_heparin) per BU from that single
+ * synthesise mode-specific artefact pairs (general + specialty + barcode +
+ * serum) per BU from that single
  * response, so the dashboard tile wall picks them up unchanged.
  *
  * For a 2-BU month run this collapses 30 SP executions on Noble down to 2.
@@ -29,13 +29,28 @@ const EDTA_VIAL_TEST_CODES = ['he011', 'he022', 'he006', 'he055', 'bi127'];
 const CITRATE_VIAL_TEST_CODES = ['he030', 'he004', 'he016', 'hem001'];
 const S_HEPARIN_TEST_CODES = ['ky004', 'cp3257'];
 const L_HEPARIN_TEST_CODES = ['ms091'];
+const LBC_TEST_CODES = ['hi0063'];
+const FLOURIDE_VIAL_TEST_CODES = [
+    'bi116',
+    'bi117',
+    'bi118',
+    'bi119',
+    'bi120',
+    'bi121',
+    'bi122',
+    'gtt3n',
+    'bi114',
+    'bi115'
+];
 
 const SPECIALTY_MODES = [
     { mode: 'urine_containers', codes: URINE_CONTAINER_TEST_CODES, blobKey: 'urineContainers' },
     { mode: 'edta_vials', codes: EDTA_VIAL_TEST_CODES, blobKey: 'edtaVials' },
+    { mode: 'flouride_vials', codes: FLOURIDE_VIAL_TEST_CODES, blobKey: 'flourideVials' },
     { mode: 'citrate_vials', codes: CITRATE_VIAL_TEST_CODES, blobKey: 'citrateVials' },
     { mode: 's_heparin', codes: S_HEPARIN_TEST_CODES, blobKey: 'sHeparin' },
-    { mode: 'l_heparin', codes: L_HEPARIN_TEST_CODES, blobKey: 'lHeparin' }
+    { mode: 'l_heparin', codes: L_HEPARIN_TEST_CODES, blobKey: 'lHeparin' },
+    { mode: 'lbc', codes: LBC_TEST_CODES, blobKey: 'lbc' }
 ];
 
 // Union of every specialty code so we send one combined `bucketTestCodes`
@@ -46,8 +61,58 @@ const ALL_SPECIALTY_CODES = [
     ...EDTA_VIAL_TEST_CODES,
     ...CITRATE_VIAL_TEST_CODES,
     ...S_HEPARIN_TEST_CODES,
-    ...L_HEPARIN_TEST_CODES
+    ...L_HEPARIN_TEST_CODES,
+    ...FLOURIDE_VIAL_TEST_CODES,
+    ...LBC_TEST_CODES
 ];
+
+const SPECIALTY_BREAKDOWN_GROUPS = [
+    { key: 'urineContainers', codes: URINE_CONTAINER_TEST_CODES },
+    { key: 'edtaVials', codes: EDTA_VIAL_TEST_CODES },
+    { key: 'citrateVials', codes: CITRATE_VIAL_TEST_CODES },
+    { key: 'sHeparin', codes: S_HEPARIN_TEST_CODES },
+    { key: 'lHeparin', codes: L_HEPARIN_TEST_CODES },
+    { key: 'flourideVials', codes: FLOURIDE_VIAL_TEST_CODES },
+    { key: 'lbc', codes: LBC_TEST_CODES }
+];
+
+/**
+ * @param {object} payload
+ * @param {string[]} codes
+ * @returns {Set<string>}
+ */
+function unionSidsForCodes(payload, codes) {
+    const sidsByCode =
+        payload.sidsByTestCode && typeof payload.sidsByTestCode === 'object' ? payload.sidsByTestCode : {};
+    const union = new Set();
+    for (const code of codes) {
+        const lower = String(code).toLowerCase();
+        const codeSids = Array.isArray(sidsByCode[lower]) ? sidsByCode[lower] : [];
+        for (const s of codeSids) union.add(String(s));
+    }
+    return union;
+}
+
+/**
+ * @param {object} payload
+ * @returns {Set<string>}
+ */
+function unionAllSpecialtySids(payload) {
+    return unionSidsForCodes(payload, ALL_SPECIALTY_CODES);
+}
+
+/**
+ * @param {object} payload
+ * @returns {Record<string, number>}
+ */
+function specialtyBreakdownCounts(payload) {
+    /** @type {Record<string, number>} */
+    const out = {};
+    for (const { key, codes } of SPECIALTY_BREAKDOWN_GROUPS) {
+        out[key] = unionSidsForCodes(payload, codes).size;
+    }
+    return out;
+}
 
 const BRACKET_RE = /\[([^\]]+)\]/g;
 
@@ -309,6 +374,22 @@ function writeModeArtefact(ctx) {
     let sids;
     if (mode === 'general') {
         sids = Array.isArray(payload.sids) ? payload.sids : [];
+    } else if (mode === 'barcode') {
+        sids = Array.isArray(payload.sids) ? payload.sids : [];
+        modeBlob = { sidsTotal: sids.length };
+    } else if (mode === 'serum') {
+        const allSids = Array.isArray(payload.sids) ? payload.sids : [];
+        const unionSet = unionAllSpecialtySids(payload);
+        const barcodeCount = allSids.length;
+        const unionCount = unionSet.size;
+        const serumCount = Math.max(0, barcodeCount - unionCount);
+        sids = allSids.filter((s) => !unionSet.has(String(s))).sort();
+        modeBlob = {
+            sidsTotal: serumCount,
+            barcode: barcodeCount,
+            unionSpecialtySidsCount: unionCount,
+            breakdown: specialtyBreakdownCounts(payload)
+        };
     } else {
         // Specialty mode: derive byTestCode from the SID buckets and union
         // them so sidsTotal stays the unique-SID count (= tubes/containers
@@ -394,7 +475,7 @@ function writeModeArtefact(ctx) {
         readOnly: true,
         source: 'sql',
         mode,
-        testCodes: mode === 'general' ? null : codes.slice(),
+        testCodes: mode === 'general' || mode === 'barcode' || mode === 'serum' ? null : codes.slice(),
         listecApiBase,
         primaryUrl: null,
         backupUrlUsed: false,
@@ -436,7 +517,7 @@ function writeModeArtefact(ctx) {
         startedAt: startedAtIso,
         source: 'sql-tracer',
         mode,
-        testCodes: mode === 'general' ? null : codes.slice(),
+        testCodes: mode === 'general' || mode === 'barcode' || mode === 'serum' ? null : codes.slice(),
         listecApiBase,
         filter: { ...filters },
         filtersApplied,
@@ -452,6 +533,10 @@ function writeModeArtefact(ctx) {
         citrateVials: mode === 'citrate_vials' ? modeBlob : null,
         sHeparin: mode === 's_heparin' ? modeBlob : null,
         lHeparin: mode === 'l_heparin' ? modeBlob : null,
+        flourideVials: mode === 'flouride_vials' ? modeBlob : null,
+        lbc: mode === 'lbc' ? modeBlob : null,
+        barcode: mode === 'barcode' ? modeBlob : null,
+        serum: mode === 'serum' ? modeBlob : null,
         recoveryEvents: [],
         completedPagerPages: [1],
         lastCompletedPagerPage: 1,
@@ -899,11 +984,11 @@ function writeSixModesForPayload(payload, meta) {
     const runIds = {};
     let lastMain = null;
     let lastPkg = null;
-    const modes = ['general', ...SPECIALTY_MODES.map((m) => m.mode)];
+    const modes = ['general', ...SPECIALTY_MODES.map((m) => m.mode), 'barcode', 'serum'];
     /** @type {Record<string,string[]|null>} */
-    const codesByMode = { general: null };
+    const codesByMode = { general: null, barcode: [], serum: [] };
     /** @type {Record<string,string|null>} */
-    const blobKeyByMode = { general: null };
+    const blobKeyByMode = { general: null, barcode: 'barcode', serum: 'serum' };
     for (const m of SPECIALTY_MODES) {
         codesByMode[m.mode] = m.codes;
         blobKeyByMode[m.mode] = m.blobKey;
@@ -1501,5 +1586,7 @@ module.exports = {
     EDTA_VIAL_TEST_CODES,
     CITRATE_VIAL_TEST_CODES,
     S_HEPARIN_TEST_CODES,
-    L_HEPARIN_TEST_CODES
+    L_HEPARIN_TEST_CODES,
+    LBC_TEST_CODES,
+    FLOURIDE_VIAL_TEST_CODES
 };
