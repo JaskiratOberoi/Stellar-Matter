@@ -165,6 +165,24 @@ router.get('/locations', async (req, res) => {
     }
 });
 
+router.post('/ensure-bus-locations', requireMover, adminWriteLimiter, async (req, res) => {
+    if (!dbGuard(res)) return;
+    try {
+        const body = req.body || {};
+        const extraUnits = Array.isArray(body.business_units) ? body.business_units : [];
+        const orgId = orgOf(req);
+        const locations = await inv.listLocations(orgId, {
+            includeInactive: true,
+            ensureBus: true,
+            extraUnits
+        });
+        const businessUnits = locations.filter((l) => l.active && l.kind === 'business_unit');
+        res.json({ locations, business_units: businessUnits.length });
+    } catch (err) {
+        sendError(res, err);
+    }
+});
+
 router.post('/locations', requireCatalogAdmin, adminWriteLimiter, async (req, res) => {
     if (!dbGuard(res)) return;
     try {

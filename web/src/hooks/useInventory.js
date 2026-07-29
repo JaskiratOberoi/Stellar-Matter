@@ -72,15 +72,28 @@ export function useInventory() {
         reload();
     }, [reload]);
 
-    const syncBusLocations = useCallback(async () => {
-        if (!ready) return;
-        try {
-            const j = await request('/api/inventory/locations?include_inactive=1&ensure_bus=1');
-            setLocations(j.locations || []);
-        } catch (e) {
-            setError(String(e.message || e));
-        }
-    }, [ready]);
+    const syncBusLocations = useCallback(
+        async (businessUnits = []) => {
+            if (!ready) return;
+            try {
+                const j = await request('/api/inventory/ensure-bus-locations', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        business_units: businessUnits.map((o) => ({
+                            code: o.id || o.code,
+                            name: o.label || o.name
+                        }))
+                    })
+                });
+                setLocations(j.locations || []);
+            } catch (e) {
+                // Best-effort enrichment: dispatch still works off the locations
+                // already loaded, so this must not raise a page-level error.
+                console.warn('[inventory] BU location sync failed:', e.message || e);
+            }
+        },
+        [ready]
+    );
 
     // -- Mutations (each returns the created/updated row) -------------------
 

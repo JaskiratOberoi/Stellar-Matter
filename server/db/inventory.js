@@ -15,6 +15,7 @@
 const crypto = require('crypto');
 const { getPool } = require('./pool');
 const { INVENTORY_MATERIAL_SEEDS } = require('./migrate');
+const { fetchBusinessUnits } = require('../sync/listecLookups');
 
 function httpError(message, status, extra) {
     const err = new Error(message);
@@ -125,8 +126,38 @@ async function updateMaterial(orgId, id, fields) {
 
 // -- Locations -------------------------------------------------------------
 
-async function syncBuLocationsFromListec(client, orgId) {
-    const bus = await client.query(
+async function seedBusinessUnitLocations(client, orgId, units) {
+    if (!Array.isArray(units) || !units.length) return 0;
+    let added = 0;
+    for (const row of units) {
+        const code = String(row.code || row.id || '').trim();
+        const name = String(row.name || row.label || code).trim();
+        if (!name) continue;
+        const linked = await client.query(
+            `SELECT id FROM inventory_locations
+             WHERE org_id = $1 AND active = true AND kind = 'business_unit'
+               AND (bu_code = $2 OR LOWER(name) = LOWER($3))
+             LIMIT 1`,
+            [orgId, code || null, name]
+        );
+        if (linked.rows.length) continue;
+        const ins = await client.query(
+            `INSERT INTO inventory_locations (id, org_id, name, kind, bu_code, active)
+             VALUES ($1, $2, $3, 'business_unit', $4, true)
+             ON CONFLICT (org_id, name) DO NOTHING
+             RETURNING id`,
+            [newLocationId(), orgId, name, code || null]
+        );
+        if (ins.rowCount) added += 1;
+    }
+    return added;
+}
+
+async function syncBuLocationsFromListec(client, orgId, extraUnits = []) {
+    /** @type {Map<string, string>} code -> display name */
+    const bus = new Map();
+
+    const fromLabs = await client.query(
         `SELECT DISTINCT business_unit_code AS code, business_unit_name AS name
          FROM client_locations
          WHERE active = true
@@ -134,32 +165,37 @@ async function syncBuLocationsFromListec(client, orgId) {
            AND TRIM(business_unit_code) <> ''
          ORDER BY business_unit_name NULLS LAST, business_unit_code`
     );
-    for (const row of bus.rows) {
+    for (const row of fromLabs.rows) {
         const code = String(row.code).trim();
         const name = String(row.name || code).trim();
-        const linked = await client.query(
-            `SELECT id FROM inventory_locations
-             WHERE org_id = $1 AND active = true AND kind = 'business_unit'
-               AND (bu_code = $2 OR LOWER(name) = LOWER($3))
-             LIMIT 1`,
-            [orgId, code, name]
-        );
-        if (linked.rows.length) continue;
-        await client.query(
-            `INSERT INTO inventory_locations (id, org_id, name, kind, bu_code, active)
-             VALUES ($1, $2, $3, 'business_unit', $4, true)
-             ON CONFLICT (org_id, name) DO NOTHING`,
-            [newLocationId(), orgId, name, code]
-        );
+        if (code) bus.set(code, name);
     }
+
+    // client_locations often has MCC rows without BU codes; fall back to the
+    // same Listec lookups feed that powers GET /api/bu and the Tracer sidebar.
+    const fromListec = await fetchBusinessUnits();
+    for (const row of fromListec) {
+        if (!bus.has(row.code)) bus.set(row.code, row.name);
+    }
+    for (const row of extraUnits) {
+        const code = String(row.code || row.id || '').trim();
+        const name = String(row.name || row.label || code).trim();
+        if (name) bus.set(code || name, name);
+    }
+
+    await seedBusinessUnitLocations(
+        client,
+        orgId,
+        [...bus.entries()].map(([code, name]) => ({ code, name }))
+    );
 }
 
-async function listLocations(orgId, { includeInactive = false, ensureBus = false } = {}) {
+async function listLocations(orgId, { includeInactive = false, ensureBus = false, extraUnits = [] } = {}) {
     const pool = getPool();
     if (ensureBus) {
         const client = await pool.connect();
         try {
-            await syncBuLocationsFromListec(client, orgId);
+            await syncBuLocationsFromListec(client, orgId, extraUnits);
         } finally {
             client.release();
         }
