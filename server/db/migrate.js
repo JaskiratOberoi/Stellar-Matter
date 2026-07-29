@@ -324,8 +324,176 @@ async function migrate() {
             `INSERT INTO client_locations_sync (id) VALUES (1)
              ON CONFLICT (id) DO NOTHING;`
         );
+
+        // Inventory tracker — stock-on-hand tracking that runs alongside the
+        // usage-measurement side (runs/tiles). Three tables plus a derived
+        // balances view: inventory_movements is an append-only ledger and
+        // inventory_balances sums it, so on-hand can never drift from history.
+        // org_id mirrors runs (default 'org-default', RESTRICT delete) so the
+        // module is tenant-scoped without touching legacy single-org deploys.
+        await migrateInventory(client);
     } finally {
         client.release();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Inventory tracker schema + seeds. Split into its own function to keep the
+// main migrate() readable; it is still called from inside migrate()'s client
+// so it shares the same connection and runs on every boot, idempotently.
+// ---------------------------------------------------------------------------
+
+// The 12 seed materials, each linked to the dashboard metric kind whose usage
+// it should eventually be compared against. Envelopes split into BIG/SMALL to
+// match how tiles already report them; letterheads count sheets 1:1 with the
+// dashboard's page metric. base_unit is the smallest countable item; packs are
+// entered as pack_size x pack_qty and stored as base units.
+const INVENTORY_MATERIAL_SEEDS = [
+    { id: 'invmat-letterheads', name: 'Letter Heads', metricKind: 'letterheads', baseUnit: 'sheet', packSize: 500, packLabel: 'ream' },
+    { id: 'invmat-envelopes-big', name: 'Envelopes (Big)', metricKind: 'envelopes', baseUnit: 'envelope', packSize: 100, packLabel: 'box' },
+    { id: 'invmat-envelopes-small', name: 'Envelopes (Small)', metricKind: 'envelopes', baseUnit: 'envelope', packSize: 100, packLabel: 'box' },
+    { id: 'invmat-urine-containers', name: 'Urine Containers', metricKind: 'urine_containers', baseUnit: 'container', packSize: 100, packLabel: 'box' },
+    { id: 'invmat-edta-vials', name: 'EDTA Vials', metricKind: 'edta_vials', baseUnit: 'vial', packSize: 100, packLabel: 'box' },
+    { id: 'invmat-flouride-vials', name: 'Flouride Vials', metricKind: 'flouride_vials', baseUnit: 'vial', packSize: 100, packLabel: 'box' },
+    { id: 'invmat-citrate-vials', name: 'Citrate Vials', metricKind: 'citrate_vials', baseUnit: 'vial', packSize: 100, packLabel: 'box' },
+    { id: 'invmat-s-heparin', name: 'S.Heparin', metricKind: 's_heparin', baseUnit: 'vial', packSize: 100, packLabel: 'box' },
+    { id: 'invmat-l-heparin', name: 'L.Heparin', metricKind: 'l_heparin', baseUnit: 'vial', packSize: 100, packLabel: 'box' },
+    { id: 'invmat-lbc', name: 'LBC', metricKind: 'lbc', baseUnit: 'sample', packSize: 50, packLabel: 'box' },
+    { id: 'invmat-barcode-labels', name: 'Barcode Labels', metricKind: 'barcode', baseUnit: 'label', packSize: 1000, packLabel: 'roll' },
+    { id: 'invmat-serum-tubes', name: 'Serum Tubes', metricKind: 'serum', baseUnit: 'tube', packSize: 100, packLabel: 'box' }
+];
+
+async function migrateInventory(client) {
+    // Materials catalog. Free-form so ops can add consumables the dashboard
+    // does not measure (gloves, slides); metric_kind is nullable and only set
+    // for the ones that map to a tile kind.
+    await client.query(`
+        CREATE TABLE IF NOT EXISTS inventory_materials (
+            id TEXT PRIMARY KEY,
+            org_id TEXT NOT NULL DEFAULT 'org-default'
+                REFERENCES organizations(id) ON DELETE RESTRICT,
+            name TEXT NOT NULL,
+            sku TEXT,
+            metric_kind TEXT,
+            base_unit TEXT NOT NULL DEFAULT 'unit',
+            default_pack_size INT NOT NULL DEFAULT 1 CHECK (default_pack_size > 0),
+            default_pack_label TEXT,
+            reorder_level INT NOT NULL DEFAULT 0 CHECK (reorder_level >= 0),
+            active BOOLEAN NOT NULL DEFAULT true,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            UNIQUE (org_id, name)
+        );
+    `);
+    await client.query(
+        `CREATE INDEX IF NOT EXISTS inventory_materials_org_idx
+         ON inventory_materials (org_id) WHERE active = true;`
+    );
+
+    // Stock locations. 'store' is the central warehouse; 'business_unit' and
+    // 'lab' are dispatch destinations that optionally carry the Listec bu_code
+    // / client_code so a location can be tied back to the usage stats.
+    await client.query(`
+        CREATE TABLE IF NOT EXISTS inventory_locations (
+            id TEXT PRIMARY KEY,
+            org_id TEXT NOT NULL DEFAULT 'org-default'
+                REFERENCES organizations(id) ON DELETE RESTRICT,
+            name TEXT NOT NULL,
+            kind TEXT NOT NULL DEFAULT 'business_unit'
+                CHECK (kind IN ('store', 'business_unit', 'lab')),
+            bu_code TEXT,
+            client_code TEXT,
+            active BOOLEAN NOT NULL DEFAULT true,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            UNIQUE (org_id, name)
+        );
+    `);
+    await client.query(
+        `CREATE INDEX IF NOT EXISTS inventory_locations_org_idx
+         ON inventory_locations (org_id) WHERE active = true;`
+    );
+
+    // Append-only ledger. Every row is a positive qty_base; direction is read
+    // from from_location_id / to_location_id. Corrections use voided_at rather
+    // than DELETE so the trail stays intact. pack_size/pack_qty are recorded
+    // for receipts so "20 boxes of 100" is auditable even though qty_base is
+    // the 2,000 that actually moves.
+    await client.query(`
+        CREATE TABLE IF NOT EXISTS inventory_movements (
+            id BIGSERIAL PRIMARY KEY,
+            org_id TEXT NOT NULL DEFAULT 'org-default'
+                REFERENCES organizations(id) ON DELETE RESTRICT,
+            material_id TEXT NOT NULL
+                REFERENCES inventory_materials(id) ON DELETE RESTRICT,
+            kind TEXT NOT NULL
+                CHECK (kind IN ('receipt', 'dispatch', 'adjustment')),
+            from_location_id TEXT REFERENCES inventory_locations(id) ON DELETE RESTRICT,
+            to_location_id TEXT REFERENCES inventory_locations(id) ON DELETE RESTRICT,
+            qty_base INT NOT NULL CHECK (qty_base > 0),
+            pack_size INT CHECK (pack_size IS NULL OR pack_size > 0),
+            pack_qty INT CHECK (pack_qty IS NULL OR pack_qty > 0),
+            vendor TEXT,
+            reference TEXT,
+            note TEXT,
+            occurred_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            created_by TEXT,
+            voided_at TIMESTAMPTZ,
+            voided_by TEXT,
+            -- A movement must touch at least one location; a dispatch touches two.
+            CONSTRAINT inventory_movements_has_location
+                CHECK (from_location_id IS NOT NULL OR to_location_id IS NOT NULL)
+        );
+    `);
+    await client.query(
+        `CREATE INDEX IF NOT EXISTS inventory_movements_material_idx
+         ON inventory_movements (org_id, material_id, occurred_at DESC);`
+    );
+    await client.query(
+        `CREATE INDEX IF NOT EXISTS inventory_movements_org_time_idx
+         ON inventory_movements (org_id, occurred_at DESC);`
+    );
+    await client.query(
+        `CREATE INDEX IF NOT EXISTS inventory_movements_from_idx
+         ON inventory_movements (from_location_id) WHERE from_location_id IS NOT NULL;`
+    );
+    await client.query(
+        `CREATE INDEX IF NOT EXISTS inventory_movements_to_idx
+         ON inventory_movements (to_location_id) WHERE to_location_id IS NOT NULL;`
+    );
+
+    // Derived balances: inflows to a location minus outflows from it, ignoring
+    // voided rows. Recreated idempotently so schema edits ship cleanly.
+    await client.query(`
+        CREATE OR REPLACE VIEW inventory_balances AS
+        SELECT org_id, material_id, location_id, SUM(qty)::bigint AS on_hand
+        FROM (
+            SELECT org_id, material_id, to_location_id AS location_id, qty_base AS qty
+                FROM inventory_movements
+                WHERE voided_at IS NULL AND to_location_id IS NOT NULL
+            UNION ALL
+            SELECT org_id, material_id, from_location_id AS location_id, -qty_base AS qty
+                FROM inventory_movements
+                WHERE voided_at IS NULL AND from_location_id IS NOT NULL
+        ) t
+        GROUP BY org_id, material_id, location_id;
+    `);
+
+    // Seed the central store for the default org and the 12 catalog materials.
+    // ON CONFLICT (org_id, name) DO NOTHING keeps re-runs and manual edits safe.
+    await client.query(
+        `INSERT INTO inventory_locations (id, org_id, name, kind)
+         VALUES ($1, $2, $3, 'store')
+         ON CONFLICT (org_id, name) DO NOTHING`,
+        ['invloc-central-store', DEFAULT_ORG_ID, 'Central Store']
+    );
+    for (const m of INVENTORY_MATERIAL_SEEDS) {
+        await client.query(
+            `INSERT INTO inventory_materials
+                (id, org_id, name, metric_kind, base_unit, default_pack_size, default_pack_label)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)
+             ON CONFLICT (org_id, name) DO NOTHING`,
+            [m.id, DEFAULT_ORG_ID, m.name, m.metricKind, m.baseUnit, m.packSize, m.packLabel]
+        );
     }
 }
 
@@ -370,7 +538,7 @@ function newUserId() {
     return `user-${crypto.randomBytes(8).toString('hex')}`;
 }
 
-module.exports = { migrate, newUserId };
+module.exports = { migrate, newUserId, INVENTORY_MATERIAL_SEEDS };
 
 if (require.main === module) {
     // CLI entrypoint: `node server/db/migrate.js`

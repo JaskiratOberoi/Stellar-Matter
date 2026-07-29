@@ -467,6 +467,7 @@ app.use(express.json({ limit: '64kb' }));
 let auth = null;
 let authApi = null;
 let adminApi = null;
+let inventoryApi = null;
 let runMigrate = null;
 let auditLog = null;
 // Phase 8: runs ingest helpers. When DATABASE_URL is set we ingest each
@@ -483,6 +484,7 @@ try {
     auth = require(path.join(serverDir, 'auth'));
     authApi = require(path.join(serverDir, 'routes', 'authApi'));
     adminApi = require(path.join(serverDir, 'routes', 'adminApi'));
+    inventoryApi = require(path.join(serverDir, 'routes', 'inventoryApi'));
     runMigrate = require(path.join(serverDir, 'db', 'migrate')).migrate;
     auditLog = require(path.join(serverDir, 'audit')).logAudit;
     runsDb = require(path.join(serverDir, 'db', 'runs'));
@@ -496,6 +498,7 @@ try {
 
 if (authApi) app.use('/api/auth', authApi);
 if (adminApi) app.use('/api/admin', adminApi);
+if (inventoryApi) app.use('/api/inventory', inventoryApi);
 
 if (auth) {
     // Public whitelist: health + auth login. Everything else under /api requires a token

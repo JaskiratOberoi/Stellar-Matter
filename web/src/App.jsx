@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
-import { Topbar } from './components/Topbar.jsx';
+import { METRIC_TAB_IDS, TAB_IDS, Topbar } from './components/Topbar.jsx';
 import { RunSidebar } from './components/RunSidebar.jsx';
 import { TileWall } from './components/TileWall.jsx';
 import { RunModal } from './components/RunModal.jsx';
@@ -10,6 +10,7 @@ import { LoginPage } from './pages/LoginPage.jsx';
 import { AdminUsersPage } from './pages/AdminUsersPage.jsx';
 import { AdminAuditLogPage } from './pages/AdminAuditLogPage.jsx';
 import { AdminOrgsPage } from './pages/AdminOrgsPage.jsx';
+import { InventoryPage } from './pages/InventoryPage.jsx';
 import { TracerPage } from './pages/TracerPage.jsx';
 import { useAuth } from './contexts/AuthContext.jsx';
 import { useTiles } from './hooks/useTiles.js';
@@ -30,22 +31,7 @@ import './styles/app.css';
 
 function loadInitialView() {
     const raw = readString(LS_VIEW, 'letterheads');
-    if (
-        raw === 'history' ||
-        raw === 'envelopes' ||
-        raw === 'letterheads' ||
-        raw === 'urine_containers' ||
-        raw === 'edta_vials' ||
-        raw === 'citrate_vials' ||
-        raw === 's_heparin' ||
-        raw === 'l_heparin' ||
-        raw === 'lbc' ||
-        raw === 'flouride_vials' ||
-        raw === 'barcode' ||
-        raw === 'serum'
-    )
-        return raw;
-    if (raw === 'results') return 'letterheads';
+    if (TAB_IDS.includes(raw)) return raw;
     return 'letterheads';
 }
 
@@ -237,184 +223,35 @@ export function App() {
                         </div>
                     )}
 
-                    {tab === 'letterheads' && (
-                        <section className="tabpanel" data-metric-kind="letterheads">
+                    {METRIC_TAB_IDS.includes(tab) && (
+                        <section
+                            className="tabpanel"
+                            role="tabpanel"
+                            id={`tabpanel-${tab}`}
+                            aria-labelledby={`tab-${tab}`}
+                            data-metric-kind={tab}
+                        >
                             <TileWall
                                 tiles={visibleTiles}
-                                kind="letterheads"
+                                kind={tab}
                                 hiddenCount={hiddenCount}
                                 clientPagesByNorm={clientPagesByNorm}
                                 onRestoreHidden={restoreHidden}
                                 onOpen={(t) => {
                                     setOpenTile(t);
-                                    setOpenTileKind('letterheads');
-                                }}
-                            />
-                        </section>
-                    )}
-
-                    {tab === 'envelopes' && (
-                        <section className="tabpanel" data-metric-kind="envelopes">
-                            <TileWall
-                                tiles={visibleTiles}
-                                kind="envelopes"
-                                hiddenCount={hiddenCount}
-                                clientPagesByNorm={clientPagesByNorm}
-                                onRestoreHidden={restoreHidden}
-                                onOpen={(t) => {
-                                    setOpenTile(t);
-                                    setOpenTileKind('envelopes');
-                                }}
-                            />
-                        </section>
-                    )}
-
-                    {tab === 'urine_containers' && (
-                        <section className="tabpanel" data-metric-kind="urine_containers">
-                            <TileWall
-                                tiles={visibleTiles}
-                                kind="urine_containers"
-                                hiddenCount={hiddenCount}
-                                clientPagesByNorm={clientPagesByNorm}
-                                onRestoreHidden={restoreHidden}
-                                onOpen={(t) => {
-                                    setOpenTile(t);
-                                    setOpenTileKind('urine_containers');
-                                }}
-                            />
-                        </section>
-                    )}
-
-                    {tab === 'edta_vials' && (
-                        <section className="tabpanel" data-metric-kind="edta_vials">
-                            <TileWall
-                                tiles={visibleTiles}
-                                kind="edta_vials"
-                                hiddenCount={hiddenCount}
-                                clientPagesByNorm={clientPagesByNorm}
-                                onRestoreHidden={restoreHidden}
-                                onOpen={(t) => {
-                                    setOpenTile(t);
-                                    setOpenTileKind('edta_vials');
-                                }}
-                            />
-                        </section>
-                    )}
-
-                    {tab === 'flouride_vials' && (
-                        <section className="tabpanel" data-metric-kind="flouride_vials">
-                            <TileWall
-                                tiles={visibleTiles}
-                                kind="flouride_vials"
-                                hiddenCount={hiddenCount}
-                                clientPagesByNorm={clientPagesByNorm}
-                                onRestoreHidden={restoreHidden}
-                                onOpen={(t) => {
-                                    setOpenTile(t);
-                                    setOpenTileKind('flouride_vials');
-                                }}
-                            />
-                        </section>
-                    )}
-
-                    {tab === 'citrate_vials' && (
-                        <section className="tabpanel" data-metric-kind="citrate_vials">
-                            <TileWall
-                                tiles={visibleTiles}
-                                kind="citrate_vials"
-                                hiddenCount={hiddenCount}
-                                clientPagesByNorm={clientPagesByNorm}
-                                onRestoreHidden={restoreHidden}
-                                onOpen={(t) => {
-                                    setOpenTile(t);
-                                    setOpenTileKind('citrate_vials');
-                                }}
-                            />
-                        </section>
-                    )}
-
-                    {tab === 's_heparin' && (
-                        <section className="tabpanel" data-metric-kind="s_heparin">
-                            <TileWall
-                                tiles={visibleTiles}
-                                kind="s_heparin"
-                                hiddenCount={hiddenCount}
-                                clientPagesByNorm={clientPagesByNorm}
-                                onRestoreHidden={restoreHidden}
-                                onOpen={(t) => {
-                                    setOpenTile(t);
-                                    setOpenTileKind('s_heparin');
-                                }}
-                            />
-                        </section>
-                    )}
-
-                    {tab === 'l_heparin' && (
-                        <section className="tabpanel" data-metric-kind="l_heparin">
-                            <TileWall
-                                tiles={visibleTiles}
-                                kind="l_heparin"
-                                hiddenCount={hiddenCount}
-                                clientPagesByNorm={clientPagesByNorm}
-                                onRestoreHidden={restoreHidden}
-                                onOpen={(t) => {
-                                    setOpenTile(t);
-                                    setOpenTileKind('l_heparin');
-                                }}
-                            />
-                        </section>
-                    )}
-
-                    {tab === 'lbc' && (
-                        <section className="tabpanel" data-metric-kind="lbc">
-                            <TileWall
-                                tiles={visibleTiles}
-                                kind="lbc"
-                                hiddenCount={hiddenCount}
-                                clientPagesByNorm={clientPagesByNorm}
-                                onRestoreHidden={restoreHidden}
-                                onOpen={(t) => {
-                                    setOpenTile(t);
-                                    setOpenTileKind('lbc');
-                                }}
-                            />
-                        </section>
-                    )}
-
-                    {tab === 'barcode' && (
-                        <section className="tabpanel" data-metric-kind="barcode">
-                            <TileWall
-                                tiles={visibleTiles}
-                                kind="barcode"
-                                hiddenCount={hiddenCount}
-                                clientPagesByNorm={clientPagesByNorm}
-                                onRestoreHidden={restoreHidden}
-                                onOpen={(t) => {
-                                    setOpenTile(t);
-                                    setOpenTileKind('barcode');
-                                }}
-                            />
-                        </section>
-                    )}
-
-                    {tab === 'serum' && (
-                        <section className="tabpanel" data-metric-kind="serum">
-                            <TileWall
-                                tiles={visibleTiles}
-                                kind="serum"
-                                hiddenCount={hiddenCount}
-                                clientPagesByNorm={clientPagesByNorm}
-                                onRestoreHidden={restoreHidden}
-                                onOpen={(t) => {
-                                    setOpenTile(t);
-                                    setOpenTileKind('serum');
+                                    setOpenTileKind(tab);
                                 }}
                             />
                         </section>
                     )}
 
                     {tab === 'history' && (
-                        <section className="tabpanel tabpanel-history">
+                        <section
+                            className="tabpanel tabpanel-history"
+                            role="tabpanel"
+                            id="tabpanel-history"
+                            aria-labelledby="tab-history"
+                        >
                             <div className="card history-card">
                                 <h2 className="card-title-demoted">Run history</h2>
                                 <p className="muted small">
@@ -464,6 +301,14 @@ export function App() {
                 element={
                     <RoleGate roles={['super_admin']}>
                         <AdminOrgsPage />
+                    </RoleGate>
+                }
+            />
+            <Route
+                path="/inventory"
+                element={
+                    <RoleGate roles={['super_admin', 'admin', 'operator', 'viewer']}>
+                        <InventoryPage />
                     </RoleGate>
                 }
             />

@@ -1,40 +1,105 @@
-/* Editorial design tokens — lifted verbatim from scripts/lis-nav-bot/public/styles.css :root.
-   Space-separated RGB triples so we can do `rgb(var(--nx-accent) / 0.4)` for translucent UI. */
+/* Design foundation for Stellar Matter.
+   Colours are space-separated RGB triples so every token can be used with an
+   alpha channel: `rgb(var(--nx-accent) / 0.4)`. */
 
-* {
+*,
+*::before,
+*::after {
     box-sizing: border-box;
 }
 
 :root {
-    --sidebar-w: 320px;
-    --sidebar-w-collapsed: 52px;
-    --topbar-h: 52px;
+    /* ---- Layout ------------------------------------------------------- */
+    --sidebar-w: 340px;
+    --sidebar-w-collapsed: 56px;
+    --topbar-h: 56px;
+    --tabbar-h: 46px;
+    --header-h: calc(var(--topbar-h) + var(--tabbar-h));
 
-    /* Nexus editorial palette */
-    --nx-bg: 10 10 10;
-    --nx-surface: 20 20 20;
-    --nx-surface-2: 31 31 31;
+    /* ---- Palette ------------------------------------------------------ */
+    --nx-bg: 9 9 11;
+    --nx-surface: 18 18 21;
+    --nx-surface-2: 26 26 31;
+    --nx-surface-3: 35 35 41;
+
+    /* Ink ramp. ink-3 is the floor for text and sits at ~6.8:1 on --nx-bg so
+       the smallest labels still clear WCAG AA. */
     --nx-ink: 250 250 247;
-    --nx-ink-2: 184 184 184;
-    --nx-ink-3: 115 115 115;
+    --nx-ink-2: 190 190 196;
+    --nx-ink-3: 150 150 158;
+
     --nx-rule: 250 250 247;
-    --nx-rule-soft: 38 38 38;
+    --nx-rule-soft: 42 42 48;
+    --nx-rule-strong: 62 62 70;
+
     --nx-accent: 212 255 58;
     --nx-accent-ink: 10 10 10;
+    --nx-signal-info: 125 200 255;
+    --nx-signal-success: 126 231 135;
     --nx-signal-warning: 255 196 60;
-    --nx-signal-danger: 255 92 87;
+    --nx-signal-danger: 255 122 117;
 
-    /* Legacy aliases — anchors against the editorial palette so existing
-       CSS lifted from scripts/lis-nav-bot/public/styles.css keeps working
-       inside web/src/styles/app.css after the Phase 2 React port. */
+    /* ---- Type scale --------------------------------------------------- */
+    --fs-3xs: 0.6875rem; /* 11px — smallest permitted, uppercase micro labels */
+    --fs-2xs: 0.75rem; /* 12px */
+    --fs-xs: 0.8125rem; /* 13px */
+    --fs-sm: 0.875rem; /* 14px */
+    --fs-base: 0.9375rem; /* 15px */
+    --fs-md: 1rem; /* 16px */
+    --fs-lg: 1.125rem; /* 18px */
+    --fs-xl: 1.375rem; /* 22px */
+    --fs-2xl: 1.75rem; /* 28px */
+    --fs-3xl: 2.25rem; /* 36px */
+
+    --lh-tight: 1.15;
+    --lh-snug: 1.3;
+    --lh-normal: 1.5;
+
+    --font-sans: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    --font-mono: ui-monospace, 'JetBrains Mono', SFMono-Regular, Menlo, Consolas, monospace;
+
+    /* ---- Spacing ------------------------------------------------------ */
+    --sp-1: 0.25rem;
+    --sp-2: 0.5rem;
+    --sp-3: 0.75rem;
+    --sp-4: 1rem;
+    --sp-5: 1.25rem;
+    --sp-6: 1.5rem;
+    --sp-8: 2rem;
+    --sp-10: 2.5rem;
+    --sp-12: 3rem;
+
+    /* ---- Radius ------------------------------------------------------- */
+    --r-xs: 4px;
+    --r-sm: 6px;
+    --r-md: 10px;
+    --r-lg: 14px;
+    --r-full: 999px;
+
+    /* ---- Elevation ---------------------------------------------------- */
+    --shadow-1: 0 1px 2px rgb(0 0 0 / 0.4);
+    --shadow-2: 0 4px 14px -4px rgb(0 0 0 / 0.55);
+    --shadow-3: 0 18px 44px -12px rgb(0 0 0 / 0.7);
+
+    /* ---- Motion ------------------------------------------------------- */
+    --ease: cubic-bezier(0.2, 0, 0.15, 1);
+    --dur-fast: 120ms;
+    --dur-base: 190ms;
+
+    /* ---- Focus -------------------------------------------------------- */
+    --focus-ring: 0 0 0 2px rgb(var(--nx-bg)), 0 0 0 4px rgb(var(--nx-accent));
+
+    /* ---- Legacy aliases ----------------------------------------------- */
     --accent: rgb(var(--nx-accent));
     --accent-2: rgb(var(--nx-ink-2));
     --bg: rgb(var(--nx-bg));
     --bg-elev-1: rgb(var(--nx-surface));
     --bg-elev-2: rgb(var(--nx-surface-2));
     --border: rgb(var(--nx-rule-soft));
+    --border-strong: rgb(var(--nx-rule-strong));
     --text: rgb(var(--nx-ink));
     --muted: rgb(var(--nx-ink-2));
+    --ink: var(--nx-ink);
     --accent-border: rgb(var(--nx-accent) / 0.45);
 }
 
@@ -54,70 +119,113 @@ body {
     background: rgb(var(--nx-bg));
     color: rgb(var(--nx-ink));
     margin: 0;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    font-family: var(--font-sans);
+    font-size: var(--fs-base);
+    line-height: var(--lh-normal);
     -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+/* A single visible focus treatment for every interactive element. Only
+   keyboard focus shows it, so pointer users are unaffected. The ring follows
+   whatever radius the element already has, so it must not set its own. */
+:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+}
+
+::selection {
+    background: rgb(var(--nx-accent) / 0.28);
+    color: rgb(var(--nx-ink));
+}
+
+/* Scrollbars — the default light thumb reads as a bug on a near-black shell. */
+* {
+    scrollbar-width: thin;
+    scrollbar-color: rgb(var(--nx-rule-strong)) transparent;
+}
+
+*::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+    background: rgb(var(--nx-rule-strong));
+    border: 2px solid rgb(var(--nx-bg));
+    border-radius: var(--r-full);
+}
+
+*::-webkit-scrollbar-thumb:hover {
+    background: rgb(var(--nx-ink-3));
 }
 
 .role-gate-loading {
-    padding: 2rem;
+    padding: var(--sp-8);
     text-align: center;
     color: rgb(var(--nx-ink-3));
 }
 
+/* A row of chips rather than a pill in its own right — nesting a bordered
+   container around bordered chips reads as a double outline. */
 .user-chip {
     display: inline-flex;
     align-items: center;
-    gap: 0.5rem;
-    padding: 0.18rem 0.5rem;
-    border-radius: 999px;
-    background: rgb(var(--nx-surface-2));
-    border: 1px solid rgb(var(--nx-rule-soft));
-    color: rgb(var(--nx-ink));
-}
-
-.user-logout {
-    padding: 0.12rem 0.5rem;
+    gap: var(--sp-2);
+    color: rgb(var(--nx-ink-2));
 }
 
 .admin-nav-link {
     text-decoration: none;
 }
 
-/* Login + admin pages */
+/* ---- Login + admin pages ---------------------------------------------- */
+
 .login-shell {
     display: flex;
     align-items: center;
     justify-content: center;
     min-height: 100vh;
-    padding: 2rem;
+    padding: var(--sp-8);
+    background:
+        radial-gradient(60rem 40rem at 50% -10%, rgb(var(--nx-accent) / 0.06), transparent 70%),
+        rgb(var(--nx-bg));
 }
 
 .login-card {
     width: 100%;
     max-width: 420px;
-    padding: 2rem;
+    padding: var(--sp-8);
+    border-radius: var(--r-lg);
+    box-shadow: var(--shadow-3);
 }
 
 .login-title {
-    margin: 0.4rem 0 0.2rem;
-    font-size: 1.6rem;
+    margin: var(--sp-2) 0 var(--sp-1);
+    font-size: var(--fs-2xl);
+    letter-spacing: -0.02em;
 }
 
 .login-sub {
-    margin: 0 0 1.4rem;
+    margin: 0 0 var(--sp-6);
+    color: rgb(var(--nx-ink-2));
 }
 
 .login-form {
     display: flex;
     flex-direction: column;
-    gap: 0.85rem;
+    gap: var(--sp-4);
 }
 
 .login-form label {
     display: flex;
     flex-direction: column;
-    gap: 0.35rem;
-    font-size: 0.85rem;
+    gap: var(--sp-2);
+    font-size: var(--fs-sm);
     color: rgb(var(--nx-ink-2));
 }
 
@@ -125,9 +233,14 @@ body {
     background: rgb(var(--nx-surface-2));
     color: rgb(var(--nx-ink));
     border: 1px solid rgb(var(--nx-rule-soft));
-    padding: 0.6rem 0.7rem;
-    border-radius: 6px;
-    font-size: 0.95rem;
+    padding: var(--sp-3);
+    border-radius: var(--r-sm);
+    font-size: var(--fs-base);
+    transition: border-color var(--dur-fast) var(--ease);
+}
+
+.login-form input:hover {
+    border-color: rgb(var(--nx-rule-strong));
 }
 
 .login-form input:focus {
@@ -138,46 +251,46 @@ body {
 .login-err {
     color: rgb(var(--nx-signal-danger));
     margin: 0;
-    font-size: 0.85rem;
+    font-size: var(--fs-sm);
 }
 
 .admin-shell {
-    padding: 2rem;
+    padding: var(--sp-8);
     max-width: 1100px;
     margin: 0 auto;
     display: flex;
     flex-direction: column;
-    gap: 1.25rem;
+    gap: var(--sp-5);
 }
 
 .admin-header {
     align-items: flex-start;
-    gap: 1rem;
+    gap: var(--sp-4);
 }
 
 .admin-actions {
     display: flex;
-    gap: 0.5rem;
+    gap: var(--sp-2);
     align-items: center;
 }
 
 .admin-create {
-    padding: 1rem;
+    padding: var(--sp-4);
     display: flex;
     flex-direction: column;
-    gap: 0.85rem;
+    gap: var(--sp-4);
 }
 
 .admin-users-table .admin-row-actions {
     display: flex;
-    gap: 0.4rem;
+    gap: var(--sp-2);
     justify-content: flex-end;
 }
 
 .admin-pw-form {
     display: flex;
-    gap: 0.5rem;
-    padding: 0.5rem 0;
+    gap: var(--sp-2);
+    padding: var(--sp-2) 0;
 }
 
 .admin-pw-form input {
@@ -185,6 +298,6 @@ body {
     background: rgb(var(--nx-surface-2));
     color: rgb(var(--nx-ink));
     border: 1px solid rgb(var(--nx-rule-soft));
-    padding: 0.4rem 0.6rem;
-    border-radius: 6px;
+    padding: var(--sp-2) var(--sp-3);
+    border-radius: var(--r-sm);
 }

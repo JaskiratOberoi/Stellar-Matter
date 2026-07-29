@@ -84,6 +84,7 @@ function metricFor(kind, tile, clientPagesByNorm) {
                     <span className="muted small">{`(${totalRows.toLocaleString('en-US')} tests)`}</span>
                 </>
             ),
+            labelText: `${cp.sids.toLocaleString('en-US')} CP004 + ${mb.sids.toLocaleString('en-US')} MB034 (${totalRows.toLocaleString('en-US')} tests)`,
             estimated: false,
             estimatedLabel: null
         };
@@ -101,6 +102,7 @@ function metricFor(kind, tile, clientPagesByNorm) {
                     {'\u2009SMALL'}
                 </>
             ),
+            numText: `${env.big.toLocaleString('en-US')} big / ${env.small.toLocaleString('en-US')} small`,
             label: `${env.total.toLocaleString('en-US')} total`,
             estimated: env.estimated,
             estimatedLabel: 'estimated envelopes'
@@ -125,6 +127,9 @@ function metricFor(kind, tile, clientPagesByNorm) {
         ) : (
             <span className="muted small">no labels</span>
         ),
+        labelText: top
+            ? `${String(top.label).toUpperCase()}${top.count != null ? ` \u00d7 ${top.count}` : ''}`
+            : 'no labels',
         estimated: agg.unknownLabels > 0,
         estimatedLabel: 'estimated minimum'
     };
@@ -140,7 +145,15 @@ export function Tile({ tile, kind, indexFromOne, clientPagesByNorm, onOpen }) {
     if ((t.errors || 0) > 0) stats.push(`${t.errors} errors`);
 
     return (
-        <button type="button" className={`tile tile-${kind}`} onClick={() => onOpen(tile, kind)}>
+        <button
+            type="button"
+            className={`tile tile-${kind}`}
+            // Without this the accessible name is the whole flattened tile,
+            // which reads as an unpunctuated run of numbers. num/label are JSX
+            // for some kinds, so those supply a plain-text twin.
+            aria-label={`${buLabel}, ${dateRange}: ${m.numText || m.num} ${m.labelText || m.label}. View breakdown.`}
+            onClick={() => onOpen(tile, kind)}
+        >
             <span className="tile-eyebrow">{eyebrow}</span>
             <h3 className="tile-title">{buLabel}</h3>
             <p className="tile-sub">{dateRange}</p>
