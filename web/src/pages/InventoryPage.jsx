@@ -9,11 +9,11 @@ const CATALOG_ROLES = new Set(['super_admin', 'admin']);
 const MOVER_ROLES = new Set(['super_admin', 'admin', 'operator']);
 
 const VIEWS = [
-    { id: 'stock', label: 'Stock', icon: 'grid' },
-    { id: 'receive', label: 'Receive', icon: 'in' },
-    { id: 'dispatch', label: 'Dispatch', icon: 'out' },
-    { id: 'ledger', label: 'Ledger', icon: 'list' },
-    { id: 'catalog', label: 'Catalog', icon: 'tag', adminOnly: true }
+    { id: 'stock', label: 'Stock', icon: 'grid', caption: 'On-hand matrix' },
+    { id: 'receive', label: 'Receive', icon: 'in', caption: 'Vendor intake' },
+    { id: 'dispatch', label: 'Dispatch', icon: 'out', caption: 'Ship & transfer' },
+    { id: 'ledger', label: 'Ledger', icon: 'list', caption: 'Movement history' },
+    { id: 'catalog', label: 'Catalog', icon: 'tag', caption: 'Materials & sites', adminOnly: true }
 ];
 
 function fmt(n) {
@@ -22,6 +22,17 @@ function fmt(n) {
 
 function balanceKey(materialId, locationId) {
     return `${materialId}|${locationId}`;
+}
+
+function kindLabel(kind) {
+    if (kind === 'business_unit') return 'BU';
+    if (kind === 'store') return 'Store';
+    if (kind === 'lab') return 'Lab';
+    return kind;
+}
+
+function kindDot(kind) {
+    return kind === 'business_unit' ? 'bu' : kind === 'store' ? 'store' : 'lab';
 }
 
 function useBalanceMap(balances) {
@@ -64,6 +75,36 @@ function Icon({ name, className }) {
         default:
             return null;
     }
+}
+
+// Section rule: kicker number, title, caption on the left; tools on the right.
+function SectionHead({ index, title, caption, children }) {
+    return (
+        <div className="inv-sechead">
+            <div className="inv-sechead-text">
+                <h2 className="inv-sechead-title">
+                    {index && <span className="inv-sechead-n">{index}</span>}
+                    {title}
+                </h2>
+                {caption && <p className="inv-sechead-cap">{caption}</p>}
+            </div>
+            {children && <div className="inv-sechead-tools">{children}</div>}
+        </div>
+    );
+}
+
+// Numbered form movement — breaks a long form into scannable editorial blocks.
+function FormStep({ n, title, hint, children }) {
+    return (
+        <fieldset className="inv-fs">
+            <legend className="inv-fs-head">
+                <span className="inv-fs-n">{n}</span>
+                <span className="inv-fs-title">{title}</span>
+                {hint && <span className="inv-fs-hint">{hint}</span>}
+            </legend>
+            <div className="inv-fs-grid">{children}</div>
+        </fieldset>
+    );
 }
 
 export function InventoryPage() {
@@ -109,15 +150,19 @@ export function InventoryPage() {
     const goto = useCallback((v) => setView(v), []);
 
     return (
-        <main className="admin-shell inv-shell">
-            <header className="inv-header">
-                <div className="inv-header-text">
-                    <p className="eyebrow">Materials</p>
-                    <h1 className="wordmark">Inventory Tracker</h1>
-                    <p className="muted small inv-subtitle">
+        <main className="inv-shell">
+            <header className="inv-masthead">
+                <div className="inv-masthead-lede">
+                    <p className="inv-kicker">Materials · Stellar Matter</p>
+                    <h1 className="inv-title">Inventory Tracker</h1>
+                </div>
+                <div className="inv-masthead-deck">
+                    <p className="inv-deck">
                         Receipts add stock to the central store; dispatches move it to a business unit
-                        or lab and deduct automatically. Balances derive from an append-only ledger, so
-                        they never drift.
+                        or lab and deduct automatically.
+                    </p>
+                    <p className="inv-deck-note">
+                        Balances derive from an append-only ledger, so they never drift.
                     </p>
                 </div>
             </header>
@@ -128,7 +173,7 @@ export function InventoryPage() {
             {inventory.loading ? (
                 <div className="inv-loading muted">Loading inventory…</div>
             ) : isFresh ? (
-                <OnboardingHero
+                <OnboardingBoard
                     canManageCatalog={canManageCatalog}
                     seeding={seeding}
                     onSeed={handleSeed}
@@ -136,20 +181,26 @@ export function InventoryPage() {
                 />
             ) : (
                 <>
-                    <SummaryStrip summary={inventory.summary} onLowStock={() => goto('stock')} />
+                    <FiguresStrip summary={inventory.summary} onLowStock={() => goto('stock')} />
 
-                    <nav className="inv-seg" role="tablist" aria-label="Inventory views">
-                        {visibleViews.map((v) => (
+                    <nav className="inv-index" role="tablist" aria-label="Inventory views">
+                        {visibleViews.map((v, i) => (
                             <button
                                 key={v.id}
                                 type="button"
                                 role="tab"
                                 aria-selected={view === v.id ? 'true' : 'false'}
-                                className={`inv-seg-btn${view === v.id ? ' active' : ''}`}
+                                className={`inv-index-item${view === v.id ? ' active' : ''}`}
                                 onClick={() => setView(v.id)}
                             >
-                                <Icon name={v.icon} />
-                                <span>{v.label}</span>
+                                <span className="inv-index-n">{String(i + 1).padStart(2, '0')}</span>
+                                <span className="inv-index-body">
+                                    <span className="inv-index-label">
+                                        <Icon name={v.icon} />
+                                        {v.label}
+                                    </span>
+                                    <span className="inv-index-cap">{v.caption}</span>
+                                </span>
                             </button>
                         ))}
                     </nav>
@@ -172,7 +223,7 @@ export function InventoryPage() {
                     )}
 
                     <div className="inv-view">
-                        {view === 'stock' && <StockView inventory={inventory} canMove={canMove} onGoto={goto} />}
+                        {view === 'stock' && <StockView inventory={inventory} onGoto={goto} />}
                         {view === 'receive' && (
                             <ReceiveView inventory={inventory} canMove={canMove} onDone={showFlash} onGoto={goto} />
                         )}
@@ -192,52 +243,50 @@ export function InventoryPage() {
 
 // -- Onboarding ------------------------------------------------------------
 
-function OnboardingHero({ canManageCatalog, seeding, onSeed, onManual }) {
+function OnboardingBoard({ canManageCatalog, seeding, onSeed, onManual }) {
     return (
-        <section className="inv-hero nexus-card">
-            <div className="inv-hero-icon">
-                <Icon name="box" className="inv-hero-glyph" />
+        <section className="inv-board">
+            <div className="inv-board-head">
+                <div>
+                    <p className="inv-kicker">Getting started</p>
+                    <h2 className="inv-board-title">Set up your inventory</h2>
+                    <p className="inv-deck">
+                        This organisation has no stock catalog yet. Three steps put the ledger to work.
+                    </p>
+                </div>
+                {canManageCatalog ? (
+                    <div className="inv-board-actions">
+                        <button type="button" className="btn-primary" onClick={onSeed} disabled={seeding}>
+                            {seeding ? 'Setting up…' : 'Create starter catalog'}
+                        </button>
+                        <button type="button" className="chip chip-tool" onClick={onManual} disabled={seeding}>
+                            Add manually instead
+                        </button>
+                    </div>
+                ) : (
+                    <p className="muted small">No catalog is set up. Ask an admin to create one.</p>
+                )}
             </div>
-            <h2>Set up your inventory</h2>
-            <p className="muted">
-                This organisation has no stock catalog yet. Get going in three steps:
-            </p>
-            <ol className="inv-hero-steps">
-                <li>
-                    <span className="inv-step-n">1</span>
-                    <div>
-                        <strong>Create the catalog</strong>
-                        <span className="muted small">Materials to track and a central store to hold them.</span>
-                    </div>
+
+            <ol className="inv-board-steps">
+                <li className="inv-board-step">
+                    <span className="inv-board-n">01</span>
+                    <h3>Create the catalog</h3>
+                    <p className="muted small">Materials to track, and a central store to hold them.</p>
                 </li>
-                <li>
-                    <span className="inv-step-n">2</span>
-                    <div>
-                        <strong>Receive stock</strong>
-                        <span className="muted small">Record vendor deliveries into the store.</span>
-                    </div>
+                <li className="inv-board-step">
+                    <span className="inv-board-n">02</span>
+                    <h3>Receive stock</h3>
+                    <p className="muted small">Record vendor deliveries into the store as packs or units.</p>
                 </li>
-                <li>
-                    <span className="inv-step-n">3</span>
-                    <div>
-                        <strong>Dispatch to BUs / labs</strong>
-                        <span className="muted small">Stock deducts automatically as it ships out.</span>
-                    </div>
+                <li className="inv-board-step">
+                    <span className="inv-board-n">03</span>
+                    <h3>Dispatch to BUs / labs</h3>
+                    <p className="muted small">Stock deducts automatically as it ships out.</p>
                 </li>
             </ol>
-            {canManageCatalog ? (
-                <div className="inv-hero-actions">
-                    <button type="button" className="btn-primary" onClick={onSeed} disabled={seeding}>
-                        {seeding ? 'Setting up…' : 'Create starter catalog'}
-                    </button>
-                    <button type="button" className="chip chip-tool" onClick={onManual} disabled={seeding}>
-                        Add manually instead
-                    </button>
-                </div>
-            ) : (
-                <p className="muted small">No catalog is set up. Ask an admin to create one.</p>
-            )}
-            <p className="muted small inv-hero-foot">
+
+            <p className="inv-board-foot muted small">
                 The starter catalog adds 12 standard materials (letter heads, envelopes, vials, tubes…)
                 and a Central Store. You can edit or add more anytime.
             </p>
@@ -245,45 +294,39 @@ function OnboardingHero({ canManageCatalog, seeding, onSeed, onManual }) {
     );
 }
 
-// -- Summary ---------------------------------------------------------------
+// -- Figures ---------------------------------------------------------------
 
-function SummaryStrip({ summary, onLowStock }) {
+function FiguresStrip({ summary, onLowStock }) {
     if (!summary) return null;
     const low = summary.low_stock ? summary.low_stock.length : 0;
     return (
-        <section className="inv-summary">
-            <div className="inv-stat">
-                <Icon name="tag" className="inv-stat-icon" />
-                <div>
-                    <span className="inv-stat-num">{fmt(summary.materials)}</span>
-                    <span className="inv-stat-label">Active materials</span>
-                </div>
+        <section className="inv-figures" aria-label="Inventory at a glance">
+            <div className="inv-figure">
+                <span className="inv-figure-num">{fmt(summary.materials)}</span>
+                <span className="inv-figure-label">Active materials</span>
+                <span className="inv-figure-cap">tracked in the catalog</span>
             </div>
-            <div className="inv-stat">
-                <Icon name="grid" className="inv-stat-icon" />
-                <div>
-                    <span className="inv-stat-num">{fmt(summary.locations)}</span>
-                    <span className="inv-stat-label">Locations</span>
-                </div>
+            <div className="inv-figure">
+                <span className="inv-figure-num">{fmt(summary.locations)}</span>
+                <span className="inv-figure-label">Locations</span>
+                <span className="inv-figure-cap">stores, BUs and labs</span>
             </div>
-            <div className="inv-stat">
-                <Icon name="list" className="inv-stat-icon" />
-                <div>
-                    <span className="inv-stat-num">{fmt(summary.movements)}</span>
-                    <span className="inv-stat-label">Ledger entries</span>
-                </div>
+            <div className="inv-figure">
+                <span className="inv-figure-num">{fmt(summary.movements)}</span>
+                <span className="inv-figure-label">Ledger entries</span>
+                <span className="inv-figure-cap">receipts and dispatches</span>
             </div>
             <button
                 type="button"
-                className={`inv-stat inv-stat-btn${low ? ' is-danger' : ''}`}
+                className={`inv-figure inv-figure-btn${low ? ' is-alert' : ''}`}
                 onClick={low ? onLowStock : undefined}
                 title={low ? 'View stock' : 'All materials above reorder level'}
             >
-                <Icon name="warn" className="inv-stat-icon" />
-                <div>
-                    <span className="inv-stat-num">{fmt(low)}</span>
-                    <span className="inv-stat-label">Below reorder</span>
-                </div>
+                <span className="inv-figure-num">{fmt(low)}</span>
+                <span className="inv-figure-label">Below reorder</span>
+                <span className="inv-figure-cap">
+                    {low ? 'needs restocking' : 'all above reorder level'}
+                </span>
             </button>
         </section>
     );
@@ -306,7 +349,7 @@ function EmptyState({ icon = 'box', title, children, action }) {
 
 // -- Stock matrix ----------------------------------------------------------
 
-function StockView({ inventory, canMove, onGoto }) {
+function StockView({ inventory, onGoto }) {
     const { materials, locations, balances } = inventory;
     const activeMaterials = materials.filter((m) => m.active);
     const activeLocations = locations.filter((l) => l.active);
@@ -349,10 +392,14 @@ function StockView({ inventory, canMove, onGoto }) {
     }
 
     const colTotal = (locId) => rows.reduce((s, m) => s + (balMap.get(balanceKey(m.id, locId)) || 0), 0);
+    const grandTotal = activeLocations.reduce((s, l) => s + colTotal(l.id), 0);
 
     return (
-        <div className="inv-panel">
-            <div className="inv-toolbar">
+        <section className="inv-panel">
+            <SectionHead
+                title="Stock on hand"
+                caption={`${fmt(rows.length)} of ${fmt(activeMaterials.length)} materials across ${fmt(activeLocations.length)} locations`}
+            >
                 <input
                     className="inv-search"
                     type="search"
@@ -372,22 +419,8 @@ function StockView({ inventory, canMove, onGoto }) {
                     </span>
                     <span className="inv-toggle-label">Hide zero rows</span>
                 </label>
-                <span className="inv-legend">
-                    <span className="inv-dot inv-dot-store" /> Store
-                    <span className="inv-dot inv-dot-bu" /> BU
-                    <span className="inv-dot inv-dot-lab" /> Lab
-                </span>
-                {canMove && (
-                    <div className="inv-toolbar-actions">
-                        <button type="button" className="chip chip-tool" onClick={() => onGoto('receive')}>
-                            + Receive
-                        </button>
-                        <button type="button" className="chip chip-tool" onClick={() => onGoto('dispatch')}>
-                            Dispatch
-                        </button>
-                    </div>
-                )}
-            </div>
+            </SectionHead>
+
             <div className="inv-table-wrap">
                 <table className="inv-matrix">
                     <thead>
@@ -395,8 +428,11 @@ function StockView({ inventory, canMove, onGoto }) {
                             <th className="sticky-col">Material</th>
                             {activeLocations.map((l) => (
                                 <th key={l.id} className="num">
-                                    <span className={`inv-dot inv-dot-${l.kind === 'business_unit' ? 'bu' : l.kind}`} />
-                                    {l.name}
+                                    <span className="inv-col-name">{l.name}</span>
+                                    <span className="inv-col-kind">
+                                        <span className={`inv-dot inv-dot-${kindDot(l.kind)}`} />
+                                        {kindLabel(l.kind)}
+                                    </span>
                                 </th>
                             ))}
                             <th className="num inv-total-col">Total</th>
@@ -407,7 +443,7 @@ function StockView({ inventory, canMove, onGoto }) {
                             <tr key={m.id}>
                                 <td className="sticky-col">
                                     <span className="inv-mat-name">{m.name}</span>
-                                    <span className="muted small inv-unit">{m.base_unit}</span>
+                                    <span className="inv-unit">{m.base_unit}</span>
                                 </td>
                                 {activeLocations.map((l) => {
                                     const val = balMap.get(balanceKey(m.id, l.id)) || 0;
@@ -440,15 +476,13 @@ function StockView({ inventory, canMove, onGoto }) {
                                 {activeLocations.map((l) => (
                                     <td key={l.id} className="num">{fmt(colTotal(l.id))}</td>
                                 ))}
-                                <td className="num inv-total-col">
-                                    {fmt(activeLocations.reduce((s, l) => s + colTotal(l.id), 0))}
-                                </td>
+                                <td className="num inv-total-col">{fmt(grandTotal)}</td>
                             </tr>
                         </tfoot>
                     )}
                 </table>
             </div>
-        </div>
+        </section>
     );
 }
 
@@ -482,6 +516,8 @@ function ReceiveView({ inventory, canMove, onDone, onGoto }) {
 
     const total = (Number(packSize) || 0) * (Number(packQty) || 0);
     const current = materialId && toLocationId ? balMap.get(balanceKey(materialId, toLocationId)) || 0 : 0;
+    const unit = material ? material.base_unit : 'units';
+    const destination = activeLocations.find((l) => l.id === toLocationId) || null;
 
     async function onSubmit(e) {
         e.preventDefault();
@@ -502,7 +538,7 @@ function ReceiveView({ inventory, canMove, onDone, onGoto }) {
                 note: note || undefined
             });
             await reload();
-            onDone(`Received ${fmt(total)} ${material ? material.base_unit : 'units'} of ${material ? material.name : ''}.`);
+            onDone(`Received ${fmt(total)} ${unit} of ${material ? material.name : ''}.`);
             setPackQty('');
             setReference('');
             setNote('');
@@ -532,67 +568,84 @@ function ReceiveView({ inventory, canMove, onDone, onGoto }) {
 
     return (
         <div className="inv-form-layout">
-            <form className="inv-panel inv-form" onSubmit={onSubmit}>
-                <h2 className="inv-form-title">Receive from vendor</h2>
-                <div className="inv-field-grid">
-                    <label className="inv-field">
-                        <span>Material</span>
-                        <select value={materialId} onChange={(e) => setMaterialId(e.target.value)} required>
-                            <option value="">— select —</option>
-                            {activeMaterials.map((m) => (
-                                <option key={m.id} value={m.id}>{m.name}</option>
-                            ))}
-                        </select>
-                    </label>
-                    <label className="inv-field">
-                        <span>Destination</span>
-                        <select value={toLocationId} onChange={(e) => setToLocationId(e.target.value)} required>
-                            <option value="">— select —</option>
-                            {activeLocations.map((l) => (
-                                <option key={l.id} value={l.id}>{l.name}</option>
-                            ))}
-                        </select>
-                    </label>
-                    <label className="inv-field">
-                        <span>Pack size ({material ? material.base_unit : 'units'}/pack)</span>
-                        <input type="number" min="1" value={packSize} onChange={(e) => setPackSize(e.target.value)} />
-                    </label>
-                    <label className="inv-field">
-                        <span>Number of packs</span>
-                        <input type="number" min="1" value={packQty} onChange={(e) => setPackQty(e.target.value)} required />
-                    </label>
-                    <label className="inv-field">
-                        <span>Vendor</span>
-                        <input value={vendor} onChange={(e) => setVendor(e.target.value)} placeholder="Optional" />
-                    </label>
-                    <label className="inv-field">
-                        <span>Reference / invoice #</span>
-                        <input value={reference} onChange={(e) => setReference(e.target.value)} placeholder="Optional" />
-                    </label>
-                    <label className="inv-field inv-field-wide">
-                        <span>Note</span>
-                        <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Optional" />
-                    </label>
+            <section className="inv-panel">
+                <SectionHead title="Receive from vendor" caption="Logs an inbound receipt against the ledger" />
+                <form id="inv-receive-form" className="inv-form" onSubmit={onSubmit}>
+                    <FormStep n="01" title="What arrived" hint="Material and where it lands">
+                        <label className="inv-field">
+                            <span>Material</span>
+                            <select value={materialId} onChange={(e) => setMaterialId(e.target.value)} required>
+                                <option value="">— select —</option>
+                                {activeMaterials.map((m) => (
+                                    <option key={m.id} value={m.id}>{m.name}</option>
+                                ))}
+                            </select>
+                        </label>
+                        <label className="inv-field">
+                            <span>Destination</span>
+                            <select value={toLocationId} onChange={(e) => setToLocationId(e.target.value)} required>
+                                <option value="">— select —</option>
+                                {activeLocations.map((l) => (
+                                    <option key={l.id} value={l.id}>{l.name}</option>
+                                ))}
+                            </select>
+                        </label>
+                    </FormStep>
+
+                    <FormStep
+                        n="02"
+                        title="How much"
+                        hint={total > 0 ? `= ${fmt(total)} ${unit}` : `Counted in ${unit}`}
+                    >
+                        <label className="inv-field">
+                            <span>Pack size ({unit}/pack)</span>
+                            <input type="number" min="1" value={packSize} onChange={(e) => setPackSize(e.target.value)} />
+                        </label>
+                        <label className="inv-field">
+                            <span>Number of packs</span>
+                            <input type="number" min="1" value={packQty} onChange={(e) => setPackQty(e.target.value)} required />
+                        </label>
+                    </FormStep>
+
+                    <FormStep n="03" title="Paperwork" hint="Optional, but useful in the audit trail">
+                        <label className="inv-field">
+                            <span>Vendor</span>
+                            <input value={vendor} onChange={(e) => setVendor(e.target.value)} placeholder="Optional" />
+                        </label>
+                        <label className="inv-field">
+                            <span>Reference / invoice #</span>
+                            <input value={reference} onChange={(e) => setReference(e.target.value)} placeholder="Optional" />
+                        </label>
+                        <label className="inv-field inv-field-wide">
+                            <span>Note</span>
+                            <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Optional" />
+                        </label>
+                    </FormStep>
+                </form>
+            </section>
+
+            <aside className="inv-docket">
+                <p className="inv-docket-head">Receipt preview</p>
+                <div className="inv-docket-big">
+                    +{fmt(total)}
+                    <span className="inv-docket-unit">{unit}</span>
                 </div>
-                {err && <p className="login-err">{err}</p>}
-                <div className="form-actions">
-                    <button type="submit" className="btn-primary" disabled={busy || total <= 0}>
+                <dl className="inv-docket-dl">
+                    <div><dt>Material</dt><dd>{material ? material.name : '—'}</dd></div>
+                    <div><dt>Destination</dt><dd>{destination ? destination.name : '—'}</dd></div>
+                    <div>
+                        <dt>Packs</dt>
+                        <dd>{packQty ? `${fmt(Number(packQty))} × ${fmt(Number(packSize) || 0)}` : '—'}</dd>
+                    </div>
+                    <div><dt>Current on hand</dt><dd>{fmt(current)}</dd></div>
+                    <div><dt>After receipt</dt><dd className="inv-docket-strong">{fmt(current + total)}</dd></div>
+                </dl>
+                {err && <p className="login-err inv-docket-err">{err}</p>}
+                <div className="inv-docket-actions">
+                    <button type="submit" form="inv-receive-form" className="btn-primary" disabled={busy || total <= 0}>
                         {busy ? 'Recording…' : 'Record receipt'}
                     </button>
                 </div>
-            </form>
-            <aside className="inv-panel inv-aside">
-                <h3 className="inv-aside-title">Preview</h3>
-                <div className="inv-aside-big">
-                    +{fmt(total)}
-                    <span className="muted small"> {material ? material.base_unit : 'units'}</span>
-                </div>
-                <dl className="inv-aside-dl">
-                    <div><dt>Material</dt><dd>{material ? material.name : '—'}</dd></div>
-                    <div><dt>Packs</dt><dd>{packQty ? `${fmt(Number(packQty))} × ${fmt(Number(packSize) || 0)}` : '—'}</dd></div>
-                    <div><dt>Current on hand</dt><dd>{fmt(current)}</dd></div>
-                    <div><dt>After receipt</dt><dd className="inv-aside-strong">{fmt(current + total)}</dd></div>
-                </dl>
             </aside>
         </div>
     );
@@ -624,8 +677,9 @@ function DispatchView({ inventory, canMove, onDone, onGoto }) {
     const material = activeMaterials.find((m) => m.id === materialId) || null;
 
     useEffect(() => {
-        syncBusLocations();
-    }, [syncBusLocations]);
+        if (!buOptions.options.length) return;
+        syncBusLocations(buOptions.options);
+    }, [syncBusLocations, buOptions.options]);
 
     useEffect(() => {
         if (fromLocationId) return;
@@ -654,6 +708,9 @@ function DispatchView({ inventory, canMove, onDone, onGoto }) {
     const totalDispatchQty = qtyNum * destCount;
     const remaining = available - totalDispatchQty;
     const overdraw = totalDispatchQty > available;
+    const unit = material ? material.base_unit : 'units';
+    const source = activeLocations.find((l) => l.id === fromLocationId) || null;
+    const dest = activeLocations.find((l) => l.id === toLocationId) || null;
 
     async function onSubmit(e) {
         e.preventDefault();
@@ -681,7 +738,7 @@ function DispatchView({ inventory, canMove, onDone, onGoto }) {
                 await reload();
                 const n = result.destinations || (result.movements && result.movements.length) || 0;
                 onDone(
-                    `Dispatched ${fmt(qtyNum)} ${material ? material.base_unit : 'units'} of ${material ? material.name : ''} to ${fmt(n)} BUs/labs (${fmt(qtyNum * n)} total).`
+                    `Dispatched ${fmt(qtyNum)} ${unit} of ${material ? material.name : ''} to ${fmt(n)} BUs/labs (${fmt(qtyNum * n)} total).`
                 );
             } else {
                 await createMovement({
@@ -694,8 +751,7 @@ function DispatchView({ inventory, canMove, onDone, onGoto }) {
                     note: note || undefined
                 });
                 await reload();
-                const dest = activeLocations.find((l) => l.id === toLocationId);
-                onDone(`Dispatched ${fmt(qtyNum)} ${material ? material.base_unit : 'units'} of ${material ? material.name : ''} to ${dest ? dest.name : ''}.`);
+                onDone(`Dispatched ${fmt(qtyNum)} ${unit} of ${material ? material.name : ''} to ${dest ? dest.name : ''}.`);
             }
             setQty('');
             setReference('');
@@ -741,121 +797,153 @@ function DispatchView({ inventory, canMove, onDone, onGoto }) {
 
     return (
         <div className="inv-form-layout">
-            <form className="inv-panel inv-form" onSubmit={onSubmit}>
-                <h2 className="inv-form-title">Dispatch or transfer stock</h2>
-                <div className="inv-field-grid">
-                    <label className="inv-field">
-                        <span>Material</span>
-                        <select value={materialId} onChange={(e) => setMaterialId(e.target.value)} required>
-                            <option value="">— select —</option>
-                            {activeMaterials.map((m) => (
-                                <option key={m.id} value={m.id}>{m.name}</option>
-                            ))}
-                        </select>
-                    </label>
-                    <label className="inv-field">
-                        <span>From</span>
-                        <select value={fromLocationId} onChange={(e) => setFromLocationId(e.target.value)} required>
-                            <option value="">— select —</option>
-                            {stores.length > 0 && (
-                                <optgroup label="Stores & warehouses">
-                                    {stores.map((l) => (
-                                        <option key={l.id} value={l.id}>{l.name}</option>
-                                    ))}
-                                </optgroup>
-                            )}
-                            {buLabLocations.length > 0 && (
-                                <optgroup label="Business units & labs">
-                                    {buLabLocations.map((l) => (
-                                        <option key={l.id} value={l.id}>
-                                            {l.name}{l.kind === 'lab' ? ' (lab)' : ''}
-                                        </option>
-                                    ))}
-                                </optgroup>
-                            )}
-                            {otherLocations.length > 0 && (
-                                <optgroup label="Other locations">
-                                    {otherLocations.map((l) => (
-                                        <option key={l.id} value={l.id}>{l.name}</option>
-                                    ))}
-                                </optgroup>
-                            )}
-                        </select>
-                    </label>
-                    <label className="inv-field">
-                        <span>To</span>
-                        <select value={toLocationId} onChange={(e) => setToLocationId(e.target.value)} required>
-                            <option value="">— select —</option>
-                            {(allBuEstimate > 0 || buOptions.options.length > 0) && (
-                                <option value={ALL_BUS_DEST}>
-                                    All BUs & labs
-                                    {allBuEstimate > 0 ? ` (${allBuEstimate})` : ''}
-                                </option>
-                            )}
-                            {buLabDestinations.length > 0 && (
-                                <optgroup label="Business units & labs">
-                                    {buLabDestinations.map((l) => (
-                                        <option key={l.id} value={l.id}>
-                                            {l.name}{l.kind === 'lab' ? ' (lab)' : ''}
-                                        </option>
-                                    ))}
-                                </optgroup>
-                            )}
-                            {otherDestinations.length > 0 && (
-                                <optgroup label="Other locations">
-                                    {otherDestinations.map((l) => (
-                                        <option key={l.id} value={l.id}>{l.name}</option>
-                                    ))}
-                                </optgroup>
-                            )}
-                        </select>
-                    </label>
-                    <label className="inv-field">
-                        <span>Quantity ({material ? material.base_unit : 'units'})</span>
-                        <input type="number" min="1" value={qty} onChange={(e) => setQty(e.target.value)} required />
-                    </label>
-                    <label className="inv-field">
-                        <span>Reference</span>
-                        <input value={reference} onChange={(e) => setReference(e.target.value)} placeholder="Optional" />
-                    </label>
-                    <label className="inv-field">
-                        <span>Note</span>
-                        <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Optional" />
-                    </label>
-                </div>
-                {err && <p className="login-err">{err}</p>}
-                <div className="form-actions">
-                    <button type="submit" className="btn-primary" disabled={busy || qtyNum <= 0 || overdraw || (isAllBus && allBuEstimate === 0)}>
-                        {busy ? 'Dispatching…' : isAllBus ? 'Dispatch to all BUs/labs' : 'Record dispatch'}
-                    </button>
-                </div>
-            </form>
-            <aside className={`inv-panel inv-aside${overdraw ? ' is-error' : ''}`}>
-                <h3 className="inv-aside-title">Source stock</h3>
-                <div className="inv-aside-big">
+            <section className="inv-panel">
+                <SectionHead
+                    title="Dispatch or transfer stock"
+                    caption="Move stock out of a store, or between business units in a shortage"
+                />
+                <form id="inv-dispatch-form" className="inv-form" onSubmit={onSubmit}>
+                    <FormStep n="01" title="Route" hint="Source and destination must differ">
+                        <label className="inv-field">
+                            <span>Material</span>
+                            <select value={materialId} onChange={(e) => setMaterialId(e.target.value)} required>
+                                <option value="">— select —</option>
+                                {activeMaterials.map((m) => (
+                                    <option key={m.id} value={m.id}>{m.name}</option>
+                                ))}
+                            </select>
+                        </label>
+                        <label className="inv-field">
+                            <span>From</span>
+                            <select value={fromLocationId} onChange={(e) => setFromLocationId(e.target.value)} required>
+                                <option value="">— select —</option>
+                                {stores.length > 0 && (
+                                    <optgroup label="Stores & warehouses">
+                                        {stores.map((l) => (
+                                            <option key={l.id} value={l.id}>{l.name}</option>
+                                        ))}
+                                    </optgroup>
+                                )}
+                                {buLabLocations.length > 0 && (
+                                    <optgroup label="Business units & labs">
+                                        {buLabLocations.map((l) => (
+                                            <option key={l.id} value={l.id}>
+                                                {l.name}{l.kind === 'lab' ? ' (lab)' : ''}
+                                            </option>
+                                        ))}
+                                    </optgroup>
+                                )}
+                                {otherLocations.length > 0 && (
+                                    <optgroup label="Other locations">
+                                        {otherLocations.map((l) => (
+                                            <option key={l.id} value={l.id}>{l.name}</option>
+                                        ))}
+                                    </optgroup>
+                                )}
+                            </select>
+                        </label>
+                        <label className="inv-field">
+                            <span>To</span>
+                            <select value={toLocationId} onChange={(e) => setToLocationId(e.target.value)} required>
+                                <option value="">— select —</option>
+                                {(allBuEstimate > 0 || buOptions.options.length > 0) && (
+                                    <option value={ALL_BUS_DEST}>
+                                        All BUs &amp; labs
+                                        {allBuEstimate > 0 ? ` (${allBuEstimate})` : ''}
+                                    </option>
+                                )}
+                                {buLabDestinations.length > 0 && (
+                                    <optgroup label="Business units & labs">
+                                        {buLabDestinations.map((l) => (
+                                            <option key={l.id} value={l.id}>
+                                                {l.name}{l.kind === 'lab' ? ' (lab)' : ''}
+                                            </option>
+                                        ))}
+                                    </optgroup>
+                                )}
+                                {otherDestinations.length > 0 && (
+                                    <optgroup label="Other locations">
+                                        {otherDestinations.map((l) => (
+                                            <option key={l.id} value={l.id}>{l.name}</option>
+                                        ))}
+                                    </optgroup>
+                                )}
+                            </select>
+                        </label>
+                    </FormStep>
+
+                    <FormStep
+                        n="02"
+                        title="How much"
+                        hint={isAllBus && destCount > 1 ? `Per destination · ${fmt(destCount)} sites` : `Counted in ${unit}`}
+                    >
+                        <label className="inv-field">
+                            <span>Quantity ({unit})</span>
+                            <input type="number" min="1" value={qty} onChange={(e) => setQty(e.target.value)} required />
+                        </label>
+                    </FormStep>
+
+                    <FormStep n="03" title="Paperwork" hint="Optional, but useful in the audit trail">
+                        <label className="inv-field">
+                            <span>Reference</span>
+                            <input value={reference} onChange={(e) => setReference(e.target.value)} placeholder="Optional" />
+                        </label>
+                        <label className="inv-field">
+                            <span>Note</span>
+                            <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Optional" />
+                        </label>
+                    </FormStep>
+                </form>
+            </section>
+
+            <aside className={`inv-docket${overdraw ? ' is-error' : ''}`}>
+                <p className="inv-docket-head">Source stock</p>
+                <div className="inv-docket-big">
                     {fmt(available)}
-                    <span className="muted small"> on hand</span>
+                    <span className="inv-docket-unit">on hand</span>
                 </div>
-                {qtyNum > 0 && (
-                    <dl className="inv-aside-dl">
-                        {isAllBus && destCount > 0 && (
-                            <div><dt>Destinations</dt><dd>{fmt(destCount)} BUs/labs</dd></div>
-                        )}
-                        <div><dt>Dispatching</dt><dd>−{fmt(totalDispatchQty)}{isAllBus && destCount > 1 ? ` (${fmt(qtyNum)} each)` : ''}</dd></div>
-                        <div>
-                            <dt>Remaining</dt>
-                            <dd className={overdraw ? 'inv-aside-danger' : 'inv-aside-strong'}>
-                                {overdraw ? 'Insufficient' : fmt(Math.max(remaining, 0))}
-                            </dd>
-                        </div>
-                    </dl>
-                )}
+                <dl className="inv-docket-dl">
+                    <div><dt>Material</dt><dd>{material ? material.name : '—'}</dd></div>
+                    <div><dt>From</dt><dd>{source ? source.name : '—'}</dd></div>
+                    <div>
+                        <dt>To</dt>
+                        <dd>{isAllBus ? `All BUs & labs (${fmt(destCount)})` : dest ? dest.name : '—'}</dd>
+                    </div>
+                    {qtyNum > 0 && (
+                        <>
+                            <div>
+                                <dt>Dispatching</dt>
+                                <dd>
+                                    −{fmt(totalDispatchQty)}
+                                    {isAllBus && destCount > 1 ? ` (${fmt(qtyNum)} each)` : ''}
+                                </dd>
+                            </div>
+                            <div>
+                                <dt>Remaining</dt>
+                                <dd className={overdraw ? 'inv-docket-danger' : 'inv-docket-strong'}>
+                                    {overdraw ? 'Insufficient' : fmt(Math.max(remaining, 0))}
+                                </dd>
+                            </div>
+                        </>
+                    )}
+                </dl>
                 {overdraw && (
-                    <p className="inv-aside-note">
+                    <p className="inv-docket-note">
                         Not enough stock at the source for this quantity
                         {isAllBus && destCount > 1 ? ` across ${fmt(destCount)} destinations` : ''}.
                     </p>
                 )}
+                {err && <p className="login-err inv-docket-err">{err}</p>}
+                <div className="inv-docket-actions">
+                    <button
+                        type="submit"
+                        form="inv-dispatch-form"
+                        className="btn-primary"
+                        disabled={busy || qtyNum <= 0 || overdraw || (isAllBus && allBuEstimate === 0)}
+                    >
+                        {busy ? 'Dispatching…' : isAllBus ? 'Dispatch to all BUs/labs' : 'Record dispatch'}
+                    </button>
+                </div>
             </aside>
         </div>
     );
@@ -928,8 +1016,8 @@ function LedgerView({ inventory, canMove, onDone }) {
     }
 
     return (
-        <div className="inv-panel">
-            <div className="inv-toolbar">
+        <section className="inv-panel">
+            <SectionHead title="Movement ledger" caption="Append-only. Voided rows stay in history but stop counting.">
                 <select
                     className="inv-search"
                     value={filterMaterial}
@@ -952,7 +1040,7 @@ function LedgerView({ inventory, canMove, onDone }) {
                     <option value="dispatch">Dispatch</option>
                     <option value="adjustment">Adjustment</option>
                 </select>
-            </div>
+            </SectionHead>
 
             {err && <div className="results-error nexus-card">{err}</div>}
 
@@ -970,34 +1058,47 @@ function LedgerView({ inventory, canMove, onDone }) {
                         </tr>
                     </thead>
                     <tbody>
-                        {rows.map((r) => (
-                            <tr key={r.id} className={r.voided_at ? 'inv-voided' : ''}>
-                                <td className="muted small nowrap">{new Date(r.occurred_at).toLocaleString()}</td>
-                                <td><span className={`inv-kbadge inv-k-${r.kind}`}>{r.kind}</span></td>
-                                <td>{r.material_name}</td>
-                                <td className="muted small">
-                                    {r.from_location_name || '—'} <span className="inv-arrow">→</span> {r.to_location_name || '—'}
-                                </td>
-                                <td className="num">
-                                    {fmt(r.qty_base)}<span className="muted small"> {r.base_unit}</span>
-                                </td>
-                                <td className="muted small">
-                                    {r.vendor && <div>Vendor: {r.vendor}</div>}
-                                    {r.reference && <div>Ref: {r.reference}</div>}
-                                    {r.note && <div>{r.note}</div>}
-                                    {r.voided_at && <span className="inv-void-tag">voided</span>}
-                                </td>
-                                {canMove && (
-                                    <td className="inv-row-actions">
-                                        {!r.voided_at && (
-                                            <button type="button" className="chip chip-tool" onClick={() => onVoid(r)}>
-                                                Void
-                                            </button>
+                        {rows.map((r) => {
+                            const when = new Date(r.occurred_at);
+                            return (
+                                <tr key={r.id} className={r.voided_at ? 'inv-voided' : ''}>
+                                    <td className="inv-when">
+                                        <span className="inv-when-date">{when.toLocaleDateString()}</span>
+                                        <span className="inv-when-time">
+                                            {when.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
+                                        </span>
+                                    </td>
+                                    <td><span className={`inv-kbadge inv-k-${r.kind}`}>{r.kind}</span></td>
+                                    <td className="inv-mat-cell">{r.material_name}</td>
+                                    <td className="inv-route">
+                                        {r.from_location_name || '—'}
+                                        <span className="inv-arrow">→</span>
+                                        {r.to_location_name || '—'}
+                                    </td>
+                                    <td className="num inv-qty">
+                                        {fmt(r.qty_base)}<span className="inv-unit">{r.base_unit}</span>
+                                    </td>
+                                    <td className="muted small inv-details">
+                                        {r.vendor && <div>Vendor: {r.vendor}</div>}
+                                        {r.reference && <div>Ref: {r.reference}</div>}
+                                        {r.note && <div>{r.note}</div>}
+                                        {r.voided_at && <span className="inv-void-tag">voided</span>}
+                                        {!r.vendor && !r.reference && !r.note && !r.voided_at && (
+                                            <span className="inv-dash">·</span>
                                         )}
                                     </td>
-                                )}
-                            </tr>
-                        ))}
+                                    {canMove && (
+                                        <td className="inv-row-actions">
+                                            {!r.voided_at && (
+                                                <button type="button" className="chip chip-tool" onClick={() => onVoid(r)}>
+                                                    Void
+                                                </button>
+                                            )}
+                                        </td>
+                                    )}
+                                </tr>
+                            );
+                        })}
                         {!rows.length && !loading && (
                             <tr>
                                 <td colSpan={canMove ? 7 : 6}>
@@ -1018,7 +1119,7 @@ function LedgerView({ inventory, canMove, onDone }) {
                     </button>
                 </div>
             )}
-        </div>
+        </section>
     );
 }
 
@@ -1109,15 +1210,14 @@ function MaterialsPanel({ inventory, onDone }) {
 
     return (
         <section className="inv-panel">
-            <div className="inv-panel-head">
-                <h2 className="inv-panel-title"><Icon name="tag" /> Materials</h2>
+            <SectionHead title="Materials" caption={`${fmt(materials.length)} in catalog`}>
                 <button type="button" className="btn-primary btn-sm" onClick={() => setOpen((v) => !v)}>
                     {open ? 'Cancel' : '+ New material'}
                 </button>
-            </div>
+            </SectionHead>
             {open && (
                 <form className="inv-inline-form" onSubmit={onSubmit}>
-                    <div className="inv-field-grid">
+                    <div className="inv-fs-grid">
                         <label className="inv-field"><span>Name</span><input value={name} onChange={(e) => setName(e.target.value)} required autoFocus /></label>
                         <label className="inv-field"><span>Base unit</span><input value={baseUnit} onChange={(e) => setBaseUnit(e.target.value)} /></label>
                         <label className="inv-field"><span>Default pack size</span><input type="number" min="1" value={packSize} onChange={(e) => setPackSize(e.target.value)} /></label>
@@ -1138,7 +1238,7 @@ function MaterialsPanel({ inventory, onDone }) {
                         <tbody>
                             {materials.map((m) => (
                                 <tr key={m.id} className={m.active ? '' : 'inv-voided'}>
-                                    <td>{m.name}</td>
+                                    <td className="inv-mat-cell">{m.name}</td>
                                     <td className="muted small">{m.base_unit}</td>
                                     <td className="num">{m.reorder_level ? fmt(m.reorder_level) : '·'}</td>
                                     <td className="inv-row-actions">
@@ -1215,19 +1315,16 @@ function LocationsPanel({ inventory, onDone }) {
         }
     }
 
-    const kindLabel = (k) => (k === 'business_unit' ? 'BU' : k === 'store' ? 'store' : 'lab');
-
     return (
         <section className="inv-panel">
-            <div className="inv-panel-head">
-                <h2 className="inv-panel-title"><Icon name="grid" /> Locations</h2>
+            <SectionHead title="Locations" caption={`${fmt(locations.length)} stores, BUs and labs`}>
                 <button type="button" className="btn-primary btn-sm" onClick={() => setOpen((v) => !v)}>
                     {open ? 'Cancel' : '+ New location'}
                 </button>
-            </div>
+            </SectionHead>
             {open && (
                 <form className="inv-inline-form" onSubmit={onSubmit}>
-                    <div className="inv-field-grid">
+                    <div className="inv-fs-grid">
                         <label className="inv-field"><span>Name</span><input value={name} onChange={(e) => setName(e.target.value)} required autoFocus /></label>
                         <label className="inv-field">
                             <span>Kind</span>
@@ -1289,9 +1386,9 @@ function LocationsPanel({ inventory, onDone }) {
                         <tbody>
                             {locations.map((l) => (
                                 <tr key={l.id} className={l.active ? '' : 'inv-voided'}>
-                                    <td>{l.name}</td>
+                                    <td className="inv-mat-cell">{l.name}</td>
                                     <td>
-                                        <span className={`inv-badge inv-badge-${l.kind === 'business_unit' ? 'bu' : l.kind}`}>
+                                        <span className={`inv-badge inv-badge-${kindDot(l.kind)}`}>
                                             {kindLabel(l.kind)}
                                         </span>
                                     </td>
