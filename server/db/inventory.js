@@ -125,8 +125,45 @@ async function updateMaterial(orgId, id, fields) {
 
 // -- Locations -------------------------------------------------------------
 
-async function listLocations(orgId, { includeInactive = false } = {}) {
+async function syncBuLocationsFromListec(client, orgId) {
+    const bus = await client.query(
+        `SELECT DISTINCT business_unit_code AS code, business_unit_name AS name
+         FROM client_locations
+         WHERE active = true
+           AND business_unit_code IS NOT NULL
+           AND TRIM(business_unit_code) <> ''
+         ORDER BY business_unit_name NULLS LAST, business_unit_code`
+    );
+    for (const row of bus.rows) {
+        const code = String(row.code).trim();
+        const name = String(row.name || code).trim();
+        const linked = await client.query(
+            `SELECT id FROM inventory_locations
+             WHERE org_id = $1 AND active = true AND kind = 'business_unit'
+               AND (bu_code = $2 OR LOWER(name) = LOWER($3))
+             LIMIT 1`,
+            [orgId, code, name]
+        );
+        if (linked.rows.length) continue;
+        await client.query(
+            `INSERT INTO inventory_locations (id, org_id, name, kind, bu_code, active)
+             VALUES ($1, $2, $3, 'business_unit', $4, true)
+             ON CONFLICT (org_id, name) DO NOTHING`,
+            [newLocationId(), orgId, name, code]
+        );
+    }
+}
+
+async function listLocations(orgId, { includeInactive = false, ensureBus = false } = {}) {
     const pool = getPool();
+    if (ensureBus) {
+        const client = await pool.connect();
+        try {
+            await syncBuLocationsFromListec(client, orgId);
+        } finally {
+            client.release();
+        }
+    }
     const where = ['org_id = $1'];
     if (!includeInactive) where.push('active = true');
     const r = await pool.query(
@@ -378,32 +415,7 @@ async function createMovement(orgId, input, opts = {}) {
  * then return active BU/lab destination ids (excluding the dispatch source).
  */
 async function resolveBuLabDestinationIds(client, orgId, fromLocationId) {
-    const bus = await client.query(
-        `SELECT DISTINCT business_unit_code AS code, business_unit_name AS name
-         FROM client_locations
-         WHERE active = true
-           AND business_unit_code IS NOT NULL
-           AND TRIM(business_unit_code) <> ''
-         ORDER BY business_unit_name NULLS LAST, business_unit_code`
-    );
-    for (const row of bus.rows) {
-        const code = String(row.code).trim();
-        const name = String(row.name || code).trim();
-        const linked = await client.query(
-            `SELECT id FROM inventory_locations
-             WHERE org_id = $1 AND active = true AND kind = 'business_unit'
-               AND (bu_code = $2 OR LOWER(name) = LOWER($3))
-             LIMIT 1`,
-            [orgId, code, name]
-        );
-        if (linked.rows.length) continue;
-        await client.query(
-            `INSERT INTO inventory_locations (id, org_id, name, kind, bu_code, active)
-             VALUES ($1, $2, $3, 'business_unit', $4, true)
-             ON CONFLICT (org_id, name) DO NOTHING`,
-            [newLocationId(), orgId, name, code]
-        );
-    }
+    await syncBuLocationsFromListec(client, orgId);
 
     const r = await client.query(
         `SELECT id, name FROM inventory_locations

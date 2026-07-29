@@ -45,14 +45,15 @@ export function useInventory() {
 
     const ready = !authLoading && (!authRequired || Boolean(getToken()));
 
-    const reload = useCallback(async () => {
+    const reload = useCallback(async (opts = {}) => {
         if (!ready) return;
         setLoading(true);
         setError(null);
         try {
+            const locQs = opts.ensureBus ? '?include_inactive=1&ensure_bus=1' : '?include_inactive=1';
             const [mats, locs, bals, summ] = await Promise.all([
                 request('/api/inventory/materials?include_inactive=1'),
-                request('/api/inventory/locations?include_inactive=1'),
+                request(`/api/inventory/locations${locQs}`),
                 request('/api/inventory/balances'),
                 request('/api/inventory/summary')
             ]);
@@ -70,6 +71,16 @@ export function useInventory() {
     useEffect(() => {
         reload();
     }, [reload]);
+
+    const syncBusLocations = useCallback(async () => {
+        if (!ready) return;
+        try {
+            const j = await request('/api/inventory/locations?include_inactive=1&ensure_bus=1');
+            setLocations(j.locations || []);
+        } catch (e) {
+            setError(String(e.message || e));
+        }
+    }, [ready]);
 
     // -- Mutations (each returns the created/updated row) -------------------
 
@@ -140,6 +151,7 @@ export function useInventory() {
         createMovement,
         voidMovement,
         seedDefaults,
+        syncBusLocations,
         fetchMovements,
         fetchOnHand,
         fetchLabs

@@ -157,7 +157,8 @@ router.get('/locations', async (req, res) => {
     if (!dbGuard(res)) return;
     try {
         const includeInactive = req.query.include_inactive === '1' || req.query.include_inactive === 'true';
-        const locations = await inv.listLocations(orgOf(req), { includeInactive });
+        const ensureBus = req.query.ensure_bus === '1' || req.query.ensure_bus === 'true';
+        const locations = await inv.listLocations(orgOf(req), { includeInactive, ensureBus });
         res.json({ locations });
     } catch (err) {
         sendError(res, err);

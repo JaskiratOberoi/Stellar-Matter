@@ -601,11 +601,15 @@ function ReceiveView({ inventory, canMove, onDone, onGoto }) {
 // -- Dispatch --------------------------------------------------------------
 
 function DispatchView({ inventory, canMove, onDone, onGoto }) {
-    const { materials, locations, balances, createMovement, reload } = inventory;
+    const { materials, locations, balances, createMovement, reload, syncBusLocations } = inventory;
     const buOptions = useBuOptions();
     const activeMaterials = materials.filter((m) => m.active);
     const activeLocations = locations.filter((l) => l.active);
     const stores = activeLocations.filter((l) => l.kind === 'store');
+    const buLabLocations = activeLocations.filter((l) => l.kind === 'business_unit' || l.kind === 'lab');
+    const otherLocations = activeLocations.filter(
+        (l) => l.kind !== 'store' && l.kind !== 'business_unit' && l.kind !== 'lab'
+    );
     const balMap = useBalanceMap(balances);
 
     const [materialId, setMaterialId] = useState('');
@@ -620,8 +624,21 @@ function DispatchView({ inventory, canMove, onDone, onGoto }) {
     const material = activeMaterials.find((m) => m.id === materialId) || null;
 
     useEffect(() => {
-        if (!fromLocationId && stores.length) setFromLocationId(stores[0].id);
-    }, [stores, fromLocationId]);
+        syncBusLocations();
+    }, [syncBusLocations]);
+
+    useEffect(() => {
+        if (fromLocationId) return;
+        if (stores.length) setFromLocationId(stores[0].id);
+        else if (buLabLocations.length) setFromLocationId(buLabLocations[0].id);
+        else if (activeLocations.length) setFromLocationId(activeLocations[0].id);
+    }, [stores, buLabLocations, activeLocations, fromLocationId]);
+
+    useEffect(() => {
+        if (toLocationId && toLocationId !== ALL_BUS_DEST && toLocationId === fromLocationId) {
+            setToLocationId('');
+        }
+    }, [fromLocationId, toLocationId]);
 
     const available = materialId && fromLocationId ? balMap.get(balanceKey(materialId, fromLocationId)) || 0 : 0;
     const qtyNum = Number(qty) || 0;
@@ -691,18 +708,33 @@ function DispatchView({ inventory, canMove, onDone, onGoto }) {
     }
 
     if (!canMove) return <ReadOnlyNotice />;
-    if (!activeMaterials.length || !stores.length) {
+    if (!activeMaterials.length) {
         return (
             <EmptyState
                 icon="out"
-                title="Need a central store"
+                title="Add materials first"
                 action={
                     <button type="button" className="btn-primary" onClick={() => onGoto('catalog')}>
                         Go to Catalog
                     </button>
                 }
             >
-                Add a store location before dispatching stock to business units or labs.
+                Create a material catalog before recording dispatches or BU-to-BU transfers.
+            </EmptyState>
+        );
+    }
+    if (!activeLocations.length && buOptions.options.length === 0) {
+        return (
+            <EmptyState
+                icon="out"
+                title="Need locations"
+                action={
+                    <button type="button" className="btn-primary" onClick={() => onGoto('catalog')}>
+                        Go to Catalog
+                    </button>
+                }
+            >
+                Add store, business unit, or lab locations before dispatching stock.
             </EmptyState>
         );
     }
@@ -710,7 +742,7 @@ function DispatchView({ inventory, canMove, onDone, onGoto }) {
     return (
         <div className="inv-form-layout">
             <form className="inv-panel inv-form" onSubmit={onSubmit}>
-                <h2 className="inv-form-title">Dispatch to BU / lab</h2>
+                <h2 className="inv-form-title">Dispatch or transfer stock</h2>
                 <div className="inv-field-grid">
                     <label className="inv-field">
                         <span>Material</span>
@@ -725,9 +757,29 @@ function DispatchView({ inventory, canMove, onDone, onGoto }) {
                         <span>From</span>
                         <select value={fromLocationId} onChange={(e) => setFromLocationId(e.target.value)} required>
                             <option value="">— select —</option>
-                            {activeLocations.map((l) => (
-                                <option key={l.id} value={l.id}>{l.name}</option>
-                            ))}
+                            {stores.length > 0 && (
+                                <optgroup label="Stores & warehouses">
+                                    {stores.map((l) => (
+                                        <option key={l.id} value={l.id}>{l.name}</option>
+                                    ))}
+                                </optgroup>
+                            )}
+                            {buLabLocations.length > 0 && (
+                                <optgroup label="Business units & labs">
+                                    {buLabLocations.map((l) => (
+                                        <option key={l.id} value={l.id}>
+                                            {l.name}{l.kind === 'lab' ? ' (lab)' : ''}
+                                        </option>
+                                    ))}
+                                </optgroup>
+                            )}
+                            {otherLocations.length > 0 && (
+                                <optgroup label="Other locations">
+                                    {otherLocations.map((l) => (
+                                        <option key={l.id} value={l.id}>{l.name}</option>
+                                    ))}
+                                </optgroup>
+                            )}
                         </select>
                     </label>
                     <label className="inv-field">
