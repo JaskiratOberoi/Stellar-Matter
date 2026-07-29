@@ -21,11 +21,9 @@
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const { getPool, useDatabase } = require('./pool');
+const { DEFAULT_ORG_ID, DEFAULT_ORG_SLUG, DEFAULT_ORG_NAME } = require('./orgConstants');
 
 const SUPER_ADMIN_ID = 'user-super-admin';
-const DEFAULT_ORG_ID = 'org-default';
-const DEFAULT_ORG_SLUG = 'default';
-const DEFAULT_ORG_NAME = 'Default';
 
 function readEnv(name, fallback) {
     const v = process.env[name];
@@ -332,9 +330,71 @@ async function migrate() {
         // org_id mirrors runs (default 'org-default', RESTRICT delete) so the
         // module is tenant-scoped without touching legacy single-org deploys.
         await migrateInventory(client);
+
+        // Fold any legacy "Default" / duplicate acme-labs org into the single
+        // canonical tenant so the org switcher only shows Qugen Pathlabs.
+        await consolidateDefaultOrg(client);
     } finally {
         client.release();
     }
+}
+
+// Merge a separately-created acme-labs org (from the admin UI) into org-default
+// and rename the canonical row to Qugen Pathlabs. Idempotent — safe on every boot.
+async function consolidateDefaultOrg(client) {
+    const dup = await client.query(
+        `SELECT id FROM organizations WHERE slug = $1 AND id <> $2`,
+        [DEFAULT_ORG_SLUG, DEFAULT_ORG_ID]
+    );
+
+    for (const { id: dupId } of dup.rows) {
+        await client.query(`UPDATE runs SET org_id = $1 WHERE org_id = $2`, [DEFAULT_ORG_ID, dupId]);
+
+        // Drop the auto-seeded catalog on org-default so Qugen's materials/locations
+        // can move over without (org_id, name) unique-index clashes.
+        await client.query(`DELETE FROM inventory_movements WHERE org_id = $1`, [DEFAULT_ORG_ID]);
+        await client.query(`DELETE FROM inventory_materials WHERE org_id = $1`, [DEFAULT_ORG_ID]);
+        await client.query(`DELETE FROM inventory_locations WHERE org_id = $1`, [DEFAULT_ORG_ID]);
+
+        await client.query(`UPDATE inventory_locations SET org_id = $1 WHERE org_id = $2`, [
+            DEFAULT_ORG_ID,
+            dupId
+        ]);
+        await client.query(`UPDATE inventory_materials SET org_id = $1 WHERE org_id = $2`, [
+            DEFAULT_ORG_ID,
+            dupId
+        ]);
+        await client.query(`UPDATE inventory_movements SET org_id = $1 WHERE org_id = $2`, [
+            DEFAULT_ORG_ID,
+            dupId
+        ]);
+
+        await client.query(
+            `INSERT INTO user_org_assignments (user_id, org_id, role)
+             SELECT user_id, $1, role FROM user_org_assignments WHERE org_id = $2
+             ON CONFLICT (user_id, org_id) DO NOTHING`,
+            [DEFAULT_ORG_ID, dupId]
+        );
+        await client.query(`DELETE FROM user_org_assignments WHERE org_id = $1`, [dupId]);
+        await client.query(`DELETE FROM organizations WHERE id = $1`, [dupId]);
+    }
+
+    await client.query(`UPDATE organizations SET slug = $2, name = $3 WHERE id = $1`, [
+        DEFAULT_ORG_ID,
+        DEFAULT_ORG_SLUG,
+        DEFAULT_ORG_NAME
+    ]);
+
+    // Drop the auto-seeded Central Store when real locations already exist.
+    await client.query(
+        `DELETE FROM inventory_locations
+         WHERE org_id = $1 AND name = 'Central Store'
+           AND EXISTS (
+               SELECT 1 FROM inventory_locations l2
+               WHERE l2.org_id = $1 AND l2.name <> 'Central Store'
+           )`,
+        [DEFAULT_ORG_ID]
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -478,22 +538,28 @@ async function migrateInventory(client) {
         GROUP BY org_id, material_id, location_id;
     `);
 
-    // Seed the central store for the default org and the 12 catalog materials.
-    // ON CONFLICT (org_id, name) DO NOTHING keeps re-runs and manual edits safe.
-    await client.query(
-        `INSERT INTO inventory_locations (id, org_id, name, kind)
-         VALUES ($1, $2, $3, 'store')
-         ON CONFLICT (org_id, name) DO NOTHING`,
-        ['invloc-central-store', DEFAULT_ORG_ID, 'Central Store']
+    // Seed the central store and catalog only for a fresh default org. Once ops
+    // have set up real locations (e.g. via the starter catalog), skip re-seeding.
+    const seeded = await client.query(
+        `SELECT COUNT(*)::int AS c FROM inventory_locations WHERE org_id = $1`,
+        [DEFAULT_ORG_ID]
     );
-    for (const m of INVENTORY_MATERIAL_SEEDS) {
+    if (seeded.rows[0].c === 0) {
         await client.query(
-            `INSERT INTO inventory_materials
-                (id, org_id, name, metric_kind, base_unit, default_pack_size, default_pack_label)
-             VALUES ($1, $2, $3, $4, $5, $6, $7)
+            `INSERT INTO inventory_locations (id, org_id, name, kind)
+             VALUES ($1, $2, $3, 'store')
              ON CONFLICT (org_id, name) DO NOTHING`,
-            [m.id, DEFAULT_ORG_ID, m.name, m.metricKind, m.baseUnit, m.packSize, m.packLabel]
+            ['invloc-central-store', DEFAULT_ORG_ID, 'Central Store']
         );
+        for (const m of INVENTORY_MATERIAL_SEEDS) {
+            await client.query(
+                `INSERT INTO inventory_materials
+                    (id, org_id, name, metric_kind, base_unit, default_pack_size, default_pack_label)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7)
+                 ON CONFLICT (org_id, name) DO NOTHING`,
+                [m.id, DEFAULT_ORG_ID, m.name, m.metricKind, m.baseUnit, m.packSize, m.packLabel]
+            );
+        }
     }
 }
 

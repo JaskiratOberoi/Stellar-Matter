@@ -9,6 +9,7 @@
 
 const jwt = require('jsonwebtoken');
 const { useDatabase } = require('./db/pool');
+const { DEFAULT_ORG_ID, DEFAULT_ORG_SLUG } = require('./db/orgConstants');
 
 function getJwtSecret() {
     const raw = process.env.JWT_SECRET;
@@ -103,8 +104,8 @@ async function loadOrgsForUser(client, user) {
              LEFT JOIN user_org_assignments a
                ON a.org_id = o.id AND a.user_id = $1
              WHERE o.active = true
-             ORDER BY o.name`,
-            [user.id]
+             ORDER BY CASE WHEN o.id = $2 OR o.slug = $3 THEN 0 ELSE 1 END, o.name`,
+            [user.id, DEFAULT_ORG_ID, DEFAULT_ORG_SLUG]
         );
         return r.rows;
     }
@@ -113,8 +114,8 @@ async function loadOrgsForUser(client, user) {
          FROM user_org_assignments a
          JOIN organizations o ON o.id = a.org_id
          WHERE a.user_id = $1 AND o.active = true
-         ORDER BY o.name`,
-        [user.id]
+         ORDER BY CASE WHEN o.id = $2 OR o.slug = $3 THEN 0 ELSE 1 END, o.name`,
+        [user.id, DEFAULT_ORG_ID, DEFAULT_ORG_SLUG]
     );
     return r.rows;
 }
@@ -126,14 +127,18 @@ async function loadOrgsForUser(client, user) {
  */
 async function pickInitialActiveOrg(client, user) {
     const orgs = await loadOrgsForUser(client, user);
+    const preferred = orgs.find((o) => o.id === DEFAULT_ORG_ID || o.slug === DEFAULT_ORG_SLUG);
+    if (preferred) return preferred.id;
     if (orgs.length > 0) return orgs[0].id;
     if (user && user.role === 'super_admin') {
         const r = await client.query(
-            `SELECT id FROM organizations WHERE active = true ORDER BY name LIMIT 1`
+            `SELECT id FROM organizations WHERE active = true
+             ORDER BY CASE WHEN id = $1 OR slug = $2 THEN 0 ELSE 1 END, name LIMIT 1`,
+            [DEFAULT_ORG_ID, DEFAULT_ORG_SLUG]
         );
         if (r.rows.length) return r.rows[0].id;
     }
-    return 'org-default';
+    return DEFAULT_ORG_ID;
 }
 
 module.exports = {

@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { useBuOptions } from '../hooks/useBuOptions.js';
 import { useInventory } from '../hooks/useInventory.js';
@@ -119,9 +118,6 @@ export function InventoryPage() {
                         they never drift.
                     </p>
                 </div>
-                <Link to="/dashboard" className="chip chip-tool inv-back">
-                    ← Dashboard
-                </Link>
             </header>
 
             {flash && <div className="inv-flash">{flash}</div>}

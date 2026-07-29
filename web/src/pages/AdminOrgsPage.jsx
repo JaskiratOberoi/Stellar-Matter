@@ -47,7 +47,7 @@ export function AdminOrgsPage() {
                 </div>
                 <div className="admin-actions">
                     <Link to="/" className="chip chip-tool">
-                        ← Back to dashboard
+                        ← Back to Tracer
                     </Link>
                     <Link to="/admin/users" className="chip chip-tool">
                         Users
