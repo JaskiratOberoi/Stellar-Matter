@@ -374,6 +374,136 @@ async function createMovement(orgId, input, opts = {}) {
 }
 
 /**
+ * Ensure inventory_locations rows exist for every distinct Listec business unit,
+ * then return active BU/lab destination ids (excluding the dispatch source).
+ */
+async function resolveBuLabDestinationIds(client, orgId, fromLocationId) {
+    const bus = await client.query(
+        `SELECT DISTINCT business_unit_code AS code, business_unit_name AS name
+         FROM client_locations
+         WHERE active = true
+           AND business_unit_code IS NOT NULL
+           AND TRIM(business_unit_code) <> ''
+         ORDER BY business_unit_name NULLS LAST, business_unit_code`
+    );
+    for (const row of bus.rows) {
+        const code = String(row.code).trim();
+        const name = String(row.name || code).trim();
+        const linked = await client.query(
+            `SELECT id FROM inventory_locations
+             WHERE org_id = $1 AND active = true AND kind = 'business_unit'
+               AND (bu_code = $2 OR LOWER(name) = LOWER($3))
+             LIMIT 1`,
+            [orgId, code, name]
+        );
+        if (linked.rows.length) continue;
+        await client.query(
+            `INSERT INTO inventory_locations (id, org_id, name, kind, bu_code, active)
+             VALUES ($1, $2, $3, 'business_unit', $4, true)
+             ON CONFLICT (org_id, name) DO NOTHING`,
+            [newLocationId(), orgId, name, code]
+        );
+    }
+
+    const r = await client.query(
+        `SELECT id, name FROM inventory_locations
+         WHERE org_id = $1 AND active = true
+           AND kind IN ('business_unit', 'lab')
+           AND id <> $2
+         ORDER BY name`,
+        [orgId, fromLocationId]
+    );
+    return r.rows;
+}
+
+/**
+ * Fan a single dispatch quantity out to every BU/lab destination. Runs in one
+ * transaction and checks total draw (qty × destinations) against source stock.
+ */
+async function createDispatchToAllBus(orgId, input, opts = {}) {
+    const pool = getPool();
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+
+        const mat = await client.query(
+            `SELECT id FROM inventory_materials WHERE org_id = $1 AND id = $2 FOR UPDATE`,
+            [orgId, input.materialId]
+        );
+        if (!mat.rows.length) throw httpError('Unknown material', 404);
+
+        const fromLoc = await client.query(
+            `SELECT id FROM inventory_locations WHERE org_id = $1 AND id = $2`,
+            [orgId, input.fromLocationId]
+        );
+        if (!fromLoc.rows.length) throw httpError('Unknown location', 404);
+
+        const destinations = await resolveBuLabDestinationIds(client, orgId, input.fromLocationId);
+        if (!destinations.length) {
+            throw httpError(
+                'No business units or labs found. Sync client locations or add BU/lab destinations in Catalog.',
+                400
+            );
+        }
+
+        const totalQty = input.qtyBase * destinations.length;
+        if (!opts.allowNegative) {
+            const available = await onHandAt(client, orgId, input.materialId, input.fromLocationId);
+            if (available < totalQty) {
+                throw httpError(
+                    `Insufficient stock: ${available} on hand, ${totalQty} requested (${input.qtyBase} × ${destinations.length} destinations)`,
+                    409,
+                    { code: 'INSUFFICIENT_STOCK', available, destinations: destinations.length }
+                );
+            }
+        }
+
+        const movementIds = [];
+        for (const dest of destinations) {
+            const ins = await client.query(
+                `INSERT INTO inventory_movements
+                    (org_id, material_id, kind, from_location_id, to_location_id, qty_base,
+                     pack_size, pack_qty, vendor, reference, note, occurred_at, created_by)
+                 VALUES ($1, $2, 'dispatch', $3, $4, $5, $6, $7, $8, $9, $10, COALESCE($11, NOW()), $12)
+                 RETURNING id`,
+                [
+                    orgId,
+                    input.materialId,
+                    input.fromLocationId,
+                    dest.id,
+                    input.qtyBase,
+                    input.packSize ?? null,
+                    input.packQty ?? null,
+                    input.vendor ?? null,
+                    input.reference ?? null,
+                    input.note ?? null,
+                    input.occurredAt ?? null,
+                    opts.createdBy ?? null
+                ]
+            );
+            movementIds.push(ins.rows[0].id);
+        }
+
+        await client.query('COMMIT');
+        const movements = [];
+        for (const id of movementIds) {
+            movements.push(await getMovement(orgId, id));
+        }
+        return {
+            movements,
+            destinations: destinations.length,
+            qty_per_destination: input.qtyBase,
+            destination_names: destinations.map((d) => d.name)
+        };
+    } catch (err) {
+        await client.query('ROLLBACK').catch(() => {});
+        throw err;
+    } finally {
+        client.release();
+    }
+}
+
+/**
  * Void a movement (soft-delete). Reversing an inflow can push a downstream
  * location negative if the stock was already dispatched onward, so the same
  * guard applies: voiding a to_location inflow is rejected with 409 when it
@@ -506,6 +636,7 @@ module.exports = {
     listMovements,
     getMovement,
     createMovement,
+    createDispatchToAllBus,
     voidMovement,
     getSummary
 };

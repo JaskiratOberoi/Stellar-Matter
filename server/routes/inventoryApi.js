@@ -345,16 +345,23 @@ router.post('/movements', requireMover, adminWriteLimiter, async (req, res) => {
 
         const fromLocationId = trimStr(body.from_location_id) || null;
         const toLocationId = trimStr(body.to_location_id) || null;
+        const toAllBus = body.to_all_bus === true || body.to_all_bus === 'true';
 
         // Direction rules per kind.
         if (kind === 'receipt') {
             if (!toLocationId) return res.status(400).json({ error: 'receipt requires to_location_id' });
             if (fromLocationId) return res.status(400).json({ error: 'receipt cannot have a from_location_id' });
         } else if (kind === 'dispatch') {
-            if (!fromLocationId || !toLocationId) {
+            if (toAllBus) {
+                if (!fromLocationId) {
+                    return res.status(400).json({ error: 'dispatch requires from_location_id' });
+                }
+                if (toLocationId) {
+                    return res.status(400).json({ error: 'dispatch cannot set both to_location_id and to_all_bus' });
+                }
+            } else if (!fromLocationId || !toLocationId) {
                 return res.status(400).json({ error: 'dispatch requires both from_location_id and to_location_id' });
-            }
-            if (fromLocationId === toLocationId) {
+            } else if (fromLocationId === toLocationId) {
                 return res.status(400).json({ error: 'dispatch source and destination must differ' });
             }
         } else {
@@ -397,6 +404,29 @@ router.post('/movements', requireMover, adminWriteLimiter, async (req, res) => {
             occurredAt
         };
         const allowNegative = body.allow_negative === true || body.allow_negative === 'true';
+        if (kind === 'dispatch' && toAllBus) {
+            const result = await inv.createDispatchToAllBus(orgOf(req), input, {
+                allowNegative,
+                createdBy: (req.user && req.user.id) || null
+            });
+            await logAudit(req, {
+                action: 'inventory.movement.create',
+                targetType: 'inventory_movement',
+                targetId: result.movements.map((m) => String(m.id)).join(','),
+                outcome: 'success',
+                after: {
+                    kind,
+                    material_id: materialId,
+                    from_location_id: fromLocationId,
+                    to_all_bus: true,
+                    qty_base: qtyBase,
+                    destinations: result.destinations
+                },
+                metadata: allowNegative ? { allow_negative: true } : undefined
+            });
+            return res.json(result);
+        }
+
         const movement = await inv.createMovement(orgOf(req), input, {
             allowNegative,
             createdBy: (req.user && req.user.id) || null

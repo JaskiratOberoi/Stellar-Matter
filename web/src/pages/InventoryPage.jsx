@@ -3,6 +3,8 @@ import { useAuth } from '../contexts/AuthContext.jsx';
 import { useBuOptions } from '../hooks/useBuOptions.js';
 import { useInventory } from '../hooks/useInventory.js';
 
+const ALL_BUS_DEST = '__all_bus__';
+
 const CATALOG_ROLES = new Set(['super_admin', 'admin']);
 const MOVER_ROLES = new Set(['super_admin', 'admin', 'operator']);
 
@@ -600,6 +602,7 @@ function ReceiveView({ inventory, canMove, onDone, onGoto }) {
 
 function DispatchView({ inventory, canMove, onDone, onGoto }) {
     const { materials, locations, balances, createMovement, reload } = inventory;
+    const buOptions = useBuOptions();
     const activeMaterials = materials.filter((m) => m.active);
     const activeLocations = locations.filter((l) => l.active);
     const stores = activeLocations.filter((l) => l.kind === 'store');
@@ -622,9 +625,18 @@ function DispatchView({ inventory, canMove, onDone, onGoto }) {
 
     const available = materialId && fromLocationId ? balMap.get(balanceKey(materialId, fromLocationId)) || 0 : 0;
     const qtyNum = Number(qty) || 0;
-    const remaining = available - qtyNum;
-    const overdraw = qtyNum > available;
-    const destinations = activeLocations.filter((l) => l.id !== fromLocationId);
+    const buLabDestinations = activeLocations.filter(
+        (l) => l.id !== fromLocationId && (l.kind === 'business_unit' || l.kind === 'lab')
+    );
+    const otherDestinations = activeLocations.filter(
+        (l) => l.id !== fromLocationId && l.kind !== 'business_unit' && l.kind !== 'lab'
+    );
+    const isAllBus = toLocationId === ALL_BUS_DEST;
+    const allBuEstimate = Math.max(buLabDestinations.length, buOptions.options.length);
+    const destCount = isAllBus ? allBuEstimate : 1;
+    const totalDispatchQty = qtyNum * destCount;
+    const remaining = available - totalDispatchQty;
+    const overdraw = totalDispatchQty > available;
 
     async function onSubmit(e) {
         e.preventDefault();
@@ -632,22 +644,42 @@ function DispatchView({ inventory, canMove, onDone, onGoto }) {
         if (!materialId) return setErr('Select a material.');
         if (!fromLocationId) return setErr('Select a source.');
         if (!toLocationId) return setErr('Select a destination.');
-        if (fromLocationId === toLocationId) return setErr('Source and destination must differ.');
+        if (!isAllBus && fromLocationId === toLocationId) return setErr('Source and destination must differ.');
         if (!(qtyNum > 0)) return setErr('Enter a quantity.');
+        if (isAllBus && allBuEstimate === 0) {
+            return setErr('No business units or labs available. Sync client locations or add destinations in Catalog.');
+        }
         setBusy(true);
         try {
-            await createMovement({
-                kind: 'dispatch',
-                material_id: materialId,
-                from_location_id: fromLocationId,
-                to_location_id: toLocationId,
-                qty_base: qtyNum,
-                reference: reference || undefined,
-                note: note || undefined
-            });
-            await reload();
-            const dest = activeLocations.find((l) => l.id === toLocationId);
-            onDone(`Dispatched ${fmt(qtyNum)} ${material ? material.base_unit : 'units'} of ${material ? material.name : ''} to ${dest ? dest.name : ''}.`);
+            if (isAllBus) {
+                const result = await createMovement({
+                    kind: 'dispatch',
+                    material_id: materialId,
+                    from_location_id: fromLocationId,
+                    to_all_bus: true,
+                    qty_base: qtyNum,
+                    reference: reference || undefined,
+                    note: note || undefined
+                });
+                await reload();
+                const n = result.destinations || (result.movements && result.movements.length) || 0;
+                onDone(
+                    `Dispatched ${fmt(qtyNum)} ${material ? material.base_unit : 'units'} of ${material ? material.name : ''} to ${fmt(n)} BUs/labs (${fmt(qtyNum * n)} total).`
+                );
+            } else {
+                await createMovement({
+                    kind: 'dispatch',
+                    material_id: materialId,
+                    from_location_id: fromLocationId,
+                    to_location_id: toLocationId,
+                    qty_base: qtyNum,
+                    reference: reference || undefined,
+                    note: note || undefined
+                });
+                await reload();
+                const dest = activeLocations.find((l) => l.id === toLocationId);
+                onDone(`Dispatched ${fmt(qtyNum)} ${material ? material.base_unit : 'units'} of ${material ? material.name : ''} to ${dest ? dest.name : ''}.`);
+            }
             setQty('');
             setReference('');
             setNote('');
@@ -659,18 +691,18 @@ function DispatchView({ inventory, canMove, onDone, onGoto }) {
     }
 
     if (!canMove) return <ReadOnlyNotice />;
-    if (!activeMaterials.length || activeLocations.length < 2) {
+    if (!activeMaterials.length || !stores.length) {
         return (
             <EmptyState
                 icon="out"
-                title="Need a source and a destination"
+                title="Need a central store"
                 action={
                     <button type="button" className="btn-primary" onClick={() => onGoto('catalog')}>
                         Go to Catalog
                     </button>
                 }
             >
-                Add a store plus at least one business unit or lab before dispatching.
+                Add a store location before dispatching stock to business units or labs.
             </EmptyState>
         );
     }
@@ -702,9 +734,28 @@ function DispatchView({ inventory, canMove, onDone, onGoto }) {
                         <span>To</span>
                         <select value={toLocationId} onChange={(e) => setToLocationId(e.target.value)} required>
                             <option value="">— select —</option>
-                            {destinations.map((l) => (
-                                <option key={l.id} value={l.id}>{l.name}{l.kind === 'lab' ? ' (lab)' : ''}</option>
-                            ))}
+                            {(allBuEstimate > 0 || buOptions.options.length > 0) && (
+                                <option value={ALL_BUS_DEST}>
+                                    All BUs & labs
+                                    {allBuEstimate > 0 ? ` (${allBuEstimate})` : ''}
+                                </option>
+                            )}
+                            {buLabDestinations.length > 0 && (
+                                <optgroup label="Business units & labs">
+                                    {buLabDestinations.map((l) => (
+                                        <option key={l.id} value={l.id}>
+                                            {l.name}{l.kind === 'lab' ? ' (lab)' : ''}
+                                        </option>
+                                    ))}
+                                </optgroup>
+                            )}
+                            {otherDestinations.length > 0 && (
+                                <optgroup label="Other locations">
+                                    {otherDestinations.map((l) => (
+                                        <option key={l.id} value={l.id}>{l.name}</option>
+                                    ))}
+                                </optgroup>
+                            )}
                         </select>
                     </label>
                     <label className="inv-field">
@@ -722,8 +773,8 @@ function DispatchView({ inventory, canMove, onDone, onGoto }) {
                 </div>
                 {err && <p className="login-err">{err}</p>}
                 <div className="form-actions">
-                    <button type="submit" className="btn-primary" disabled={busy || qtyNum <= 0 || overdraw}>
-                        {busy ? 'Dispatching…' : 'Record dispatch'}
+                    <button type="submit" className="btn-primary" disabled={busy || qtyNum <= 0 || overdraw || (isAllBus && allBuEstimate === 0)}>
+                        {busy ? 'Dispatching…' : isAllBus ? 'Dispatch to all BUs/labs' : 'Record dispatch'}
                     </button>
                 </div>
             </form>
@@ -735,7 +786,10 @@ function DispatchView({ inventory, canMove, onDone, onGoto }) {
                 </div>
                 {qtyNum > 0 && (
                     <dl className="inv-aside-dl">
-                        <div><dt>Dispatching</dt><dd>−{fmt(qtyNum)}</dd></div>
+                        {isAllBus && destCount > 0 && (
+                            <div><dt>Destinations</dt><dd>{fmt(destCount)} BUs/labs</dd></div>
+                        )}
+                        <div><dt>Dispatching</dt><dd>−{fmt(totalDispatchQty)}{isAllBus && destCount > 1 ? ` (${fmt(qtyNum)} each)` : ''}</dd></div>
                         <div>
                             <dt>Remaining</dt>
                             <dd className={overdraw ? 'inv-aside-danger' : 'inv-aside-strong'}>
@@ -744,7 +798,12 @@ function DispatchView({ inventory, canMove, onDone, onGoto }) {
                         </div>
                     </dl>
                 )}
-                {overdraw && <p className="inv-aside-note">Not enough stock at the source for this quantity.</p>}
+                {overdraw && (
+                    <p className="inv-aside-note">
+                        Not enough stock at the source for this quantity
+                        {isAllBus && destCount > 1 ? ` across ${fmt(destCount)} destinations` : ''}.
+                    </p>
+                )}
             </aside>
         </div>
     );
