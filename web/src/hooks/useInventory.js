@@ -65,7 +65,14 @@ export function useInventory() {
             setBalances(bals.balances || []);
             setSummary(summ.summary || null);
         } catch (e) {
-            setError(String(e.message || e));
+            const msg = String(e.message || e);
+            if (/failed to fetch|networkerror|load failed/i.test(msg)) {
+                setError(
+                    'Cannot reach the API (api-matter.stellarinfomatica.com). Check your connection — the backend runs on a home server and may be unreachable off your network.',
+                );
+            } else {
+                setError(msg);
+            }
         } finally {
             setLoading(false);
         }

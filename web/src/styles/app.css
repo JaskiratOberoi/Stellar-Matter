@@ -225,6 +225,10 @@ kbd {
     border-bottom: 1px solid rgb(var(--nx-rule-soft));
 }
 
+.topbar--menu-open {
+    z-index: 4000;
+}
+
 .topbar-bar {
     min-height: var(--topbar-h);
     display: flex;
@@ -3788,7 +3792,7 @@ tr.inv-voided td:nth-child(3) {
     border: 0;
     padding: 0;
     background: rgb(0 0 0 / 0.55);
-    z-index: 140;
+    z-index: 4000;
     cursor: pointer;
 }
 
@@ -3797,7 +3801,7 @@ tr.inv-voided td:nth-child(3) {
     top: 0;
     right: 0;
     bottom: 0;
-    z-index: 150;
+    z-index: 4010;
     width: min(320px, 88vw);
     padding: calc(var(--sp-6) + env(safe-area-inset-top, 0px)) var(--sp-5)
         calc(var(--sp-6) + env(safe-area-inset-bottom, 0px));

@@ -77,66 +77,10 @@ export default defineConfig(({ mode }) => {
                     navigateFallback: '/index.html',
                     // Skip auth endpoints so login never serves a stale offline response.
                     navigateFallbackDenylist: [/^\/api\//],
-                    globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2,webmanifest}'],
-                    runtimeCaching: [
-                        {
-                            // Production API (cross-origin Hostinger → api-matter).
-                            // NetworkFirst so last-viewed GETs still render offline.
-                            urlPattern: ({ url, request }) =>
-                                request.method === 'GET' &&
-                                url.hostname === 'api-matter.stellarinfomatica.com' &&
-                                !url.pathname.startsWith('/api/auth'),
-                            handler: 'NetworkFirst',
-                            options: {
-                                cacheName: 'matter-api-get',
-                                networkTimeoutSeconds: 4,
-                                expiration: {
-                                    maxEntries: 80,
-                                    maxAgeSeconds: 60 * 60 * 24
-                                },
-                                cacheableResponse: {
-                                    statuses: [0, 200]
-                                }
-                            }
-                        },
-                        {
-                            // Dev proxy path (same-origin /api during vite/preview).
-                            urlPattern: ({ url, request }) =>
-                                request.method === 'GET' &&
-                                url.origin === self.location.origin &&
-                                url.pathname.startsWith('/api/') &&
-                                !url.pathname.startsWith('/api/auth'),
-                            handler: 'NetworkFirst',
-                            options: {
-                                cacheName: 'matter-api-get-local',
-                                networkTimeoutSeconds: 4,
-                                expiration: {
-                                    maxEntries: 80,
-                                    maxAgeSeconds: 60 * 60 * 24
-                                },
-                                cacheableResponse: {
-                                    statuses: [0, 200]
-                                }
-                            }
-                        },
-                        {
-                            urlPattern: ({ url }) =>
-                                url.pathname.startsWith('/inventory-photos/') ||
-                                (url.hostname === 'api-matter.stellarinfomatica.com' &&
-                                    url.pathname.startsWith('/inventory-photos/')),
-                            handler: 'StaleWhileRevalidate',
-                            options: {
-                                cacheName: 'matter-photos',
-                                expiration: {
-                                    maxEntries: 60,
-                                    maxAgeSeconds: 60 * 60 * 24 * 7
-                                },
-                                cacheableResponse: {
-                                    statuses: [0, 200]
-                                }
-                            }
-                        }
-                    ]
+                    globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2,webmanifest}']
+                    // Do not runtime-cache cross-origin API calls — Workbox NetworkFirst
+                    // turns timeouts and offline states into opaque "no-response" failures
+                    // that surface as NetworkError / CORS in the console on mobile.
                 },
                 devOptions: {
                     // Keep SW off in `vite` HMR; enable only for production builds /

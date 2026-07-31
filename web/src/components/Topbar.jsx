@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { BrandMark } from './BrandMark.jsx';
@@ -45,7 +46,7 @@ export function Topbar({ statusPill, lastUpdated, onOrgSwitched }) {
     );
 
     return (
-        <header className="topbar" role="banner">
+        <header className={`topbar${menuOpen ? ' topbar--menu-open' : ''}`} role="banner">
             <div className="topbar-bar">
                 <div className="topbar-left">
                     <div className="topbar-brand">
@@ -110,70 +111,80 @@ export function Topbar({ statusPill, lastUpdated, onOrgSwitched }) {
                 </div>
             </div>
 
-            {menuOpen && (
-                <div className="topbar-drawer-root">
-                    <button
-                        type="button"
-                        className="topbar-drawer-scrim"
-                        aria-label="Close menu"
-                        onClick={() => setMenuOpen(false)}
-                    />
-                    <nav
-                        id="topbar-drawer"
-                        className="topbar-drawer"
-                        ref={drawerRef}
-                        aria-label="App menu"
-                    >
-                        <div className="topbar-drawer-section">
-                            <p className="eyebrow">Navigate</p>
-                            {navLink}
-                        </div>
-                        {user && (
-                            <>
-                                <div className="topbar-drawer-section">
-                                    <p className="eyebrow">Account</p>
-                                    <p className="topbar-drawer-user">
-                                        {user.display_name || user.username}
-                                        {user.role === 'super_admin' && ' · super admin'}
-                                        {user.role === 'admin' && ' · admin'}
-                                    </p>
-                                    <OrgSwitcher user={user} orgs={orgs} onSwitch={switchOrgHandler} />
-                                </div>
-                                {user.role === 'super_admin' && (
+            {menuOpen &&
+                createPortal(
+                    <div className="topbar-drawer-root">
+                        <button
+                            type="button"
+                            className="topbar-drawer-scrim"
+                            aria-label="Close menu"
+                            onClick={() => setMenuOpen(false)}
+                        />
+                        <nav
+                            id="topbar-drawer"
+                            className="topbar-drawer"
+                            ref={drawerRef}
+                            aria-label="App menu"
+                        >
+                            <div className="topbar-drawer-section">
+                                <p className="eyebrow">Navigate</p>
+                                {navLink}
+                            </div>
+                            {user && (
+                                <>
                                     <div className="topbar-drawer-section">
-                                        <p className="eyebrow">Admin</p>
-                                        <Link to="/admin/users" className="chip chip-tool" onClick={() => setMenuOpen(false)}>
-                                            Users
-                                        </Link>
-                                        <Link to="/admin/orgs" className="chip chip-tool" onClick={() => setMenuOpen(false)}>
-                                            Orgs
-                                        </Link>
-                                        <Link
-                                            to="/admin/audit-log"
-                                            className="chip chip-tool"
-                                            onClick={() => setMenuOpen(false)}
-                                        >
-                                            Audit log
-                                        </Link>
+                                        <p className="eyebrow">Account</p>
+                                        <p className="topbar-drawer-user">
+                                            {user.display_name || user.username}
+                                            {user.role === 'super_admin' && ' · super admin'}
+                                            {user.role === 'admin' && ' · admin'}
+                                        </p>
+                                        <OrgSwitcher user={user} orgs={orgs} onSwitch={switchOrgHandler} />
                                     </div>
-                                )}
-                                <div className="topbar-drawer-section">
-                                    <button
-                                        type="button"
-                                        className="chip chip-tool user-logout"
-                                        onClick={() => {
-                                            setMenuOpen(false);
-                                            logout();
-                                        }}
-                                    >
-                                        Log out
-                                    </button>
-                                </div>
-                            </>
-                        )}
-                    </nav>
-                </div>
-            )}
+                                    {user.role === 'super_admin' && (
+                                        <div className="topbar-drawer-section">
+                                            <p className="eyebrow">Admin</p>
+                                            <Link
+                                                to="/admin/users"
+                                                className="chip chip-tool"
+                                                onClick={() => setMenuOpen(false)}
+                                            >
+                                                Users
+                                            </Link>
+                                            <Link
+                                                to="/admin/orgs"
+                                                className="chip chip-tool"
+                                                onClick={() => setMenuOpen(false)}
+                                            >
+                                                Orgs
+                                            </Link>
+                                            <Link
+                                                to="/admin/audit-log"
+                                                className="chip chip-tool"
+                                                onClick={() => setMenuOpen(false)}
+                                            >
+                                                Audit log
+                                            </Link>
+                                        </div>
+                                    )}
+                                    <div className="topbar-drawer-section">
+                                        <button
+                                            type="button"
+                                            className="chip chip-tool user-logout"
+                                            onClick={() => {
+                                                setMenuOpen(false);
+                                                logout();
+                                            }}
+                                        >
+                                            Log out
+                                        </button>
+                                    </div>
+                                </>
+                            )}
+                        </nav>
+                    </div>,
+                    document.body,
+                )}
         </header>
     );
 }
