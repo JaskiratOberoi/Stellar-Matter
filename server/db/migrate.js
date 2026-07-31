@@ -616,6 +616,14 @@ async function migrateInventory(client) {
          ON inventory_movements (vendor_id) WHERE vendor_id IS NOT NULL;`
     );
 
+    // Optional proof-of-goods photo per movement line. Stores a URL path such
+    // as /inventory-photos/<file>; the file itself lives on the bind-mounted
+    // out/ volume so it survives container rebuilds.
+    await client.query(
+        `ALTER TABLE inventory_movements
+         ADD COLUMN IF NOT EXISTS photo_path TEXT;`
+    );
+
     // Derived balances: inflows to a location minus outflows from it, ignoring
     // voided rows. Recreated idempotently so schema edits ship cleanly.
     await client.query(`

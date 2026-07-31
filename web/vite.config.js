@@ -13,12 +13,13 @@ function buildApiProxy(env) {
     // MATTER_APP_PORT instead — that override path is honoured here.
     const port = String(env.MATTER_APP_PORT || env.LIS_UI_PORT || env.PORT || env.VITE_API_PORT || '4377').trim() || '4377';
     const target = `http://127.0.0.1:${port}`;
+    const opts = { target, changeOrigin: true, secure: false };
     return {
-        '/api': {
-            target,
-            changeOrigin: true,
-            secure: false
-        }
+        '/api': opts,
+        // Inventory proof-of-goods photos are served by the backend at this
+        // top-level path (not under /api), so the dev proxy needs it too or
+        // <img src="/inventory-photos/..."> would 404 against Vite.
+        '/inventory-photos': opts
     };
 }
 

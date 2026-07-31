@@ -22,6 +22,7 @@ const { requireAuth, requireRole } = require('../auth');
 const { adminWriteLimiter } = require('../rateLimit');
 const { logAudit } = require('../audit');
 const inv = require('../db/inventory');
+const { uploadPhoto, urlFor } = require('../inventoryPhotos');
 
 const router = express.Router();
 
@@ -561,6 +562,132 @@ router.post('/movements', requireMover, adminWriteLimiter, async (req, res) => {
         if (err && err.status === 409 && err.code === 'INSUFFICIENT_STOCK') {
             await logAudit(req, {
                 action: 'inventory.movement.create',
+                outcome: 'failure',
+                targetType: 'inventory_movement',
+                metadata: { reason: 'insufficient_stock', available: err.available }
+            });
+        }
+        sendError(res, err);
+    }
+});
+
+// -- Photo upload ----------------------------------------------------------
+//
+// Accepts a single image (multipart field "photo") and returns its URL path.
+// Movers upload one per order line as proof of goods; the returned url is then
+// passed back in the batch's line.photo_path. Kept separate from movement
+// creation so the batch stays JSON and files stream straight to disk.
+router.post('/photos', requireMover, adminWriteLimiter, (req, res) => {
+    if (!dbGuard(res)) return;
+    uploadPhoto.single('photo')(req, res, (err) => {
+        if (err) {
+            const status = err.status || (err.code === 'LIMIT_FILE_SIZE' ? 413 : 400);
+            return res.status(status).json({ error: err.message || 'Upload failed' });
+        }
+        if (!req.file) return res.status(400).json({ error: 'No file uploaded (field "photo")' });
+        res.json({ url: urlFor(req.file.filename) });
+    });
+});
+
+// -- Batch movements (orders) ----------------------------------------------
+//
+// One header (vendor + destination for receipts, from + to / all-BUs for
+// dispatches) plus many material lines, all committed in a single transaction
+// so an overdraw on any line rolls the whole order back. Each line carries its
+// own pack_size/pack_qty (or qty_base) and an optional photo_path.
+router.post('/movements/batch', requireMover, adminWriteLimiter, async (req, res) => {
+    if (!dbGuard(res)) return;
+    try {
+        const body = req.body || {};
+        const kind = trimStr(body.kind);
+        if (kind !== 'receipt' && kind !== 'dispatch') {
+            return res.status(400).json({ error: 'kind must be receipt or dispatch' });
+        }
+
+        const fromLocationId = trimStr(body.from_location_id) || null;
+        const toLocationId = trimStr(body.to_location_id) || null;
+        const toAllBus = body.to_all_bus === true || body.to_all_bus === 'true';
+
+        if (kind === 'receipt') {
+            if (!toLocationId) return res.status(400).json({ error: 'receipt requires to_location_id' });
+            if (fromLocationId) return res.status(400).json({ error: 'receipt cannot have a from_location_id' });
+        } else {
+            if (!fromLocationId) return res.status(400).json({ error: 'dispatch requires from_location_id' });
+            if (toAllBus) {
+                if (toLocationId) return res.status(400).json({ error: 'dispatch cannot set both to_location_id and to_all_bus' });
+            } else {
+                if (!toLocationId) return res.status(400).json({ error: 'dispatch requires to_location_id' });
+                if (fromLocationId === toLocationId) return res.status(400).json({ error: 'dispatch source and destination must differ' });
+            }
+        }
+
+        const rawLines = Array.isArray(body.lines) ? body.lines : [];
+        if (!rawLines.length) return res.status(400).json({ error: 'at least one line is required' });
+        if (rawLines.length > 100) return res.status(400).json({ error: 'too many lines (max 100)' });
+
+        const lines = rawLines.map((line, i) => {
+            const materialId = trimStr(line.material_id);
+            if (!materialId) {
+                const err = new Error(`line ${i + 1}: material_id is required`);
+                err.status = 400;
+                throw err;
+            }
+            const packSize = optInt(line.pack_size, `line ${i + 1} pack_size`, { min: 1, allowNull: true });
+            const packQty = optInt(line.pack_qty, `line ${i + 1} pack_qty`, { min: 1, allowNull: true });
+            let qtyBase = optInt(line.qty_base, `line ${i + 1} qty_base`, { min: 1 });
+            if (qtyBase === undefined) {
+                if (packSize && packQty) qtyBase = packSize * packQty;
+                else {
+                    const err = new Error(`line ${i + 1}: provide qty_base, or both pack_size and pack_qty`);
+                    err.status = 400;
+                    throw err;
+                }
+            }
+            return {
+                materialId,
+                qtyBase,
+                packSize: packSize ?? null,
+                packQty: packQty ?? null,
+                photoPath: line.photo_path != null ? trimStr(line.photo_path) || null : null
+            };
+        });
+
+        const header = {
+            kind,
+            fromLocationId,
+            toLocationId,
+            toAllBus,
+            vendorId: body.vendor_id != null ? trimStr(body.vendor_id) || null : null,
+            reference: body.reference != null ? trimStr(body.reference) || null : null,
+            note: body.note != null ? trimStr(body.note) || null : null
+        };
+        const allowNegative = body.allow_negative === true || body.allow_negative === 'true';
+
+        const result = await inv.createMovementsBatch(orgOf(req), header, lines, {
+            allowNegative,
+            createdBy: (req.user && req.user.id) || null
+        });
+
+        await logAudit(req, {
+            action: 'inventory.movement.batch',
+            targetType: 'inventory_movement',
+            targetId: result.movements.map((m) => String(m.id)).join(','),
+            outcome: 'success',
+            after: {
+                kind,
+                lines: lines.length,
+                movements: result.movements.length,
+                from_location_id: fromLocationId,
+                to_location_id: toLocationId,
+                to_all_bus: toAllBus || undefined
+            },
+            metadata: allowNegative ? { allow_negative: true } : undefined
+        });
+        res.json(result);
+    } catch (err) {
+        if (err && err.status === 409 && err.code === 'INSUFFICIENT_STOCK') {
+            await logAudit(req, {
+                action: 'inventory.movement.batch',
                 outcome: 'failure',
                 targetType: 'inventory_movement',
                 metadata: { reason: 'insufficient_stock', available: err.available }

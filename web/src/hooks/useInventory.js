@@ -128,6 +128,19 @@ export function useInventory() {
         (body) => request('/api/inventory/movements', { method: 'POST', body: JSON.stringify(body) }),
         []
     );
+    const createMovementsBatch = useCallback(
+        (body) => request('/api/inventory/movements/batch', { method: 'POST', body: JSON.stringify(body) }),
+        []
+    );
+    // Uploads a single image and returns its URL path (for a line's photo_path).
+    // Uses FormData so apiFetch skips the JSON content-type and the browser sets
+    // the multipart boundary itself.
+    const uploadPhoto = useCallback(async (file) => {
+        const form = new FormData();
+        form.append('photo', file);
+        const j = await request('/api/inventory/photos', { method: 'POST', body: form });
+        return j.url;
+    }, []);
     const voidMovement = useCallback(
         (id, body = {}) => request(`/api/inventory/movements/${id}/void`, { method: 'POST', body: JSON.stringify(body) }),
         []
@@ -176,6 +189,8 @@ export function useInventory() {
         createLocation,
         updateLocation,
         createMovement,
+        createMovementsBatch,
+        uploadPhoto,
         voidMovement,
         seedDefaults,
         syncBusLocations,

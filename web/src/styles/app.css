@@ -2806,10 +2806,17 @@ td.inv-low {
     color: rgb(var(--nx-accent));
 }
 
+/* Keep this a real table-cell (not display:flex) so its bottom border lines up
+   with taller multi-line cells in the same row. Buttons are right-aligned
+   inline with a gap between them. */
 .inv-row-actions {
-    display: flex;
-    gap: var(--sp-2);
-    justify-content: flex-end;
+    text-align: right;
+    white-space: nowrap;
+    vertical-align: middle;
+}
+
+.inv-row-actions > * + * {
+    margin-left: var(--sp-2);
 }
 
 /* Empty state — left-aligned notice hung off a rule, not a centred blob. */
@@ -2953,6 +2960,319 @@ td.inv-low {
     grid-column: 1 / -1;
 }
 
+/* -- Order forms (multi-line Receive / Dispatch) ----------------------- */
+.inv-order-form {
+    display: block;
+}
+
+.inv-order-lines {
+    margin-top: var(--sp-6);
+    padding-top: var(--sp-6);
+    border-top: 1px solid rgb(var(--nx-rule-soft));
+}
+
+.inv-order-lines-head {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--sp-3);
+    margin-bottom: var(--sp-4);
+}
+
+.inv-fs-titles {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.inv-line-table-wrap {
+    overflow-x: auto;
+}
+
+.inv-line-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: var(--fs-sm);
+}
+
+.inv-line-table thead th {
+    text-align: left;
+    padding: 0 var(--sp-4) var(--sp-3);
+    font: 600 var(--fs-3xs) / 1 var(--font-mono);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: rgb(var(--nx-ink-3));
+    border-bottom: 1px solid rgb(var(--nx-rule-soft));
+    white-space: nowrap;
+}
+
+.inv-line-table td {
+    padding: var(--sp-3) var(--sp-4);
+    border-bottom: 1px solid rgb(var(--nx-rule-soft));
+    vertical-align: middle;
+}
+
+/* Flush the first/last columns to the panel edges so the row lines up with
+   the header above and the "Add material" button below. */
+.inv-line-table td:first-child,
+.inv-line-table th:first-child {
+    padding-left: 0;
+}
+
+.inv-line-table td:last-child,
+.inv-line-table th:last-child {
+    padding-right: 0;
+}
+
+/* Material takes the slack; the rest are sized to their content so the
+   numeric cluster stays evenly spaced instead of crammed at the edge. */
+.inv-line-table .inv-lt-mat {
+    width: auto;
+    min-width: 200px;
+}
+
+.inv-line-table .inv-lt-num {
+    width: 104px;
+}
+
+.inv-line-table .inv-lt-num input {
+    text-align: right;
+}
+
+.inv-line-table .inv-lt-total {
+    width: 112px;
+    white-space: nowrap;
+}
+
+.inv-line-table .inv-lt-photo {
+    width: 110px;
+}
+
+.inv-line-table .inv-lt-x {
+    width: 40px;
+    text-align: right;
+}
+
+.inv-line-table select,
+.inv-line-table input {
+    width: 100%;
+    padding: var(--sp-2) var(--sp-3);
+    background: rgb(var(--nx-surface));
+    border: 1px solid rgb(var(--nx-rule-soft));
+    border-radius: var(--r-sm);
+    color: rgb(var(--nx-ink));
+    font: inherit;
+    font-size: var(--fs-sm);
+}
+
+.inv-line-table .inv-lt-num input {
+    text-align: right;
+}
+
+.inv-line-table select:focus,
+.inv-line-table input:focus {
+    outline: none;
+    border-color: rgb(var(--nx-accent));
+}
+
+/* -- Number stepper -------------------------------------------------------
+   Custom up/down control that replaces the browser's native number spinner
+   (which renders as an out-of-theme white box). The input keeps its normal
+   styling; the stepper is a two-button column overlaid on the right edge. */
+.inv-step {
+    position: relative;
+    display: block;
+}
+
+/* Hide the native spinners; we draw our own. */
+.inv-step input[type='number'] {
+    -moz-appearance: textfield;
+    appearance: textfield;
+}
+
+.inv-step input::-webkit-outer-spin-button,
+.inv-step input::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+/* Reserve room on the right so digits never slip under the buttons. */
+.inv-line-table .inv-step input {
+    padding-right: 24px;
+    text-align: right;
+}
+
+.inv-step-btns {
+    position: absolute;
+    top: 1px;
+    right: 1px;
+    bottom: 1px;
+    width: 19px;
+    display: flex;
+    flex-direction: column;
+    border-left: 1px solid rgb(var(--nx-rule-soft));
+    overflow: hidden;
+    border-radius: 0 calc(var(--r-sm) - 1px) calc(var(--r-sm) - 1px) 0;
+}
+
+.inv-step-btns button {
+    flex: 1 1 50%;
+    min-height: 0;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: rgb(var(--nx-surface-2));
+    color: rgb(var(--nx-ink-3));
+    cursor: pointer;
+    position: relative;
+    transition: background 0.12s ease, color 0.12s ease;
+}
+
+.inv-step-up {
+    border-bottom: 1px solid rgb(var(--nx-rule-soft));
+}
+
+.inv-step-btns button:hover {
+    background: rgb(var(--nx-accent) / 0.16);
+    color: rgb(var(--nx-accent));
+}
+
+.inv-step-btns button:active {
+    background: rgb(var(--nx-accent) / 0.28);
+}
+
+/* Caret glyphs drawn with CSS triangles so they stay crisp at any zoom. */
+.inv-step-btns button::before {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 0;
+    height: 0;
+    transform: translate(-50%, -50%);
+    border-left: 3px solid transparent;
+    border-right: 3px solid transparent;
+}
+
+.inv-step-up::before {
+    border-bottom: 4px solid currentColor;
+}
+
+.inv-step-down::before {
+    border-top: 4px solid currentColor;
+}
+
+.inv-lt-total {
+    font-variant-numeric: tabular-nums;
+    color: rgb(var(--nx-ink));
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.inv-lt-danger {
+    color: rgb(var(--nx-signal-danger));
+    font-weight: 600;
+}
+
+.inv-line-table tr.is-overdraw td {
+    background: rgb(var(--nx-signal-danger) / 0.06);
+}
+
+.inv-line-remove {
+    border: 0;
+    background: transparent;
+    color: rgb(var(--nx-ink-3));
+    font-size: var(--fs-lg);
+    line-height: 1;
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: var(--r-sm);
+    transition: color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
+}
+
+.inv-line-remove:hover:not(:disabled) {
+    color: rgb(var(--nx-signal-danger));
+    background: rgb(var(--nx-signal-danger) / 0.08);
+}
+
+.inv-line-remove:disabled {
+    opacity: 0.3;
+    cursor: default;
+}
+
+.inv-line-add {
+    margin-top: var(--sp-4);
+    padding: var(--sp-3) var(--sp-4);
+    width: 100%;
+    background: transparent;
+    border: 1px dashed rgb(var(--nx-rule-strong));
+    border-radius: var(--r-sm);
+    color: rgb(var(--nx-ink-2));
+    font: 600 var(--fs-sm) / 1 var(--font-sans);
+    cursor: pointer;
+    transition: border-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+
+.inv-line-add:hover {
+    border-color: rgb(var(--nx-accent));
+    color: rgb(var(--nx-accent));
+}
+
+/* Per-line proof photo: pick button or thumbnail. */
+.inv-line-photo {
+    display: flex;
+    align-items: center;
+}
+
+.inv-line-photo-btn {
+    white-space: nowrap;
+}
+
+.inv-line-thumb {
+    position: relative;
+    display: inline-flex;
+}
+
+.inv-line-thumb img {
+    width: 36px;
+    height: 36px;
+    object-fit: cover;
+    border-radius: var(--r-sm);
+    border: 1px solid rgb(var(--nx-rule-soft));
+    display: block;
+}
+
+.inv-line-thumb-x {
+    position: absolute;
+    top: -6px;
+    right: -6px;
+    width: 16px;
+    height: 16px;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: rgb(var(--nx-signal-danger));
+    color: #fff;
+    font-size: 11px;
+    line-height: 16px;
+    text-align: center;
+    cursor: pointer;
+}
+
+/* Ledger proof thumbnail. */
+.inv-ledger-thumb {
+    display: inline-block;
+    margin-bottom: var(--sp-2);
+}
+
+.inv-ledger-thumb img {
+    width: 44px;
+    height: 44px;
+    object-fit: cover;
+    border-radius: var(--r-sm);
+    border: 1px solid rgb(var(--nx-rule-soft));
+    display: block;
+}
+
 .inv-inline-form {
     padding: var(--sp-5);
     margin-bottom: var(--sp-5);
@@ -3001,6 +3321,18 @@ td.inv-low {
 
 .inv-vendor-supplies {
     white-space: nowrap;
+}
+
+/* Let the Vendor name column soak up the slack so Contact / Phone / GST /
+   Supplies stay a tidy group and the actions sit flush right — instead of all
+   six columns floating apart on a wide screen. */
+.inv-vendors-table td:first-child,
+.inv-vendors-table th:first-child {
+    width: 100%;
+}
+
+.inv-vendors-table .inv-row-actions {
+    padding-left: var(--sp-6);
 }
 
 /* Docket — the sticky receipt beside a form: figure, breakdown, action. */

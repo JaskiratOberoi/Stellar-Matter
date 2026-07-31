@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { apiUrl } from '../apiClient.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { useBuOptions } from '../hooks/useBuOptions.js';
 import { useInventory } from '../hooks/useInventory.js';
@@ -497,68 +498,201 @@ function StockView({ inventory, onGoto }) {
     );
 }
 
+// -- Order helpers (shared by Receive & Dispatch) --------------------------
+
+let _lineSeq = 0;
+function makeLine(extra = {}) {
+    _lineSeq += 1;
+    return { key: `ln-${_lineSeq}`, materialId: '', packSize: '', packQty: '', photoUrl: '', uploading: false, ...extra };
+}
+
+// A running list of material lines for an order, with add/remove/patch helpers.
+function useOrderLines() {
+    const [lines, setLines] = useState(() => [makeLine()]);
+    const addLine = useCallback(() => setLines((ls) => [...ls, makeLine()]), []);
+    const removeLine = useCallback(
+        (key) => setLines((ls) => (ls.length > 1 ? ls.filter((l) => l.key !== key) : ls)),
+        []
+    );
+    const updateLine = useCallback(
+        (key, patch) => setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l))),
+        []
+    );
+    const resetLines = useCallback(() => setLines([makeLine()]), []);
+    return { lines, addLine, removeLine, updateLine, resetLines };
+}
+
+// Per-line proof photo: tap to pick or capture, shows a thumbnail once uploaded.
+function LinePhoto({ url, uploading, onPick, onClear }) {
+    const inputRef = useRef(null);
+    return (
+        <div className="inv-line-photo">
+            <input
+                ref={inputRef}
+                type="file"
+                accept="image/*"
+                capture="environment"
+                hidden
+                onChange={(e) => {
+                    const f = e.target.files && e.target.files[0];
+                    if (f) onPick(f);
+                    e.target.value = '';
+                }}
+            />
+            {url ? (
+                <span className="inv-line-thumb">
+                    <a href={apiUrl(url)} target="_blank" rel="noreferrer">
+                        <img src={apiUrl(url)} alt="proof" />
+                    </a>
+                    <button type="button" className="inv-line-thumb-x" onClick={onClear} aria-label="Remove photo">×</button>
+                </span>
+            ) : (
+                <button
+                    type="button"
+                    className="chip chip-tool inv-line-photo-btn"
+                    onClick={() => inputRef.current && inputRef.current.click()}
+                    disabled={uploading}
+                >
+                    {uploading ? 'Uploading…' : '+ Photo'}
+                </button>
+            )}
+        </div>
+    );
+}
+
+// A material <select>; when a vendor is chosen its supplied items lead in their
+// own optgroup, the rest follow. Reused by both order forms (dispatch passes no
+// vendor, so it just lists everything).
+function MaterialSelect({ value, onChange, materials, vendor }) {
+    const suppliedIds = vendor ? new Set(vendor.material_ids || []) : null;
+    const supplied = suppliedIds ? materials.filter((m) => suppliedIds.has(m.id)) : [];
+    const rest = suppliedIds ? materials.filter((m) => !suppliedIds.has(m.id)) : materials;
+    return (
+        <select value={value} onChange={(e) => onChange(e.target.value)} required>
+            <option value="">— select —</option>
+            {suppliedIds ? (
+                <>
+                    {supplied.length > 0 && (
+                        <optgroup label={`Supplied by ${vendor.name}`}>
+                            {supplied.map((m) => (
+                                <option key={m.id} value={m.id}>{m.name}</option>
+                            ))}
+                        </optgroup>
+                    )}
+                    {rest.length > 0 && (
+                        <optgroup label="Other materials">
+                            {rest.map((m) => (
+                                <option key={m.id} value={m.id}>{m.name}</option>
+                            ))}
+                        </optgroup>
+                    )}
+                </>
+            ) : (
+                materials.map((m) => (
+                    <option key={m.id} value={m.id}>{m.name}</option>
+                ))
+            )}
+        </select>
+    );
+}
+
+// A number input with a custom, theme-matched up/down stepper. The native
+// spinner is hidden in CSS; these buttons clamp to `min` and don't steal focus.
+function StepInput({ value, onChange, min = 1, ariaLabel }) {
+    const step = (delta) => {
+        const cur = value === '' || value == null ? min - 1 : Number(value);
+        const base = Number.isFinite(cur) ? cur : min - 1;
+        onChange(String(Math.max(min, base + delta)));
+    };
+    return (
+        <span className="inv-step">
+            <input
+                type="number"
+                min={min}
+                value={value}
+                onChange={(e) => onChange(e.target.value)}
+                aria-label={ariaLabel}
+            />
+            <span className="inv-step-btns" aria-hidden="true">
+                <button type="button" tabIndex={-1} className="inv-step-up" onClick={() => step(1)} aria-label="Increase" />
+                <button type="button" tabIndex={-1} className="inv-step-down" onClick={() => step(-1)} aria-label="Decrease" />
+            </span>
+        </span>
+    );
+}
+
 // -- Receive ---------------------------------------------------------------
 
 function ReceiveView({ inventory, canMove, onDone, onGoto }) {
-    const { materials, vendors, locations, balances, createMovement, reload } = inventory;
+    const { materials, vendors, locations, createMovementsBatch, uploadPhoto, reload } = inventory;
     const activeMaterials = materials.filter((m) => m.active);
     const activeVendors = (vendors || []).filter((v) => v.active);
     const activeLocations = locations.filter((l) => l.active);
     const stores = activeLocations.filter((l) => l.kind === 'store');
-    const balMap = useBalanceMap(balances);
+    const matById = useMemo(() => new Map(activeMaterials.map((m) => [m.id, m])), [activeMaterials]);
 
-    const [materialId, setMaterialId] = useState('');
     const [vendorId, setVendorId] = useState('');
     const [toLocationId, setToLocationId] = useState('');
-    const [packSize, setPackSize] = useState('');
-    const [packQty, setPackQty] = useState('');
     const [reference, setReference] = useState('');
     const [note, setNote] = useState('');
     const [busy, setBusy] = useState(false);
     const [err, setErr] = useState(null);
+    const { lines, addLine, removeLine, updateLine, resetLines } = useOrderLines();
 
-    const material = activeMaterials.find((m) => m.id === materialId) || null;
     const vendor = activeVendors.find((v) => v.id === vendorId) || null;
-
-    // When a vendor is picked, split the material dropdown into what they supply
-    // and everything else. Grouping (not filtering) keeps off-list receipts easy.
-    const suppliedIds = useMemo(() => new Set(vendor ? vendor.material_ids || [] : []), [vendor]);
-    const suppliedMaterials = vendor ? activeMaterials.filter((m) => suppliedIds.has(m.id)) : [];
-    const otherMaterials = vendor ? activeMaterials.filter((m) => !suppliedIds.has(m.id)) : activeMaterials;
 
     useEffect(() => {
         if (!toLocationId && stores.length) setToLocationId(stores[0].id);
     }, [stores, toLocationId]);
-    useEffect(() => {
-        if (material) setPackSize(String(material.default_pack_size || 1));
-    }, [material]);
 
-    const total = (Number(packSize) || 0) * (Number(packQty) || 0);
-    const current = materialId && toLocationId ? balMap.get(balanceKey(materialId, toLocationId)) || 0 : 0;
-    const unit = material ? material.base_unit : 'units';
-    const destination = activeLocations.find((l) => l.id === toLocationId) || null;
+    // Default a line's pack size from its material the moment one is chosen.
+    function onPickMaterial(key, materialId) {
+        const m = matById.get(materialId);
+        updateLine(key, {
+            materialId,
+            packSize: m ? String(m.default_pack_size || 1) : ''
+        });
+    }
+
+    async function onPickPhoto(key, file) {
+        updateLine(key, { uploading: true });
+        try {
+            const url = await uploadPhoto(file);
+            updateLine(key, { photoUrl: url, uploading: false });
+        } catch (e) {
+            updateLine(key, { uploading: false });
+            window.alert(`Photo upload failed: ${e.message || e}`);
+        }
+    }
+
+    const validLines = lines.filter((l) => l.materialId && Number(l.packQty) > 0);
+    const totalUnits = validLines.reduce((s, l) => s + (Number(l.packSize) || 0) * (Number(l.packQty) || 0), 0);
+    const anyUploading = lines.some((l) => l.uploading);
 
     async function onSubmit(e) {
         e.preventDefault();
         setErr(null);
-        if (!materialId) return setErr('Select a material.');
         if (!toLocationId) return setErr('Select a destination.');
-        if (!(Number(packQty) > 0)) return setErr('Enter how many packs were received.');
+        if (!validLines.length) return setErr('Add at least one material with a pack count.');
         setBusy(true);
         try {
-            await createMovement({
+            const result = await createMovementsBatch({
                 kind: 'receipt',
-                material_id: materialId,
                 to_location_id: toLocationId,
-                pack_size: Number(packSize) || 1,
-                pack_qty: Number(packQty),
                 vendor_id: vendorId || undefined,
                 reference: reference || undefined,
-                note: note || undefined
+                note: note || undefined,
+                lines: validLines.map((l) => ({
+                    material_id: l.materialId,
+                    pack_size: Number(l.packSize) || 1,
+                    pack_qty: Number(l.packQty),
+                    photo_path: l.photoUrl || undefined
+                }))
             });
             await reload();
-            onDone(`Received ${fmt(total)} ${unit} of ${material ? material.name : ''}.`);
-            setPackQty('');
+            const n = (result.movements && result.movements.length) || validLines.length;
+            onDone(`Received ${fmt(totalUnits)} units across ${fmt(n)} material${n === 1 ? '' : 's'}.`);
+            resetLines();
             setReference('');
             setNote('');
         } catch (e2) {
@@ -585,12 +719,14 @@ function ReceiveView({ inventory, canMove, onDone, onGoto }) {
         );
     }
 
+    const destination = activeLocations.find((l) => l.id === toLocationId) || null;
+
     return (
         <div className="inv-form-layout">
             <section className="inv-panel">
-                <SectionHead title="Receive from vendor" caption="Logs an inbound receipt against the ledger" />
-                <form id="inv-receive-form" className="inv-form" onSubmit={onSubmit}>
-                    <FormStep n="01" title="What arrived" hint="Vendor, material and where it lands">
+                <SectionHead title="Receive from vendor" caption="One vendor, one delivery — add every material on the docket" />
+                <form id="inv-receive-form" className="inv-order-form" onSubmit={onSubmit}>
+                    <FormStep n="01" title="From whom & where" hint="Applies to every line below">
                         <label className="inv-field">
                             <span>Vendor</span>
                             <select value={vendorId} onChange={(e) => setVendorId(e.target.value)}>
@@ -601,33 +737,7 @@ function ReceiveView({ inventory, canMove, onDone, onGoto }) {
                             </select>
                         </label>
                         <label className="inv-field">
-                            <span>Material</span>
-                            <select value={materialId} onChange={(e) => setMaterialId(e.target.value)} required>
-                                <option value="">— select —</option>
-                                {vendor && suppliedMaterials.length > 0 && (
-                                    <optgroup label={`Supplied by ${vendor.name}`}>
-                                        {suppliedMaterials.map((m) => (
-                                            <option key={m.id} value={m.id}>{m.name}</option>
-                                        ))}
-                                    </optgroup>
-                                )}
-                                {vendor ? (
-                                    otherMaterials.length > 0 && (
-                                        <optgroup label="Other materials">
-                                            {otherMaterials.map((m) => (
-                                                <option key={m.id} value={m.id}>{m.name}</option>
-                                            ))}
-                                        </optgroup>
-                                    )
-                                ) : (
-                                    activeMaterials.map((m) => (
-                                        <option key={m.id} value={m.id}>{m.name}</option>
-                                    ))
-                                )}
-                            </select>
-                        </label>
-                        <label className="inv-field">
-                            <span>Destination</span>
+                            <span>Destination store</span>
                             <select value={toLocationId} onChange={(e) => setToLocationId(e.target.value)} required>
                                 <option value="">— select —</option>
                                 {activeLocations.map((l) => (
@@ -635,24 +745,6 @@ function ReceiveView({ inventory, canMove, onDone, onGoto }) {
                                 ))}
                             </select>
                         </label>
-                    </FormStep>
-
-                    <FormStep
-                        n="02"
-                        title="How much"
-                        hint={total > 0 ? `= ${fmt(total)} ${unit}` : `Counted in ${unit}`}
-                    >
-                        <label className="inv-field">
-                            <span>Pack size ({unit}/pack)</span>
-                            <input type="number" min="1" value={packSize} onChange={(e) => setPackSize(e.target.value)} />
-                        </label>
-                        <label className="inv-field">
-                            <span>Number of packs</span>
-                            <input type="number" min="1" value={packQty} onChange={(e) => setPackQty(e.target.value)} required />
-                        </label>
-                    </FormStep>
-
-                    <FormStep n="03" title="Paperwork" hint="Optional, but useful in the audit trail">
                         <label className="inv-field">
                             <span>Reference / invoice #</span>
                             <input value={reference} onChange={(e) => setReference(e.target.value)} placeholder="Optional" />
@@ -662,30 +754,112 @@ function ReceiveView({ inventory, canMove, onDone, onGoto }) {
                             <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Optional" />
                         </label>
                     </FormStep>
+
+                    <div className="inv-order-lines">
+                        <div className="inv-order-lines-head">
+                            <span className="inv-fs-n">02</span>
+                            <div className="inv-fs-titles">
+                                <span className="inv-fs-title">Materials received</span>
+                                <span className="inv-fs-hint">Pack size defaults from the catalog — override if the box differs</span>
+                            </div>
+                        </div>
+                        <div className="inv-line-table-wrap">
+                            <table className="inv-line-table">
+                                <thead>
+                                    <tr>
+                                        <th className="inv-lt-mat">Material</th>
+                                        <th className="inv-lt-num">Pack size</th>
+                                        <th className="inv-lt-num">Packs</th>
+                                        <th className="inv-lt-num">= Units</th>
+                                        <th className="inv-lt-photo">Photo</th>
+                                        <th aria-label="Remove" />
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {lines.map((l) => {
+                                        const lineTotal = (Number(l.packSize) || 0) * (Number(l.packQty) || 0);
+                                        const m = matById.get(l.materialId);
+                                        const unit = m ? m.base_unit : '';
+                                        return (
+                                            <tr key={l.key}>
+                                                <td className="inv-lt-mat">
+                                                    <MaterialSelect
+                                                        value={l.materialId}
+                                                        onChange={(v) => onPickMaterial(l.key, v)}
+                                                        materials={activeMaterials}
+                                                        vendor={vendor}
+                                                    />
+                                                </td>
+                                                <td className="inv-lt-num">
+                                                    <StepInput
+                                                        value={l.packSize}
+                                                        onChange={(v) => updateLine(l.key, { packSize: v })}
+                                                        ariaLabel="Pack size"
+                                                    />
+                                                </td>
+                                                <td className="inv-lt-num">
+                                                    <StepInput
+                                                        value={l.packQty}
+                                                        onChange={(v) => updateLine(l.key, { packQty: v })}
+                                                        ariaLabel="Number of packs"
+                                                    />
+                                                </td>
+                                                <td className="inv-lt-num inv-lt-total">
+                                                    {lineTotal > 0 ? `${fmt(lineTotal)}${unit ? ` ${unit}` : ''}` : '—'}
+                                                </td>
+                                                <td className="inv-lt-photo">
+                                                    <LinePhoto
+                                                        url={l.photoUrl}
+                                                        uploading={l.uploading}
+                                                        onPick={(f) => onPickPhoto(l.key, f)}
+                                                        onClear={() => updateLine(l.key, { photoUrl: '' })}
+                                                    />
+                                                </td>
+                                                <td className="inv-lt-x">
+                                                    <button
+                                                        type="button"
+                                                        className="inv-line-remove"
+                                                        onClick={() => removeLine(l.key)}
+                                                        disabled={lines.length === 1}
+                                                        aria-label="Remove line"
+                                                    >
+                                                        ×
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
+                        <button type="button" className="inv-line-add" onClick={addLine}>
+                            + Add material
+                        </button>
+                    </div>
                 </form>
             </section>
 
             <aside className="inv-docket">
                 <p className="inv-docket-head">Receipt preview</p>
                 <div className="inv-docket-big">
-                    +{fmt(total)}
-                    <span className="inv-docket-unit">{unit}</span>
+                    +{fmt(totalUnits)}
+                    <span className="inv-docket-unit">units</span>
                 </div>
                 <dl className="inv-docket-dl">
                     <div><dt>Vendor</dt><dd>{vendor ? vendor.name : '—'}</dd></div>
-                    <div><dt>Material</dt><dd>{material ? material.name : '—'}</dd></div>
                     <div><dt>Destination</dt><dd>{destination ? destination.name : '—'}</dd></div>
-                    <div>
-                        <dt>Packs</dt>
-                        <dd>{packQty ? `${fmt(Number(packQty))} × ${fmt(Number(packSize) || 0)}` : '—'}</dd>
-                    </div>
-                    <div><dt>Current on hand</dt><dd>{fmt(current)}</dd></div>
-                    <div><dt>After receipt</dt><dd className="inv-docket-strong">{fmt(current + total)}</dd></div>
+                    <div><dt>Materials</dt><dd>{fmt(validLines.length)}</dd></div>
+                    <div><dt>With photo</dt><dd>{fmt(validLines.filter((l) => l.photoUrl).length)}</dd></div>
                 </dl>
                 {err && <p className="login-err inv-docket-err">{err}</p>}
                 <div className="inv-docket-actions">
-                    <button type="submit" form="inv-receive-form" className="btn-primary" disabled={busy || total <= 0}>
-                        {busy ? 'Recording…' : 'Record receipt'}
+                    <button
+                        type="submit"
+                        form="inv-receive-form"
+                        className="btn-primary"
+                        disabled={busy || anyUploading || !validLines.length}
+                    >
+                        {busy ? 'Recording…' : anyUploading ? 'Uploading photo…' : 'Record receipt'}
                     </button>
                 </div>
             </aside>
@@ -696,7 +870,7 @@ function ReceiveView({ inventory, canMove, onDone, onGoto }) {
 // -- Dispatch --------------------------------------------------------------
 
 function DispatchView({ inventory, canMove, onDone, onGoto }) {
-    const { materials, locations, balances, createMovement, reload, syncBusLocations } = inventory;
+    const { materials, locations, balances, createMovementsBatch, uploadPhoto, reload, syncBusLocations } = inventory;
     const buOptions = useBuOptions();
     const activeMaterials = materials.filter((m) => m.active);
     const activeLocations = locations.filter((l) => l.active);
@@ -706,17 +880,15 @@ function DispatchView({ inventory, canMove, onDone, onGoto }) {
         (l) => l.kind !== 'store' && l.kind !== 'business_unit' && l.kind !== 'lab'
     );
     const balMap = useBalanceMap(balances);
+    const matById = useMemo(() => new Map(activeMaterials.map((m) => [m.id, m])), [activeMaterials]);
 
-    const [materialId, setMaterialId] = useState('');
     const [fromLocationId, setFromLocationId] = useState('');
     const [toLocationId, setToLocationId] = useState('');
-    const [qty, setQty] = useState('');
     const [reference, setReference] = useState('');
     const [note, setNote] = useState('');
     const [busy, setBusy] = useState(false);
     const [err, setErr] = useState(null);
-
-    const material = activeMaterials.find((m) => m.id === materialId) || null;
+    const { lines, addLine, removeLine, updateLine, resetLines } = useOrderLines();
 
     useEffect(() => {
         if (!buOptions.options.length) return;
@@ -736,8 +908,6 @@ function DispatchView({ inventory, canMove, onDone, onGoto }) {
         }
     }, [fromLocationId, toLocationId]);
 
-    const available = materialId && fromLocationId ? balMap.get(balanceKey(materialId, fromLocationId)) || 0 : 0;
-    const qtyNum = Number(qty) || 0;
     const buLabDestinations = activeLocations.filter(
         (l) => l.id !== fromLocationId && (l.kind === 'business_unit' || l.kind === 'lab')
     );
@@ -746,56 +916,74 @@ function DispatchView({ inventory, canMove, onDone, onGoto }) {
     );
     const isAllBus = toLocationId === ALL_BUS_DEST;
     const allBuEstimate = Math.max(buLabDestinations.length, buOptions.options.length);
-    const destCount = isAllBus ? allBuEstimate : 1;
-    const totalDispatchQty = qtyNum * destCount;
-    const remaining = available - totalDispatchQty;
-    const overdraw = totalDispatchQty > available;
-    const unit = material ? material.base_unit : 'units';
+    const destCount = isAllBus ? Math.max(allBuEstimate, 1) : 1;
     const source = activeLocations.find((l) => l.id === fromLocationId) || null;
     const dest = activeLocations.find((l) => l.id === toLocationId) || null;
+
+    function onPickMaterial(key, materialId) {
+        const m = matById.get(materialId);
+        updateLine(key, { materialId, packSize: m ? String(m.default_pack_size || 1) : '' });
+    }
+
+    async function onPickPhoto(key, file) {
+        updateLine(key, { uploading: true });
+        try {
+            const url = await uploadPhoto(file);
+            updateLine(key, { photoUrl: url, uploading: false });
+        } catch (e) {
+            updateLine(key, { uploading: false });
+            window.alert(`Photo upload failed: ${e.message || e}`);
+        }
+    }
+
+    // Enrich each line with its derived qty, source availability and overdraw.
+    const decorated = lines.map((l) => {
+        const qty = (Number(l.packSize) || 0) * (Number(l.packQty) || 0);
+        const available = l.materialId && fromLocationId ? balMap.get(balanceKey(l.materialId, fromLocationId)) || 0 : 0;
+        const required = qty * destCount;
+        const overdraw = qty > 0 && required > available;
+        return { ...l, qty, available, required, overdraw };
+    });
+    const validLines = decorated.filter((l) => l.materialId && l.qty > 0);
+    const totalOut = validLines.reduce((s, l) => s + l.required, 0);
+    const anyOverdraw = validLines.some((l) => l.overdraw);
+    const anyUploading = lines.some((l) => l.uploading);
 
     async function onSubmit(e) {
         e.preventDefault();
         setErr(null);
-        if (!materialId) return setErr('Select a material.');
         if (!fromLocationId) return setErr('Select a source.');
         if (!toLocationId) return setErr('Select a destination.');
         if (!isAllBus && fromLocationId === toLocationId) return setErr('Source and destination must differ.');
-        if (!(qtyNum > 0)) return setErr('Enter a quantity.');
+        if (!validLines.length) return setErr('Add at least one material with a pack count.');
         if (isAllBus && allBuEstimate === 0) {
             return setErr('No business units or labs available. Sync client locations or add destinations in Catalog.');
         }
+        if (anyOverdraw) return setErr('One or more lines exceed available stock at the source.');
         setBusy(true);
         try {
+            const result = await createMovementsBatch({
+                kind: 'dispatch',
+                from_location_id: fromLocationId,
+                ...(isAllBus ? { to_all_bus: true } : { to_location_id: toLocationId }),
+                reference: reference || undefined,
+                note: note || undefined,
+                lines: validLines.map((l) => ({
+                    material_id: l.materialId,
+                    pack_size: Number(l.packSize) || 1,
+                    pack_qty: Number(l.packQty),
+                    photo_path: l.photoUrl || undefined
+                }))
+            });
+            await reload();
+            const moved = (result.movements && result.movements.length) || validLines.length;
             if (isAllBus) {
-                const result = await createMovement({
-                    kind: 'dispatch',
-                    material_id: materialId,
-                    from_location_id: fromLocationId,
-                    to_all_bus: true,
-                    qty_base: qtyNum,
-                    reference: reference || undefined,
-                    note: note || undefined
-                });
-                await reload();
-                const n = result.destinations || (result.movements && result.movements.length) || 0;
-                onDone(
-                    `Dispatched ${fmt(qtyNum)} ${unit} of ${material ? material.name : ''} to ${fmt(n)} BUs/labs (${fmt(qtyNum * n)} total).`
-                );
+                const nDest = (result.destination_names && result.destination_names.length) || destCount;
+                onDone(`Dispatched ${fmt(validLines.length)} material${validLines.length === 1 ? '' : 's'} to ${fmt(nDest)} BUs/labs (${fmt(moved)} movements).`);
             } else {
-                await createMovement({
-                    kind: 'dispatch',
-                    material_id: materialId,
-                    from_location_id: fromLocationId,
-                    to_location_id: toLocationId,
-                    qty_base: qtyNum,
-                    reference: reference || undefined,
-                    note: note || undefined
-                });
-                await reload();
-                onDone(`Dispatched ${fmt(qtyNum)} ${unit} of ${material ? material.name : ''} to ${dest ? dest.name : ''}.`);
+                onDone(`Dispatched ${fmt(validLines.length)} material${validLines.length === 1 ? '' : 's'} (${fmt(totalOut)} units) to ${dest ? dest.name : ''}.`);
             }
-            setQty('');
+            resetLines();
             setReference('');
             setNote('');
         } catch (e2) {
@@ -842,19 +1030,10 @@ function DispatchView({ inventory, canMove, onDone, onGoto }) {
             <section className="inv-panel">
                 <SectionHead
                     title="Dispatch or transfer stock"
-                    caption="Move stock out of a store, or between business units in a shortage"
+                    caption="Pick where it goes, then list every material in the shipment"
                 />
-                <form id="inv-dispatch-form" className="inv-form" onSubmit={onSubmit}>
-                    <FormStep n="01" title="Route" hint="Source and destination must differ">
-                        <label className="inv-field">
-                            <span>Material</span>
-                            <select value={materialId} onChange={(e) => setMaterialId(e.target.value)} required>
-                                <option value="">— select —</option>
-                                {activeMaterials.map((m) => (
-                                    <option key={m.id} value={m.id}>{m.name}</option>
-                                ))}
-                            </select>
-                        </label>
+                <form id="inv-dispatch-form" className="inv-order-form" onSubmit={onSubmit}>
+                    <FormStep n="01" title="Route & paperwork" hint="Applies to every line below">
                         <label className="inv-field">
                             <span>From</span>
                             <select value={fromLocationId} onChange={(e) => setFromLocationId(e.target.value)} required>
@@ -912,66 +1091,128 @@ function DispatchView({ inventory, canMove, onDone, onGoto }) {
                                 )}
                             </select>
                         </label>
-                    </FormStep>
-
-                    <FormStep
-                        n="02"
-                        title="How much"
-                        hint={isAllBus && destCount > 1 ? `Per destination · ${fmt(destCount)} sites` : `Counted in ${unit}`}
-                    >
-                        <label className="inv-field">
-                            <span>Quantity ({unit})</span>
-                            <input type="number" min="1" value={qty} onChange={(e) => setQty(e.target.value)} required />
-                        </label>
-                    </FormStep>
-
-                    <FormStep n="03" title="Paperwork" hint="Optional, but useful in the audit trail">
                         <label className="inv-field">
                             <span>Reference</span>
                             <input value={reference} onChange={(e) => setReference(e.target.value)} placeholder="Optional" />
                         </label>
-                        <label className="inv-field">
+                        <label className="inv-field inv-field-wide">
                             <span>Note</span>
                             <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Optional" />
                         </label>
                     </FormStep>
+
+                    <div className="inv-order-lines">
+                        <div className="inv-order-lines-head">
+                            <span className="inv-fs-n">02</span>
+                            <div className="inv-fs-titles">
+                                <span className="inv-fs-title">Materials in this shipment</span>
+                                <span className="inv-fs-hint">
+                                    {isAllBus && destCount > 1
+                                        ? `Quantities are per destination · ${fmt(destCount)} sites`
+                                        : 'Pack size defaults from the catalog — override if needed'}
+                                </span>
+                            </div>
+                        </div>
+                        <div className="inv-line-table-wrap">
+                            <table className="inv-line-table">
+                                <thead>
+                                    <tr>
+                                        <th className="inv-lt-mat">Material</th>
+                                        <th className="inv-lt-num">Pack size</th>
+                                        <th className="inv-lt-num">Packs</th>
+                                        <th className="inv-lt-num">= Units</th>
+                                        <th className="inv-lt-num">Available</th>
+                                        <th className="inv-lt-photo">Photo</th>
+                                        <th aria-label="Remove" />
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {decorated.map((l) => {
+                                        const m = matById.get(l.materialId);
+                                        const unit = m ? m.base_unit : '';
+                                        return (
+                                            <tr key={l.key} className={l.overdraw ? 'is-overdraw' : ''}>
+                                                <td className="inv-lt-mat">
+                                                    <MaterialSelect
+                                                        value={l.materialId}
+                                                        onChange={(v) => onPickMaterial(l.key, v)}
+                                                        materials={activeMaterials}
+                                                        vendor={null}
+                                                    />
+                                                </td>
+                                                <td className="inv-lt-num">
+                                                    <StepInput
+                                                        value={l.packSize}
+                                                        onChange={(v) => updateLine(l.key, { packSize: v })}
+                                                        ariaLabel="Pack size"
+                                                    />
+                                                </td>
+                                                <td className="inv-lt-num">
+                                                    <StepInput
+                                                        value={l.packQty}
+                                                        onChange={(v) => updateLine(l.key, { packQty: v })}
+                                                        ariaLabel="Number of packs"
+                                                    />
+                                                </td>
+                                                <td className="inv-lt-num inv-lt-total">
+                                                    {l.qty > 0 ? `${fmt(l.required)}${unit ? ` ${unit}` : ''}` : '—'}
+                                                </td>
+                                                <td className={`inv-lt-num${l.overdraw ? ' inv-lt-danger' : ''}`}>
+                                                    {l.materialId ? fmt(l.available) : '—'}
+                                                </td>
+                                                <td className="inv-lt-photo">
+                                                    <LinePhoto
+                                                        url={l.photoUrl}
+                                                        uploading={l.uploading}
+                                                        onPick={(f) => onPickPhoto(l.key, f)}
+                                                        onClear={() => updateLine(l.key, { photoUrl: '' })}
+                                                    />
+                                                </td>
+                                                <td className="inv-lt-x">
+                                                    <button
+                                                        type="button"
+                                                        className="inv-line-remove"
+                                                        onClick={() => removeLine(l.key)}
+                                                        disabled={lines.length === 1}
+                                                        aria-label="Remove line"
+                                                    >
+                                                        ×
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
+                        <button type="button" className="inv-line-add" onClick={addLine}>
+                            + Add material
+                        </button>
+                    </div>
                 </form>
             </section>
 
-            <aside className={`inv-docket${overdraw ? ' is-error' : ''}`}>
-                <p className="inv-docket-head">Source stock</p>
+            <aside className={`inv-docket${anyOverdraw ? ' is-error' : ''}`}>
+                <p className="inv-docket-head">Dispatch preview</p>
                 <div className="inv-docket-big">
-                    {fmt(available)}
-                    <span className="inv-docket-unit">on hand</span>
+                    −{fmt(totalOut)}
+                    <span className="inv-docket-unit">units</span>
                 </div>
                 <dl className="inv-docket-dl">
-                    <div><dt>Material</dt><dd>{material ? material.name : '—'}</dd></div>
                     <div><dt>From</dt><dd>{source ? source.name : '—'}</dd></div>
                     <div>
                         <dt>To</dt>
                         <dd>{isAllBus ? `All BUs & labs (${fmt(destCount)})` : dest ? dest.name : '—'}</dd>
                     </div>
-                    {qtyNum > 0 && (
-                        <>
-                            <div>
-                                <dt>Dispatching</dt>
-                                <dd>
-                                    −{fmt(totalDispatchQty)}
-                                    {isAllBus && destCount > 1 ? ` (${fmt(qtyNum)} each)` : ''}
-                                </dd>
-                            </div>
-                            <div>
-                                <dt>Remaining</dt>
-                                <dd className={overdraw ? 'inv-docket-danger' : 'inv-docket-strong'}>
-                                    {overdraw ? 'Insufficient' : fmt(Math.max(remaining, 0))}
-                                </dd>
-                            </div>
-                        </>
+                    <div><dt>Materials</dt><dd>{fmt(validLines.length)}</dd></div>
+                    {isAllBus && destCount > 1 && (
+                        <div><dt>Per destination</dt><dd>{fmt(validLines.reduce((s, l) => s + l.qty, 0))} units</dd></div>
                     )}
+                    <div><dt>With photo</dt><dd>{fmt(validLines.filter((l) => l.photoUrl).length)}</dd></div>
                 </dl>
-                {overdraw && (
+                {anyOverdraw && (
                     <p className="inv-docket-note">
-                        Not enough stock at the source for this quantity
+                        One or more lines exceed available stock at the source
                         {isAllBus && destCount > 1 ? ` across ${fmt(destCount)} destinations` : ''}.
                     </p>
                 )}
@@ -981,9 +1222,9 @@ function DispatchView({ inventory, canMove, onDone, onGoto }) {
                         type="submit"
                         form="inv-dispatch-form"
                         className="btn-primary"
-                        disabled={busy || qtyNum <= 0 || overdraw || (isAllBus && allBuEstimate === 0)}
+                        disabled={busy || anyUploading || !validLines.length || anyOverdraw || (isAllBus && allBuEstimate === 0)}
                     >
-                        {busy ? 'Dispatching…' : isAllBus ? 'Dispatch to all BUs/labs' : 'Record dispatch'}
+                        {busy ? 'Dispatching…' : anyUploading ? 'Uploading photo…' : isAllBus ? 'Dispatch to all BUs/labs' : 'Record dispatch'}
                     </button>
                 </div>
             </aside>
@@ -1121,11 +1362,22 @@ function LedgerView({ inventory, canMove, onDone }) {
                                         {fmt(r.qty_base)}<span className="inv-unit">{r.base_unit}</span>
                                     </td>
                                     <td className="muted small inv-details">
+                                        {r.photo_path && (
+                                            <a
+                                                className="inv-ledger-thumb"
+                                                href={apiUrl(r.photo_path)}
+                                                target="_blank"
+                                                rel="noreferrer"
+                                                title="Open proof photo"
+                                            >
+                                                <img src={apiUrl(r.photo_path)} alt="proof" />
+                                            </a>
+                                        )}
                                         {(r.vendor_name || r.vendor) && <div>Vendor: {r.vendor_name || r.vendor}</div>}
                                         {r.reference && <div>Ref: {r.reference}</div>}
                                         {r.note && <div>{r.note}</div>}
                                         {r.voided_at && <span className="inv-void-tag">voided</span>}
-                                        {!r.vendor_name && !r.vendor && !r.reference && !r.note && !r.voided_at && (
+                                        {!r.photo_path && !r.vendor_name && !r.vendor && !r.reference && !r.note && !r.voided_at && (
                                             <span className="inv-dash">·</span>
                                         )}
                                     </td>
@@ -1353,7 +1605,7 @@ function VendorsView({ inventory, canManageCatalog, onDone }) {
 
             {vendors.length ? (
                 <div className="inv-table-wrap">
-                    <table className="inv-table">
+                    <table className="inv-table inv-vendors-table">
                         <thead>
                             <tr>
                                 <th>Vendor</th>

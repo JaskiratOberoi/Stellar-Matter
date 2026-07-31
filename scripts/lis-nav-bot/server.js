@@ -1578,6 +1578,18 @@ app.get('/api/runs/:id', async (req, res) => {
     }
 });
 
+// Inventory proof-of-goods photos live on the bind-mounted out/ volume and are
+// served read-only here. Filenames are random, so a URL is effectively an
+// unguessable capability for this internal tool. Mounted before the SPA static
+// handler so /inventory-photos/* never falls through to index.html.
+try {
+    const { PHOTOS_DIR, URL_PREFIX, ensurePhotosDir } = require('../../server/inventoryPhotos');
+    ensurePhotosDir();
+    app.use(URL_PREFIX, express.static(PHOTOS_DIR, { fallthrough: false, maxAge: '365d', immutable: true }));
+} catch (e) {
+    console.warn('[stellar-matter] inventory photo serving disabled:', e.message);
+}
+
 const publicDir = path.join(__dirname, 'public');
 app.use(express.static(publicDir));
 

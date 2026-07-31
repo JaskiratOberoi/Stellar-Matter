@@ -499,7 +499,8 @@ async function listMovements(orgId, { limit = 50, beforeId = null, materialId = 
     params.push(limit);
     const r = await pool.query(
         `SELECT mv.id, mv.kind, mv.material_id, mv.qty_base, mv.pack_size, mv.pack_qty,
-                mv.vendor, mv.vendor_id, mv.reference, mv.note, mv.occurred_at, mv.created_at,
+                mv.vendor, mv.vendor_id, mv.reference, mv.note, mv.photo_path,
+                mv.occurred_at, mv.created_at,
                 mv.created_by, mv.voided_at, mv.voided_by,
                 mv.from_location_id, mv.to_location_id,
                 m.name AS material_name, m.base_unit,
@@ -539,76 +540,86 @@ async function getMovement(orgId, id) {
  * @param {object} input material_id/kind/from/to/qty_base + optional pack/vendor/etc.
  * @param {object} [opts] { allowNegative, createdBy }
  */
+// Core insert used by createMovement and createMovementsBatch. Assumes the
+// caller owns the transaction (client is mid-BEGIN). Locks the material,
+// validates locations/vendor, guards against overdraw on the source, then
+// inserts one row and returns its id. Because it reads on-hand from within the
+// same transaction, sequential lines in a batch see each other's inserts.
+async function insertMovementTx(client, orgId, input, opts = {}) {
+    // Lock the material row so concurrent movements of the same material
+    // serialise — otherwise two dispatches could both read stale stock.
+    const mat = await client.query(
+        `SELECT id FROM inventory_materials WHERE org_id = $1 AND id = $2 FOR UPDATE`,
+        [orgId, input.materialId]
+    );
+    if (!mat.rows.length) throw httpError('Unknown material', 404);
+
+    // Validate referenced locations belong to this org.
+    for (const locId of [input.fromLocationId, input.toLocationId]) {
+        if (!locId) continue;
+        const loc = await client.query(
+            `SELECT id FROM inventory_locations WHERE org_id = $1 AND id = $2`,
+            [orgId, locId]
+        );
+        if (!loc.rows.length) throw httpError('Unknown location', 404);
+    }
+
+    // Validate the vendor (if any) belongs to this org, mirroring locations.
+    if (input.vendorId) {
+        const ven = await client.query(
+            `SELECT id FROM inventory_vendors WHERE org_id = $1 AND id = $2`,
+            [orgId, input.vendorId]
+        );
+        if (!ven.rows.length) throw httpError('Unknown vendor', 404);
+    }
+
+    // Negative-stock guard on the source location.
+    if (input.fromLocationId && !opts.allowNegative) {
+        const available = await onHandAt(client, orgId, input.materialId, input.fromLocationId);
+        if (available < input.qtyBase) {
+            throw httpError(
+                `Insufficient stock: ${available} on hand, ${input.qtyBase} requested`,
+                409,
+                { code: 'INSUFFICIENT_STOCK', available }
+            );
+        }
+    }
+
+    const ins = await client.query(
+        `INSERT INTO inventory_movements
+            (org_id, material_id, kind, from_location_id, to_location_id, qty_base,
+             pack_size, pack_qty, vendor, vendor_id, reference, note, photo_path, occurred_at, created_by)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, COALESCE($14, NOW()), $15)
+         RETURNING id`,
+        [
+            orgId,
+            input.materialId,
+            input.kind,
+            input.fromLocationId ?? null,
+            input.toLocationId ?? null,
+            input.qtyBase,
+            input.packSize ?? null,
+            input.packQty ?? null,
+            input.vendor ?? null,
+            input.vendorId ?? null,
+            input.reference ?? null,
+            input.note ?? null,
+            input.photoPath ?? null,
+            input.occurredAt ?? null,
+            opts.createdBy ?? null
+        ]
+    );
+    return ins.rows[0].id;
+}
+
 async function createMovement(orgId, input, opts = {}) {
     const pool = getPool();
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
-
-        // Lock the material row so concurrent movements of the same material
-        // serialise — otherwise two dispatches could both read stale stock.
-        const mat = await client.query(
-            `SELECT id FROM inventory_materials WHERE org_id = $1 AND id = $2 FOR UPDATE`,
-            [orgId, input.materialId]
-        );
-        if (!mat.rows.length) throw httpError('Unknown material', 404);
-
-        // Validate referenced locations belong to this org.
-        for (const locId of [input.fromLocationId, input.toLocationId]) {
-            if (!locId) continue;
-            const loc = await client.query(
-                `SELECT id FROM inventory_locations WHERE org_id = $1 AND id = $2`,
-                [orgId, locId]
-            );
-            if (!loc.rows.length) throw httpError('Unknown location', 404);
-        }
-
-        // Validate the vendor (if any) belongs to this org, mirroring locations.
-        if (input.vendorId) {
-            const ven = await client.query(
-                `SELECT id FROM inventory_vendors WHERE org_id = $1 AND id = $2`,
-                [orgId, input.vendorId]
-            );
-            if (!ven.rows.length) throw httpError('Unknown vendor', 404);
-        }
-
-        // Negative-stock guard on the source location.
-        if (input.fromLocationId && !opts.allowNegative) {
-            const available = await onHandAt(client, orgId, input.materialId, input.fromLocationId);
-            if (available < input.qtyBase) {
-                throw httpError(
-                    `Insufficient stock: ${available} on hand, ${input.qtyBase} requested`,
-                    409,
-                    { code: 'INSUFFICIENT_STOCK', available }
-                );
-            }
-        }
-
-        const ins = await client.query(
-            `INSERT INTO inventory_movements
-                (org_id, material_id, kind, from_location_id, to_location_id, qty_base,
-                 pack_size, pack_qty, vendor, vendor_id, reference, note, occurred_at, created_by)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, COALESCE($13, NOW()), $14)
-             RETURNING id`,
-            [
-                orgId,
-                input.materialId,
-                input.kind,
-                input.fromLocationId ?? null,
-                input.toLocationId ?? null,
-                input.qtyBase,
-                input.packSize ?? null,
-                input.packQty ?? null,
-                input.vendor ?? null,
-                input.vendorId ?? null,
-                input.reference ?? null,
-                input.note ?? null,
-                input.occurredAt ?? null,
-                opts.createdBy ?? null
-            ]
-        );
+        const id = await insertMovementTx(client, orgId, input, opts);
         await client.query('COMMIT');
-        return getMovement(orgId, ins.rows[0].id);
+        return getMovement(orgId, id);
     } catch (err) {
         await client.query('ROLLBACK').catch(() => {});
         throw err;
@@ -639,73 +650,81 @@ async function resolveBuLabDestinationIds(client, orgId, fromLocationId) {
  * Fan a single dispatch quantity out to every BU/lab destination. Runs in one
  * transaction and checks total draw (qty × destinations) against source stock.
  */
+// Fan one dispatch line out to every BU/lab destination, within a transaction
+// the caller owns. Returns the inserted ids plus the destination rows so the
+// caller can report names. Checks total draw (qty × destinations) up front.
+async function insertDispatchAllBusTx(client, orgId, input, opts = {}) {
+    const mat = await client.query(
+        `SELECT id FROM inventory_materials WHERE org_id = $1 AND id = $2 FOR UPDATE`,
+        [orgId, input.materialId]
+    );
+    if (!mat.rows.length) throw httpError('Unknown material', 404);
+
+    const fromLoc = await client.query(
+        `SELECT id FROM inventory_locations WHERE org_id = $1 AND id = $2`,
+        [orgId, input.fromLocationId]
+    );
+    if (!fromLoc.rows.length) throw httpError('Unknown location', 404);
+
+    const destinations = await resolveBuLabDestinationIds(client, orgId, input.fromLocationId);
+    if (!destinations.length) {
+        throw httpError(
+            'No business units or labs found. Sync client locations or add BU/lab destinations in Catalog.',
+            400
+        );
+    }
+
+    const totalQty = input.qtyBase * destinations.length;
+    if (!opts.allowNegative) {
+        const available = await onHandAt(client, orgId, input.materialId, input.fromLocationId);
+        if (available < totalQty) {
+            throw httpError(
+                `Insufficient stock: ${available} on hand, ${totalQty} requested (${input.qtyBase} × ${destinations.length} destinations)`,
+                409,
+                { code: 'INSUFFICIENT_STOCK', available, destinations: destinations.length }
+            );
+        }
+    }
+
+    const ids = [];
+    for (const dest of destinations) {
+        const ins = await client.query(
+            `INSERT INTO inventory_movements
+                (org_id, material_id, kind, from_location_id, to_location_id, qty_base,
+                 pack_size, pack_qty, vendor, vendor_id, reference, note, photo_path, occurred_at, created_by)
+             VALUES ($1, $2, 'dispatch', $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, COALESCE($13, NOW()), $14)
+             RETURNING id`,
+            [
+                orgId,
+                input.materialId,
+                input.fromLocationId,
+                dest.id,
+                input.qtyBase,
+                input.packSize ?? null,
+                input.packQty ?? null,
+                input.vendor ?? null,
+                input.vendorId ?? null,
+                input.reference ?? null,
+                input.note ?? null,
+                input.photoPath ?? null,
+                input.occurredAt ?? null,
+                opts.createdBy ?? null
+            ]
+        );
+        ids.push(ins.rows[0].id);
+    }
+    return { ids, destinations };
+}
+
 async function createDispatchToAllBus(orgId, input, opts = {}) {
     const pool = getPool();
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
-
-        const mat = await client.query(
-            `SELECT id FROM inventory_materials WHERE org_id = $1 AND id = $2 FOR UPDATE`,
-            [orgId, input.materialId]
-        );
-        if (!mat.rows.length) throw httpError('Unknown material', 404);
-
-        const fromLoc = await client.query(
-            `SELECT id FROM inventory_locations WHERE org_id = $1 AND id = $2`,
-            [orgId, input.fromLocationId]
-        );
-        if (!fromLoc.rows.length) throw httpError('Unknown location', 404);
-
-        const destinations = await resolveBuLabDestinationIds(client, orgId, input.fromLocationId);
-        if (!destinations.length) {
-            throw httpError(
-                'No business units or labs found. Sync client locations or add BU/lab destinations in Catalog.',
-                400
-            );
-        }
-
-        const totalQty = input.qtyBase * destinations.length;
-        if (!opts.allowNegative) {
-            const available = await onHandAt(client, orgId, input.materialId, input.fromLocationId);
-            if (available < totalQty) {
-                throw httpError(
-                    `Insufficient stock: ${available} on hand, ${totalQty} requested (${input.qtyBase} × ${destinations.length} destinations)`,
-                    409,
-                    { code: 'INSUFFICIENT_STOCK', available, destinations: destinations.length }
-                );
-            }
-        }
-
-        const movementIds = [];
-        for (const dest of destinations) {
-            const ins = await client.query(
-                `INSERT INTO inventory_movements
-                    (org_id, material_id, kind, from_location_id, to_location_id, qty_base,
-                     pack_size, pack_qty, vendor, reference, note, occurred_at, created_by)
-                 VALUES ($1, $2, 'dispatch', $3, $4, $5, $6, $7, $8, $9, $10, COALESCE($11, NOW()), $12)
-                 RETURNING id`,
-                [
-                    orgId,
-                    input.materialId,
-                    input.fromLocationId,
-                    dest.id,
-                    input.qtyBase,
-                    input.packSize ?? null,
-                    input.packQty ?? null,
-                    input.vendor ?? null,
-                    input.reference ?? null,
-                    input.note ?? null,
-                    input.occurredAt ?? null,
-                    opts.createdBy ?? null
-                ]
-            );
-            movementIds.push(ins.rows[0].id);
-        }
-
+        const { ids, destinations } = await insertDispatchAllBusTx(client, orgId, input, opts);
         await client.query('COMMIT');
         const movements = [];
-        for (const id of movementIds) {
+        for (const id of ids) {
             movements.push(await getMovement(orgId, id));
         }
         return {
@@ -713,6 +732,68 @@ async function createDispatchToAllBus(orgId, input, opts = {}) {
             destinations: destinations.length,
             qty_per_destination: input.qtyBase,
             destination_names: destinations.map((d) => d.name)
+        };
+    } catch (err) {
+        await client.query('ROLLBACK').catch(() => {});
+        throw err;
+    } finally {
+        client.release();
+    }
+}
+
+/**
+ * Record a whole order — several material lines sharing one header — in a single
+ * transaction, so an overdraw or bad line rolls the entire order back. Used by
+ * the Receive (vendor + destination) and Dispatch (from + to / all-BUs) forms.
+ *
+ * @param {object} header { kind, vendorId?, fromLocationId?, toLocationId?, toAllBus?, reference?, note?, occurredAt? }
+ * @param {Array}  lines  [{ materialId, qtyBase, packSize?, packQty?, photoPath? }]
+ * @param {object} [opts] { allowNegative, createdBy }
+ */
+async function createMovementsBatch(orgId, header, lines, opts = {}) {
+    if (!Array.isArray(lines) || !lines.length) {
+        throw httpError('At least one line is required', 400);
+    }
+    const pool = getPool();
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        const movementIds = [];
+        let destinationNames = [];
+        for (const line of lines) {
+            const input = {
+                kind: header.kind,
+                materialId: line.materialId,
+                fromLocationId: header.fromLocationId ?? null,
+                toLocationId: header.toLocationId ?? null,
+                qtyBase: line.qtyBase,
+                packSize: line.packSize ?? null,
+                packQty: line.packQty ?? null,
+                vendor: header.vendor ?? null,
+                vendorId: header.vendorId ?? null,
+                reference: header.reference ?? null,
+                note: header.note ?? null,
+                photoPath: line.photoPath ?? null,
+                occurredAt: header.occurredAt ?? null
+            };
+            if (header.kind === 'dispatch' && header.toAllBus) {
+                const { ids, destinations } = await insertDispatchAllBusTx(client, orgId, input, opts);
+                movementIds.push(...ids);
+                destinationNames = destinations.map((d) => d.name);
+            } else {
+                const id = await insertMovementTx(client, orgId, input, opts);
+                movementIds.push(id);
+            }
+        }
+        await client.query('COMMIT');
+        const movements = [];
+        for (const id of movementIds) {
+            movements.push(await getMovement(orgId, id));
+        }
+        return {
+            movements,
+            lines: lines.length,
+            destination_names: destinationNames.length ? destinationNames : undefined
         };
     } catch (err) {
         await client.query('ROLLBACK').catch(() => {});
@@ -861,6 +942,7 @@ module.exports = {
     listMovements,
     getMovement,
     createMovement,
+    createMovementsBatch,
     createDispatchToAllBus,
     voidMovement,
     getSummary
