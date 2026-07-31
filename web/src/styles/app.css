@@ -2161,6 +2161,16 @@ table.packages td.envelope-cell {
     overflow: auto;
 }
 
+/* Long press opens the code list, so suppress the iOS text-selection callout
+   and Android's tap highlight that would otherwise fire at the same moment. */
+.sales-chip {
+    -webkit-touch-callout: none;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+}
+
 .sales-codes-head {
     display: flex;
     align-items: baseline;
@@ -2170,6 +2180,20 @@ table.packages td.envelope-cell {
     top: 0;
     background: rgb(var(--nx-surface));
     padding-bottom: 4px;
+}
+
+.sales-codes-close {
+    flex: 0 0 auto;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border: 1px solid rgb(var(--nx-rule-soft));
+    border-radius: var(--r-sm);
+    background: rgb(var(--nx-surface-2));
+    color: rgb(var(--nx-ink-2));
+    font-size: 12px;
+    line-height: 1;
+    cursor: pointer;
 }
 
 .sales-codes-name {
