@@ -3,16 +3,20 @@ import { createPortal } from 'react-dom';
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { BrandMark } from './BrandMark.jsx';
+import { usePwaInstall } from '../hooks/usePwaInstall.js';
 
 export function Topbar({ statusPill, lastUpdated, onOrgSwitched }) {
     const { user, orgs, authRequired, logout, switchOrg } = useAuth();
     const location = useLocation();
     const isInventory = location.pathname.startsWith('/inventory');
     const [menuOpen, setMenuOpen] = useState(false);
+    const [installHintOpen, setInstallHintOpen] = useState(false);
     const drawerRef = useRef(null);
+    const { installMode, triggerNativeInstall } = usePwaInstall();
 
     useEffect(() => {
         setMenuOpen(false);
+        setInstallHintOpen(false);
     }, [location.pathname]);
 
     useEffect(() => {
@@ -130,6 +134,51 @@ export function Topbar({ statusPill, lastUpdated, onOrgSwitched }) {
                                 <p className="eyebrow">Navigate</p>
                                 {navLink}
                             </div>
+                            {installMode !== 'installed' && (
+                                <div className="topbar-drawer-section">
+                                    <p className="eyebrow">App</p>
+                                    {installMode === 'native' ? (
+                                        <button
+                                            type="button"
+                                            className="chip chip-tool topbar-drawer-install"
+                                            onClick={async () => {
+                                                await triggerNativeInstall();
+                                                setMenuOpen(false);
+                                            }}
+                                        >
+                                            Install app
+                                        </button>
+                                    ) : (
+                                        <>
+                                            <button
+                                                type="button"
+                                                className="chip chip-tool topbar-drawer-install"
+                                                aria-expanded={installHintOpen ? 'true' : 'false'}
+                                                onClick={() => setInstallHintOpen((v) => !v)}
+                                            >
+                                                Install app
+                                            </button>
+                                            {installHintOpen && (
+                                                <p className="topbar-drawer-hint">
+                                                    {installMode === 'ios' ? (
+                                                        <>
+                                                            Tap <strong>Share</strong> then{' '}
+                                                            <strong>Add to Home Screen</strong> to install Inventory on
+                                                            your phone.
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            Open your browser menu and choose{' '}
+                                                            <strong>Add to Home Screen</strong> or{' '}
+                                                            <strong>Install app</strong>.
+                                                        </>
+                                                    )}
+                                                </p>
+                                            )}
+                                        </>
+                                    )}
+                                </div>
+                            )}
                             {user && (
                                 <>
                                     <div className="topbar-drawer-section">

@@ -3837,6 +3837,18 @@ tr.inv-voided td:nth-child(3) {
     color: rgb(var(--nx-ink-2));
 }
 
+.topbar-drawer-hint {
+    margin: 0;
+    font-size: var(--fs-sm);
+    line-height: 1.5;
+    color: rgb(var(--nx-ink-2));
+}
+
+.topbar-drawer-install {
+    width: 100%;
+    justify-content: flex-start;
+}
+
 /* ==========================================================================
    Mobile-first overrides (<=640 / <=400)
    ========================================================================== */
