@@ -12,6 +12,7 @@ export function useRunStatus({ onIdle } = {}) {
     const [status, setStatus] = useState(null);
     const [running, setRunning] = useState(false);
     const [submitError, setSubmitError] = useState(null);
+    const [cancelling, setCancelling] = useState(false);
     const pollTimer = useRef(null);
     const wasRunningRef = useRef(false);
     // Ref pattern keeps `tick`'s identity stable across App re-renders even
@@ -102,5 +103,26 @@ export function useRunStatus({ onIdle } = {}) {
         [tick, startPolling]
     );
 
-    return { status, running, submitError, submit, refresh: tick };
+    const cancel = useCallback(async () => {
+        setCancelling(true);
+        try {
+            const r = await apiFetch('/api/run/cancel', { method: 'POST' });
+            const j = await r.json().catch(() => ({}));
+            if (!r.ok) {
+                // 409 means the run already finished on its own — the next
+                // poll will clear the strip, so this isn't worth an error.
+                if (r.status !== 409) setSubmitError(j.error ? String(j.error) : `HTTP ${r.status}`);
+                return { ok: false, error: j.error };
+            }
+            await tick();
+            return { ok: true };
+        } catch (e) {
+            setSubmitError(String(e));
+            return { ok: false, error: String(e) };
+        } finally {
+            setCancelling(false);
+        }
+    }, [tick]);
+
+    return { status, running, submitError, submit, cancel, cancelling, refresh: tick };
 }

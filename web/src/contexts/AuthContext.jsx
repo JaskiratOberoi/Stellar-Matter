@@ -75,6 +75,9 @@ export function AuthProvider({ children }) {
     }, []);
 
     const logout = useCallback(() => {
+        // Tell the server first so the audit trail records the sign-out, but
+        // never let a failed/offline call keep the user signed in.
+        apiFetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
         setToken(null);
         setUser(null);
         setOrgs([]);

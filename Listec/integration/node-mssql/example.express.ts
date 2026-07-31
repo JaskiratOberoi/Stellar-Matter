@@ -18,6 +18,7 @@ import {
     fetchAllWorksheetReports,
     fetchAllWorksheetReportsByCodes,
     getListecPool,
+    QueryAbortedError,
 } from './listec.client';
 import type { WorksheetReportFilters } from './listec.types';
 import { aggregatePackages } from './listec.aggregate';
@@ -55,6 +56,27 @@ function strOrNull(v: unknown): string | null {
   if (v == null) return null;
   const s = String(v).trim();
   return s === '' ? null : s;
+}
+
+/**
+ * Abort signal that fires when the HTTP client hangs up before we answered.
+ *
+ * A tracer drain is a long chain of SP calls; without this, cancelling a run
+ * upstream just orphans it — MSSQL keeps scanning for minutes and holds a pool
+ * connection for a response no one will read. Passing this signal into the
+ * drain cancels the in-flight request and stops the page loop.
+ */
+function abortOnDisconnect(req: express.Request, res: express.Response): AbortSignal {
+  const ctrl = new AbortController();
+  res.on('close', () => {
+    if (!res.writableEnded) ctrl.abort();
+  });
+  return ctrl.signal;
+}
+
+/** True when a route failure is really "the caller went away". */
+function isAborted(e: unknown): boolean {
+  return e instanceof QueryAbortedError || (e instanceof Error && e.name === 'QueryAbortedError');
 }
 
 interface ResolvedFilters {
@@ -149,6 +171,7 @@ app.get('/api/worksheet-reports', async (req, res) => {
  * for lis-nav-bot's package-label aggregator.
  */
 app.get('/api/worksheet-reports/packages', async (req, res) => {
+  const signal = abortOnDisconnect(req, res);
   try {
     const { filters, resolved, unresolved } = await filtersFromQuery(req.query);
     // Tracer optimisation: when the caller passes `bucketTestCodes=he011,he022,...`
@@ -188,7 +211,7 @@ app.get('/api/worksheet-reports/packages', async (req, res) => {
       }
     }
 
-    const rows = await fetchAllWorksheetReports(filters);
+    const rows = await fetchAllWorksheetReports(filters, { signal });
     const summary = aggregatePackages(rows, {
       bucketCodes,
       bucketCities: bucketCities.length ? bucketCities : undefined,
@@ -197,6 +220,11 @@ app.get('/api/worksheet-reports/packages', async (req, res) => {
     });
     res.json({ ...summary, resolved, unresolved, filters });
   } catch (e) {
+    if (isAborted(e)) {
+      console.warn('[listec] /packages cancelled by caller — SP request aborted.');
+      if (!res.writableEnded) res.status(499).end();
+      return;
+    }
     const msg = e instanceof Error ? e.message : String(e);
     res.status(400).json({ error: msg });
   }
@@ -213,6 +241,7 @@ app.get('/api/worksheet-reports/packages', async (req, res) => {
  * endpoint.
  */
 app.get('/api/worksheet-reports/packages-by-codes', async (req, res) => {
+  const signal = abortOnDisconnect(req, res);
   try {
     const codesRaw = req.query.clientCodes;
     if (typeof codesRaw !== 'string' || !codesRaw.trim()) {
@@ -248,7 +277,7 @@ app.get('/api/worksheet-reports/packages-by-codes', async (req, res) => {
             .filter(Boolean)
         : [];
 
-    const rows = await fetchAllWorksheetReportsByCodes(byCodesFilters, codes);
+    const rows = await fetchAllWorksheetReportsByCodes(byCodesFilters, codes, { signal });
     const summary = aggregatePackages(rows, { bucketCodes });
     res.json({
       ...summary,
@@ -258,6 +287,11 @@ app.get('/api/worksheet-reports/packages-by-codes', async (req, res) => {
       clientCodesUsed: codes,
     });
   } catch (e) {
+    if (isAborted(e)) {
+      console.warn('[listec] /packages-by-codes cancelled by caller — SP request aborted.');
+      if (!res.writableEnded) res.status(499).end();
+      return;
+    }
     const msg = e instanceof Error ? e.message : String(e);
     res.status(400).json({ error: msg });
   }
@@ -339,6 +373,41 @@ app.get('/api/lookups', async (_req, res) => {
     res.json(await dumpLookups());
   } catch (e) {
     res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+  }
+});
+
+/**
+ * Resolve business-unit names/codes to their numeric master ids.
+ *
+ * `/api/lookups` returns a flat list of accepted business-unit strings, but it
+ * folds BusinessUnitCode and BusinessUnitName into the same array with no hint
+ * that two entries point at one master row. Callers fanning out per BU need
+ * that distinction: "QUGEN" and "QUGEN PATHLABS" are both id 1, so running
+ * both fires the identical drain twice and writes two identical tiles.
+ *
+ * Backed by the same cached lookup map `resolveBusinessUnitId` uses, so this
+ * is an in-memory hit — no SP execution per name.
+ */
+app.get('/api/resolve/business-units', async (req, res) => {
+  try {
+    const raw = req.query.names;
+    const names =
+      typeof raw === 'string'
+        ? raw
+            .split(',')
+            .map((s) => s.trim())
+            .filter(Boolean)
+        : [];
+    if (names.length === 0) {
+      return res.status(400).json({ error: 'names query parameter is required (comma-separated)' });
+    }
+    const resolved: Record<string, number | null> = {};
+    for (const name of names) {
+      resolved[name] = await resolveBusinessUnitId(name);
+    }
+    return res.json({ resolved });
+  } catch (e) {
+    return res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
   }
 });
 

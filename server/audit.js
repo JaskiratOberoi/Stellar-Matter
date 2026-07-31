@@ -21,15 +21,20 @@
 // object with { user, ip, userAgent } shaped like a request.
 
 const { getPool, useDatabase } = require('./db/pool');
+const { lookupGeo, normalizeIp } = require('./geoip');
+
+// Set on the request once an explicit logAudit() call has covered it, so the
+// catch-all middleware in auditRequest.js doesn't write a duplicate generic row.
+const AUDITED = Symbol.for('stellarMatter.audited');
 
 function clientIp(req) {
     if (!req) return null;
-    if (typeof req.ip === 'string' && req.ip) return req.ip;
-    if (req.headers && req.headers['x-forwarded-for']) {
-        return String(req.headers['x-forwarded-for']).split(',')[0].trim();
-    }
-    if (req.connection && req.connection.remoteAddress) return req.connection.remoteAddress;
-    return null;
+    let raw = null;
+    if (typeof req.ip === 'string' && req.ip) raw = req.ip;
+    else if (req.headers && req.headers['x-forwarded-for']) {
+        raw = String(req.headers['x-forwarded-for']).split(',')[0].trim();
+    } else if (req.connection && req.connection.remoteAddress) raw = req.connection.remoteAddress;
+    return normalizeIp(raw);
 }
 
 function userAgent(req) {
@@ -68,13 +73,25 @@ async function logAudit(req, fields) {
             ? req.user.username
             : null;
     const outcome = fields.outcome === 'failure' ? 'failure' : 'success';
+    const ip = clientIp(req);
+
+    if (req && typeof req === 'object') {
+        try {
+            req[AUDITED] = true;
+        } catch {
+            // Frozen/proxy request object — the worst case is a duplicate
+            // generic row from the catch-all middleware.
+        }
+    }
 
     try {
-        await pool.query(
+        const r = await pool.query(
             `INSERT INTO audit_log
                 (actor_id, actor_username, action, target_type, target_id,
-                 outcome, ip, user_agent, "before", "after", metadata)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+                 outcome, ip, user_agent, "before", "after", metadata,
+                 method, path, status_code)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+             RETURNING id`,
             [
                 actorId,
                 actorUsername,
@@ -82,17 +99,46 @@ async function logAudit(req, fields) {
                 fields.targetType != null ? String(fields.targetType) : null,
                 fields.targetId != null ? String(fields.targetId) : null,
                 outcome,
-                clientIp(req),
+                ip,
                 userAgent(req),
                 safeJson(fields.before),
                 safeJson(fields.after),
-                safeJson(fields.metadata)
+                safeJson(fields.metadata),
+                fields.method != null ? String(fields.method) : req && req.method ? String(req.method) : null,
+                fields.path != null ? String(fields.path).slice(0, 512) : requestPath(req),
+                Number.isFinite(fields.statusCode) ? Math.floor(fields.statusCode) : null
             ]
         );
+        if (r.rows.length && ip) {
+            // Geo resolution can hit the network, so it happens after the row
+            // is durable and outside the caller's await.
+            enrichGeo(r.rows[0].id, ip);
+        }
     } catch (err) {
         // Never let audit failure block the request that triggered it.
         console.error('[audit] insert failed:', err && err.message ? err.message : err);
     }
 }
 
-module.exports = { logAudit };
+function requestPath(req) {
+    if (!req) return null;
+    const raw = req.originalUrl || req.url;
+    if (!raw) return null;
+    return String(raw).split('?')[0].slice(0, 512);
+}
+
+function enrichGeo(rowId, ip) {
+    Promise.resolve()
+        .then(() => lookupGeo(ip))
+        .then((geo) => {
+            if (!geo) return null;
+            const pool = getPool();
+            if (!pool) return null;
+            return pool.query(`UPDATE audit_log SET geo = $1 WHERE id = $2`, [safeJson(geo), rowId]);
+        })
+        .catch((err) => {
+            console.error('[audit] geo enrich failed:', err && err.message ? err.message : err);
+        });
+}
+
+module.exports = { logAudit, AUDITED };

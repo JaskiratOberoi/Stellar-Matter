@@ -23,6 +23,9 @@ import { RunProgress } from '../components/RunProgress.jsx';
  *   submit: (body: object) => Promise<{ ok: boolean, error?: string }>,
  *   running: boolean,
  *   runFanOut?: object | null,
+ *   onCancelRun?: () => Promise<{ ok: boolean }>,
+ *   cancelling?: boolean,
+ *   cancellable?: boolean,
  *   clientPagesByNorm: Record<string, number>,
  *   buOptions: { options: { id: string, label: string }[], error: string | null },
  *   buSelected: Set<string>,
@@ -39,6 +42,9 @@ export function TracerPage({
     submit,
     running,
     runFanOut,
+    onCancelRun,
+    cancelling,
+    cancellable,
     clientPagesByNorm,
     buOptions,
     buSelected,
@@ -196,6 +202,12 @@ export function TracerPage({
         return body;
     }, []);
 
+    const handleCancel = useCallback(async () => {
+        if (typeof onCancelRun !== 'function') return;
+        setLocalError(null);
+        await onCancelRun();
+    }, [onCancelRun]);
+
     const handleRun = useCallback(
         async (snap) => {
             setLocalError(null);
@@ -218,7 +230,12 @@ export function TracerPage({
                     setLocalError(String(r.error || 'Tracer run failed'));
                     return;
                 }
-                await waitForRunIdle(() => apiFetch('/api/run/status'));
+                const final = await waitForRunIdle(() => apiFetch('/api/run/status'));
+                if (final && final.cancelled) {
+                    setLocalError(
+                        'Tracer run cancelled. Any scope that finished before the stop kept its tiles; the rest were aborted on the server.'
+                    );
+                }
                 pendingBannerRef.current = {
                     batchIso,
                     from: snap.fromDate,
@@ -284,8 +301,22 @@ export function TracerPage({
                 </div>
 
                 <div className="tracer-hide-print">
-                    {showFanOut && <RunProgress payload={runFanOut} />}
-                    {running && !showFanOut && <RunProgress fallbackText="Starting run…" />}
+                    {showFanOut && (
+                        <RunProgress
+                            payload={runFanOut}
+                            onCancel={handleCancel}
+                            cancelling={cancelling}
+                            cancelDisabled={!cancellable || viewerDisabled}
+                        />
+                    )}
+                    {running && !showFanOut && (
+                        <RunProgress
+                            fallbackText="Starting run…"
+                            onCancel={handleCancel}
+                            cancelling={cancelling}
+                            cancelDisabled={!cancellable || viewerDisabled}
+                        />
+                    )}
                     {!running && tracerBusy && <RunProgress fallbackText="Preparing next tracer step…" />}
                 </div>
 

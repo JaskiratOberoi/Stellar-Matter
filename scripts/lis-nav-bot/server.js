@@ -277,8 +277,20 @@ function buildTileFromRunFiles(outDir, packagesFileName) {
         filter.region && typeof filter.region === 'object' && String(filter.region.key || '').trim() ? filter.region : null;
     const reqRegion =
         req.region && typeof req.region === 'object' && String(req.region.key || '').trim() ? req.region : null;
+    const collatedSrc =
+        (filter.collated && typeof filter.collated === 'object' ? filter.collated : null) ||
+        (req.collated && typeof req.collated === 'object' ? req.collated : null);
+    const collated = collatedSrc
+        ? {
+              label: String(collatedSrc.label || 'Collated').trim() || 'Collated',
+              businessUnits: Array.isArray(collatedSrc.businessUnits) ? collatedSrc.businessUnits.slice() : [],
+              regionTargets: Array.isArray(collatedSrc.regionTargets) ? collatedSrc.regionTargets.slice() : []
+          }
+        : null;
+    let tracerScope = String(filter.tracerScope || req.tracerScope || '').trim().toLowerCase();
+    if (tracerScope !== 'collated' && collated) tracerScope = 'collated';
     const region =
-        filtRegion || reqRegion
+        tracerScope !== 'collated' && (filtRegion || reqRegion)
             ? {
                   kind: String((filtRegion || reqRegion).kind || '').trim(),
                   key: String((filtRegion || reqRegion).key || '').trim(),
@@ -287,13 +299,15 @@ function buildTileFromRunFiles(outDir, packagesFileName) {
                           .trim() || String((filtRegion || reqRegion).key || '').trim()
               }
             : null;
-    let tracerScope = String(filter.tracerScope || req.tracerScope || '').trim().toLowerCase();
-    if (tracerScope !== 'region' && region) tracerScope = 'region';
-    if (!tracerScope || tracerScope === 'bu') tracerScope = region ? 'region' : 'bu';
-    const kind = tracerScope === 'region' ? 'region' : 'bu';
+    if (tracerScope !== 'collated') {
+        if (tracerScope !== 'region' && region) tracerScope = 'region';
+        if (!tracerScope || tracerScope === 'bu') tracerScope = region ? 'region' : 'bu';
+    }
+    const kind = tracerScope === 'collated' ? 'collated' : tracerScope === 'region' ? 'region' : 'bu';
     let bu =
         (filter.bu != null && String(filter.bu).trim()) || (req.bu != null && String(req.bu).trim()) || '';
     if (!bu && kind === 'region' && region && region.label) bu = region.label;
+    if (!bu && kind === 'collated' && collated) bu = collated.label;
     bu = String(bu).trim() || '—';
     const source = (main && main.source) || (pkg.source && String(pkg.source)) || 'scrape';
     const sidCount = main && Array.isArray(main.sidsFoundOnPage1) ? main.sidsFoundOnPage1.length : 0;
@@ -377,6 +391,7 @@ function buildTileFromRunFiles(outDir, packagesFileName) {
         tracerScope,
         kind,
         region,
+        collated,
         source,
         mode,
         urineContainers,
@@ -452,8 +467,18 @@ let jobState = {
     outPackagesPath: null,
     exitCode: null,
     fanOut: null,
-    lastFanOut: null
+    lastFanOut: null,
+    cancelled: false
 };
+
+/**
+ * Abort handle for the run currently in flight, or null when nothing is
+ * cancellable. Only the tracer batch honours it today — the legacy scrape
+ * path drives Puppeteer and has no safe mid-run abort point.
+ *
+ * @type {{ runId: string, controller: AbortController, kind: string } | null}
+ */
+let activeRunAbort = null;
 
 app.use(express.json({ limit: '64kb' }));
 
@@ -479,6 +504,10 @@ let runsDb = null;
 // into Postgres so Tracer Region chips + chip-to-client_codes resolution can
 // answer from db-1 instead of round-tripping to MSSQL on every page load.
 let clientLocationsSync = null;
+// Phase 13: catch-all audit middleware. Records every state-changing API call
+// that a route handler did not explicitly audit, so the admin audit trail is
+// complete rather than curated.
+let auditRequests = null;
 try {
     const serverDir = path.resolve(__dirname, '..', '..', 'server');
     auth = require(path.join(serverDir, 'auth'));
@@ -487,6 +516,7 @@ try {
     inventoryApi = require(path.join(serverDir, 'routes', 'inventoryApi'));
     runMigrate = require(path.join(serverDir, 'db', 'migrate')).migrate;
     auditLog = require(path.join(serverDir, 'audit')).logAudit;
+    auditRequests = require(path.join(serverDir, 'auditRequest')).auditRequests;
     runsDb = require(path.join(serverDir, 'db', 'runs'));
     clientLocationsSync = require(path.join(serverDir, 'sync', 'syncClientLocations'));
 } catch (e) {
@@ -495,6 +525,10 @@ try {
         console.warn('[stellar-matter] DATABASE_URL set but auth modules failed to load:', e.message);
     }
 }
+
+// Registered ahead of the routers so its response-finish hook is attached
+// before any handler can end the request.
+if (auditRequests) app.use(auditRequests());
 
 if (authApi) app.use('/api/auth', authApi);
 if (adminApi) app.use('/api/admin', adminApi);
@@ -562,6 +596,9 @@ app.get('/api/run/status', (_req, res) => {
         state: jobState.state,
         runId: jobState.runId,
         startedAt: jobState.startedAt,
+        cancellable: !!activeRunAbort && jobState.state === 'running',
+        cancelRequested: !!(activeRunAbort && activeRunAbort.controller.signal.aborted),
+        cancelled: !!jobState.cancelled,
         error: jobState.error,
         summary: jobState.summary,
         resultSummary: jobState.state === 'idle' ? jobState.summary : null,
@@ -572,6 +609,36 @@ app.get('/api/run/status', (_req, res) => {
         fanOut: jobState.fanOut,
         lastFanOut: jobState.state === 'idle' ? jobState.lastFanOut : null
     });
+});
+
+/**
+ * Cancel the in-flight run.
+ *
+ * Aborting the controller drops the sockets held open against Listec, which
+ * that service turns into `request.cancel()` on the MS SQL request — so the
+ * expensive scan stops on the LIS box rather than running to completion for a
+ * result nobody will read. The batch then unwinds normally and reports every
+ * unfinished scope as `cancelled`, leaving already-written artefacts intact.
+ */
+app.post('/api/run/cancel', requireRunStarter, (req, res) => {
+    if (jobState.state !== 'running' || !activeRunAbort) {
+        return res.status(409).json({ error: 'No cancellable run is in progress.' });
+    }
+    const { runId, controller, kind } = activeRunAbort;
+    const already = controller.signal.aborted;
+    if (!already) controller.abort();
+
+    if (auditLog) {
+        auditLog(req, {
+            action: 'tracer-run.cancel',
+            targetType: 'tracer-run',
+            targetId: runId,
+            outcome: 'success',
+            metadata: { source: 'sql-tracer', kind, already_requested: already }
+        }).catch(() => {});
+    }
+
+    res.json({ ok: true, runId, alreadyRequested: already });
 });
 
 /**
@@ -738,7 +805,47 @@ app.get('/api/tracer/sales-marketing-users/codes', async (req, res) => {
         if (!r.ok) {
             return res.status(502).json({ error: `Listec ${r.status}: ${text.slice(0, 300)}` });
         }
-        res.type('application/json').send(text);
+        // `detail=1` asks us to name the codes. Listec only knows the raw MCC
+        // codes; the client name / city lives in the Postgres client_locations
+        // mirror, so the join happens here rather than adding a second LIS
+        // round trip. Unknown codes are simply omitted — the caller still has
+        // the code itself and a stale mirror shouldn't blank the list.
+        if (String(req.query.detail || '') !== '1' || !useDatabase()) {
+            return res.type('application/json').send(text);
+        }
+        const payload = JSON.parse(text);
+        const codesByUser =
+            payload && payload.codesByUser && typeof payload.codesByUser === 'object'
+                ? payload.codesByUser
+                : {};
+        const allCodes = [
+            ...new Set(
+                Object.values(codesByUser)
+                    .flatMap((arr) => (Array.isArray(arr) ? arr : []))
+                    .map((c) => String(c).trim().toUpperCase())
+                    .filter(Boolean)
+            )
+        ];
+        /** @type {Record<string, object>} */
+        const clientsByCode = {};
+        if (allCodes.length > 0) {
+            const q = await getPool().query(
+                `SELECT code, name, city_label, state_label, business_unit_name, active
+                   FROM client_locations
+                  WHERE code = ANY($1::text[])`,
+                [allCodes]
+            );
+            for (const row of q.rows) {
+                clientsByCode[String(row.code).toUpperCase()] = {
+                    name: row.name || null,
+                    city: row.city_label || null,
+                    state: row.state_label || null,
+                    businessUnit: row.business_unit_name || null,
+                    active: row.active !== false
+                };
+            }
+        }
+        res.json({ ...payload, clientsByCode });
     } catch (e) {
         res.status(502).json({ error: String(e && e.message ? e.message : e) });
     }
@@ -1288,6 +1395,9 @@ app.post('/api/tracer-run', requireRunStarter, async (req, res) => {
         ? [collatedLabel]
         : [...businessUnits, ...regionProgressRows.map((r) => r.bu), ...salesProgressRows.map((r) => r.bu)];
 
+    const abortController = new AbortController();
+    activeRunAbort = { runId, controller: abortController, kind: 'tracer' };
+
     jobState = {
         state: 'running',
         runId,
@@ -1306,7 +1416,8 @@ app.post('/api/tracer-run', requireRunStarter, async (req, res) => {
             failed: [],
             items: [...buProgressRows, ...regionProgressRows, ...salesProgressRows, ...collatedProgressRows]
         },
-        lastFanOut: null
+        lastFanOut: null,
+        cancelled: false
     };
 
     const orgId = (req.user && req.user.activeOrgId) || 'org-default';
@@ -1362,11 +1473,14 @@ app.post('/api/tracer-run', requireRunStarter, async (req, res) => {
                 toHour,
                 orgId,
                 outDir: resolveOutDir(),
-                concurrency: 3,
+                // Left unset so runTracerBatch applies its own default (4) and
+                // honours TRACER_FANOUT_CONCURRENCY. Pinning it here overrode
+                // both.
                 listecApiBase: listecApiBase(),
                 onProgress,
                 collate,
-                collateLabel: collatedLabel
+                collateLabel: collatedLabel,
+                signal: abortController.signal
             });
 
             const collatedItems = Array.isArray(result.collatedItems) ? result.collatedItems : [];
@@ -1374,15 +1488,19 @@ app.post('/api/tracer-run', requireRunStarter, async (req, res) => {
 
             // Ingest every per-mode artefact into Postgres so the tile wall
             // sees them on the next /api/runs/tiles poll without waiting for
-            // the boot-time backfill sweep. Fire-and-forget per artefact;
+            // the boot-time backfill sweep. Awaited before the run flips to
+            // idle: the Tracer page reloads tiles the moment it sees idle, and
+            // an artefact that hasn't landed yet renders as a missing row.
             // ingestRunSafe never throws.
             if (runsDb) {
+                const ingests = [];
                 for (const it of allWrites) {
                     if (it.state !== 'done') continue;
                     for (const cid of Object.values(it.runIds || {})) {
-                        if (cid) runsDb.ingestRunSafe(resolveOutDir(), cid).catch(() => {});
+                        if (cid) ingests.push(runsDb.ingestRunSafe(resolveOutDir(), cid));
                     }
                 }
+                await Promise.allSettled(ingests);
             }
 
             const mapSnap = (it) => ({
@@ -1412,12 +1530,14 @@ app.post('/api/tracer-run', requireRunStarter, async (req, res) => {
                 ]
             };
 
+            const wasCancelled = !!result.cancelled || abortController.signal.aborted;
             const anyFail =
                 result.failed.length > 0 ||
                 result.regionFailed.length > 0 ||
                 collatedFailed.length > 0;
             const errTxt =
-                anyFail ?
+                wasCancelled ? 'Run cancelled before it finished. Completed scopes kept their tiles.'
+                : anyFail ?
                     `Failed: ${[...result.failed, ...result.regionFailed, ...collatedFailed].join('; ')}`
                 :   null;
             jobState = {
@@ -1429,25 +1549,32 @@ app.post('/api/tracer-run', requireRunStarter, async (req, res) => {
                 result: null,
                 outMainPath: null,
                 outPackagesPath: null,
-                exitCode: anyFail ? 1 : 0,
+                exitCode: wasCancelled || anyFail ? 1 : 0,
                 fanOut: null,
-                lastFanOut: fanOutSnapshot
+                lastFanOut: fanOutSnapshot,
+                cancelled: wasCancelled
             };
         } catch (e) {
             const partial = jobState.fanOut;
+            const wasCancelled = abortController.signal.aborted;
             jobState = {
                 state: 'idle',
                 runId,
                 startedAt,
-                error: String(e && e.message ? e.message : e),
+                error: wasCancelled
+                    ? 'Run cancelled before it finished. Completed scopes kept their tiles.'
+                    : String(e && e.message ? e.message : e),
                 summary: null,
                 result: null,
                 outMainPath: null,
                 outPackagesPath: null,
                 exitCode: 1,
                 fanOut: null,
-                lastFanOut: partial
+                lastFanOut: partial,
+                cancelled: wasCancelled
             };
+        } finally {
+            if (activeRunAbort && activeRunAbort.runId === runId) activeRunAbort = null;
         }
     });
 

@@ -17,6 +17,7 @@
     "build": "npm run build -w web",
     "start": "node server/index.js",
     "migrate": "node server/db/migrate.js",
+    "backfill:audit-geo": "node server/db/backfillAuditGeo.js",
     "cli": "node cli/stellar-matter-cli.js"
   },
   "bin": {

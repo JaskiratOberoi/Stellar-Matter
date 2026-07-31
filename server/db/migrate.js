@@ -120,6 +120,19 @@ async function migrate() {
             `CREATE INDEX IF NOT EXISTS audit_log_actor_idx ON audit_log (actor_id, created_at DESC);`
         );
 
+        // Phase 13 (audit trail) — request shape + resolved geography for the
+        // captured IP. geo is filled in asynchronously after the row lands
+        // (server/geoip.js) so a slow lookup never delays a login; it stays
+        // NULL for private-network IPs and when GEOIP_ENABLED=0.
+        await client.query(`ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS geo JSONB`);
+        await client.query(`ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS method TEXT`);
+        await client.query(`ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS path TEXT`);
+        await client.query(`ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS status_code INT`);
+        await client.query(
+            `CREATE INDEX IF NOT EXISTS audit_log_actor_username_idx
+             ON audit_log (actor_username, created_at DESC);`
+        );
+
         // organizations + user_org_assignments. The default org is seeded so
         // every existing user (and every existing on-disk run, by convention)
         // belongs to a real row instead of NULL. Single-org deployments simply

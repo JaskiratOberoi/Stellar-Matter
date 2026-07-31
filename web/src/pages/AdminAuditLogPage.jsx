@@ -1,12 +1,17 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { apiFetch } from '../apiClient.js';
+import { ActorHoverCard, describeUserAgent, formatGeo } from '../components/ActorHoverCard.jsx';
 
 const ACTION_GROUPS = [
     { id: '', label: 'All actions' },
     { id: 'auth.', label: 'Authentication' },
     { id: 'admin.user.', label: 'User management' },
-    { id: 'run.', label: 'Run starts' }
+    { id: 'admin.org.', label: 'Org management' },
+    { id: 'admin.', label: 'All admin actions' },
+    { id: 'inventory.', label: 'Inventory' },
+    { id: 'run.', label: 'Run starts' },
+    { id: 'api.', label: 'Other API activity' }
 ];
 
 const OUTCOMES = [
@@ -28,6 +33,8 @@ export function AdminAuditLogPage() {
     const [entries, setEntries] = useState([]);
     const [actionFilter, setActionFilter] = useState('');
     const [outcomeFilter, setOutcomeFilter] = useState('');
+    const [searchInput, setSearchInput] = useState('');
+    const [search, setSearch] = useState('');
     const [loading, setLoading] = useState(true);
     const [err, setErr] = useState(null);
     const [nextCursor, setNextCursor] = useState(null);
@@ -46,6 +53,7 @@ export function AdminAuditLogPage() {
                 params.set('limit', '50');
                 if (actionFilter) params.set('action', actionFilter);
                 if (outcomeFilter) params.set('outcome', outcomeFilter);
+                if (search) params.set('q', search);
                 if (append && nextCursor != null) params.set('before_id', String(nextCursor));
                 const r = await apiFetch(`/api/admin/audit-log?${params.toString()}`);
                 if (!r.ok) {
@@ -62,7 +70,7 @@ export function AdminAuditLogPage() {
                 else setLoading(false);
             }
         },
-        [actionFilter, outcomeFilter, nextCursor]
+        [actionFilter, outcomeFilter, search, nextCursor]
     );
 
     // Reset cursor + reload when filters change.
@@ -70,7 +78,13 @@ export function AdminAuditLogPage() {
         setNextCursor(null);
         load({ append: false });
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [actionFilter, outcomeFilter]);
+    }, [actionFilter, outcomeFilter, search]);
+
+    // Debounce the search box so typing doesn't fire a query per keystroke.
+    useEffect(() => {
+        const t = setTimeout(() => setSearch(searchInput.trim()), 350);
+        return () => clearTimeout(t);
+    }, [searchInput]);
 
     const grouped = useMemo(() => entries, [entries]);
 
@@ -79,10 +93,11 @@ export function AdminAuditLogPage() {
             <header className="admin-header row-between">
                 <div>
                     <p className="eyebrow">Admin</p>
-                    <h1 className="wordmark">Audit log</h1>
+                    <h1 className="wordmark">Audit trail</h1>
                     <p className="muted small">
-                        Append-only record of logins, admin user mutations, and run starts. Actor, target,
-                        before/after snapshots are captured for diffing.
+                        Append-only record of every action taken in the portal — logins, admin and inventory
+                        mutations, run starts, and any other state-changing request. Hover a username to see
+                        the IP, location and device behind that action.
                     </p>
                 </div>
                 <div className="admin-actions">
@@ -116,6 +131,15 @@ export function AdminAuditLogPage() {
                         ))}
                     </select>
                 </label>
+                <label className="audit-filter audit-filter-search">
+                    <span className="muted small">Search</span>
+                    <input
+                        type="search"
+                        value={searchInput}
+                        placeholder="user, action, IP or place"
+                        onChange={(e) => setSearchInput(e.target.value)}
+                    />
+                </label>
                 <button
                     type="button"
                     className="chip chip-tool"
@@ -140,6 +164,7 @@ export function AdminAuditLogPage() {
                             <th>Target</th>
                             <th>Outcome</th>
                             <th>IP</th>
+                            <th>Location</th>
                             <th aria-label="expand" />
                         </tr>
                     </thead>
@@ -154,7 +179,7 @@ export function AdminAuditLogPage() {
                         ))}
                         {!grouped.length && (
                             <tr>
-                                <td colSpan={7} className="muted">
+                                <td colSpan={8} className="muted">
                                     No audit entries match this filter.
                                 </td>
                             </tr>
@@ -180,20 +205,38 @@ export function AdminAuditLogPage() {
 }
 
 function AuditRow({ entry, expanded, onToggle }) {
-    const outcomeChip = entry.outcome === 'failure' ? 'env-big' : 'env-small';
+    const outcomeChip = entry.outcome === 'failure' ? 'is-failure' : 'is-success';
+    const location = formatGeo(entry.geo);
+    const device = describeUserAgent(entry.user_agent);
+    const target = entry.target_type ? `${entry.target_type}:${entry.target_id || '—'}` : '—';
     return (
         <>
             <tr className={expanded ? 'rank-1' : ''}>
                 <td className="muted small">{fmtTime(entry.created_at)}</td>
-                <td className="label">{entry.action}</td>
-                <td className="muted small">{entry.actor_username || entry.actor_id || '—'}</td>
+                <td className="label">
+                    {entry.action}
+                    {entry.method && entry.path && (
+                        <span className="muted small audit-endpoint">
+                            {entry.method} {entry.path}
+                        </span>
+                    )}
+                </td>
                 <td className="muted small">
-                    {entry.target_type ? `${entry.target_type}:${entry.target_id || '—'}` : '—'}
+                    {entry.actor_username || entry.actor_id ? (
+                        <ActorHoverCard entry={entry} />
+                    ) : (
+                        'anonymous'
+                    )}
+                </td>
+                <td className="muted small" title={target}>
+                    {target}
                 </td>
                 <td>
-                    <span className={`env-chip ${outcomeChip}`}>{entry.outcome}</span>
+                    <span className={`env-chip audit-outcome ${outcomeChip}`}>{entry.outcome}</span>
+                    {entry.status_code ? <span className="muted small"> {entry.status_code}</span> : null}
                 </td>
                 <td className="muted small">{entry.ip || '—'}</td>
+                <td className="muted small">{location || '—'}</td>
                 <td>
                     <button type="button" className="chip chip-tool" onClick={onToggle}>
                         {expanded ? 'Hide' : 'Details'}
@@ -202,7 +245,7 @@ function AuditRow({ entry, expanded, onToggle }) {
             </tr>
             {expanded && (
                 <tr>
-                    <td colSpan={7} className="audit-detail-cell">
+                    <td colSpan={8} className="audit-detail-cell">
                         <div className="audit-detail">
                             {entry.before && (
                                 <div>
@@ -222,9 +265,16 @@ function AuditRow({ entry, expanded, onToggle }) {
                                     <pre className="audit-json">{JSON.stringify(entry.metadata, null, 2)}</pre>
                                 </div>
                             )}
+                            {entry.geo && (
+                                <div>
+                                    <p className="eyebrow-lite">origin</p>
+                                    <pre className="audit-json">{JSON.stringify(entry.geo, null, 2)}</pre>
+                                </div>
+                            )}
                             {entry.user_agent && (
                                 <p className="muted small">
-                                    user-agent: <code>{entry.user_agent}</code>
+                                    {device ? `${device} — ` : ''}
+                                    <code>{entry.user_agent}</code>
                                 </p>
                             )}
                         </div>

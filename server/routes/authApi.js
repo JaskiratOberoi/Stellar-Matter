@@ -8,7 +8,15 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const { getPool, useDatabase } = require('../db/pool');
-const { signToken, requireAuth, loadUserById, loadOrgsForUser, pickInitialActiveOrg } = require('../auth');
+const {
+    signToken,
+    verifyToken,
+    extractBearer,
+    requireAuth,
+    loadUserById,
+    loadOrgsForUser,
+    pickInitialActiveOrg
+} = require('../auth');
 const { loginLimiter } = require('../rateLimit');
 const { logAudit } = require('../audit');
 
@@ -215,7 +223,28 @@ router.post('/switch-org', requireAuth, async (req, res) => {
     }
 });
 
-router.post('/logout', (_req, res) => {
+// Logout is intentionally not gated: an expired or already-discarded token
+// must still get a clean 200. The token is decoded best-effort purely so the
+// audit trail can attribute the sign-out to someone.
+router.post('/logout', async (req, res) => {
+    let actor = null;
+    try {
+        const token = extractBearer(req);
+        if (token) {
+            const decoded = verifyToken(token);
+            actor = { id: decoded.sub, username: decoded.username };
+        }
+    } catch {
+        actor = null;
+    }
+    if (actor) {
+        await logAudit(req, {
+            action: 'auth.logout',
+            outcome: 'success',
+            actorId: actor.id,
+            actorUsername: actor.username
+        });
+    }
     res.json({ ok: true });
 });
 

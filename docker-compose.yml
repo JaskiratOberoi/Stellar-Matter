@@ -61,6 +61,11 @@ services:
       # streams every SID for the whole window across the LIS DB and filters
       # in JS — a 30-day multi-city run hangs and times out.
       TRACER_RESOLVE_CODES_VIA_PG: ${TRACER_RESOLVE_CODES_VIA_PG:-1}
+      # How many business units the tracer drains concurrently. Each in-flight
+      # unit holds one Listec pool connection (pool max 10) for its whole page
+      # drain, so this trades wall-clock against load on the production LIS
+      # box. Clamped to 8 in sql-tracer-source.js.
+      TRACER_FANOUT_CONCURRENCY: ${TRACER_FANOUT_CONCURRENCY:-4}
       CORS_ORIGINS: ${CORS_ORIGINS:-https://matter.stellarinfomatica.com}
       TZ: ${TZ:-Asia/Kolkata}
     extra_hosts:
@@ -96,6 +101,11 @@ services:
       LISTEC_API_HOST: 0.0.0.0
       LISTEC_API_PORT: "3100"
       LISTEC_ALIAS_NO_WATCH: "1"
+      # Rows per page when draining a filter window. The SP paginates with
+      # OFFSET/FETCH, so each page re-scans everything before it and a full
+      # drain is quadratic — fewer, larger pages is strictly cheaper. 5000 is
+      # the SP's own clamp ceiling. Lower it if the LIS box needs smaller batches.
+      LISTEC_DRAIN_PAGE_SIZE: ${LISTEC_DRAIN_PAGE_SIZE:-5000}
       TZ: ${TZ:-Asia/Kolkata}
     ports:
       # Bind to host loopback so devs can curl http://127.0.0.1:3100 without

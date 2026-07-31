@@ -12,6 +12,27 @@ import type { WorksheetReportFilters, WorksheetReportRow, TestResult } from './l
 
 let poolPromise: Promise<sql.ConnectionPool> | null = null;
 
+/**
+ * Page size used when draining every page for a filter window.
+ *
+ * The SP paginates with `OFFSET @offset ROWS FETCH NEXT @size ROWS ONLY`, so
+ * each page re-scans and discards everything before it — per-page cost grows
+ * with depth and a full drain is quadratic in the row count. Measured against
+ * the largest BU (id 1, one month): page 1 = 0.58s, page 25 = 6.4s,
+ * page 50 = 12.9s, plateauing near 15s. At 1000 rows/page that BU needs ~65
+ * pages ≈ 10 minutes, which blows past the 300s undici default in the tracer's
+ * `fetch()` and fails the unit outright.
+ *
+ * 5000 is the SP's own clamp ceiling (@page_size > 5000 -> 5000), so this is
+ * the fewest round trips the procedure will allow. Same window at 5000/page
+ * measured 122s end to end. Override with LISTEC_DRAIN_PAGE_SIZE if the LIS
+ * box needs gentler batches.
+ */
+const DEFAULT_DRAIN_PAGE_SIZE = Math.min(
+  Math.max(Number(process.env.LISTEC_DRAIN_PAGE_SIZE) || 5000, 1),
+  5000,
+);
+
 /** Split `host` or `host,port` (mirrors SQL Server connection-string convention). */
 function splitServer(raw: string): { host: string; port: number | undefined } {
   const trimmed = raw.trim();
@@ -71,6 +92,24 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+/**
+ * Raised when the caller hangs up (or explicitly aborts) while a drain is in
+ * flight. Distinct from a SQL error so retry and HTTP layers can treat a
+ * deliberate cancellation as "stop", not "something broke".
+ */
+export class QueryAbortedError extends Error {
+  readonly aborted = true;
+
+  constructor(message = 'Query aborted by caller') {
+    super(message);
+    this.name = 'QueryAbortedError';
+  }
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw new QueryAbortedError();
+}
+
 async function withRetry<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
   let last: unknown;
   for (let i = 0; i < attempts; i++) {
@@ -78,6 +117,10 @@ async function withRetry<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
       return await fn();
     } catch (e) {
       last = e;
+      // A cancelled request surfaces as "Canceled." / ECANCEL, which matches
+      // the transient heuristic below. Retrying it would re-issue the very
+      // scan the caller just asked us to stop.
+      if (e instanceof QueryAbortedError) throw e;
       const msg = String(e);
       const transient =
         msg.includes('ETIMEOUT') ||
@@ -89,6 +132,44 @@ async function withRetry<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
     }
   }
   throw last;
+}
+
+/**
+ * Execute a stored procedure, cancelling the in-flight request if `signal`
+ * fires. `request.cancel()` sends a TDS attention packet, so MSSQL stops the
+ * scan on the LIS box instead of running it to completion into a socket
+ * nobody is reading any more.
+ */
+async function executeProcedure(
+  pool: sql.ConnectionPool,
+  procedure: string,
+  bind: (req: sql.Request) => void,
+  signal?: AbortSignal,
+): Promise<WorksheetReportRow[]> {
+  throwIfAborted(signal);
+  const req = pool.request();
+  bind(req);
+
+  const onAbort = () => {
+    try {
+      req.cancel();
+    } catch {
+      /* request already settled — nothing to cancel */
+    }
+  };
+  signal?.addEventListener('abort', onAbort, { once: true });
+
+  try {
+    const result = await req.execute<Record<string, unknown>>(procedure);
+    const set = result.recordsets[0];
+    if (!set) return [];
+    return [...set].map((row) => rowToReportRow(row as Record<string, unknown>));
+  } catch (e) {
+    if (signal?.aborted) throw new QueryAbortedError(`Aborted during ${procedure}`);
+    throw e;
+  } finally {
+    signal?.removeEventListener('abort', onAbort);
+  }
 }
 
 function parseResultsJson(raw: string | null): TestResult[] {
@@ -131,53 +212,68 @@ function rowToReportRow(r: Record<string, unknown>): WorksheetReportRow {
  * Call dbo.usp_listec_worksheet_report_json with filters.
  * Null/undefined optional filters become SQL NULL (meaning "no filter").
  */
-export async function fetchWorksheetReports(f: WorksheetReportFilters): Promise<WorksheetReportRow[]> {
+export async function fetchWorksheetReports(
+  f: WorksheetReportFilters,
+  signal?: AbortSignal,
+): Promise<WorksheetReportRow[]> {
   const pool = await getListecPool();
 
-  return withRetry(async () => {
-    const req = pool.request();
-
-    req.input('from_date', sql.Date, f.fromDate);
-    req.input('to_date', sql.Date, f.toDate);
-    req.input('from_hour', sql.TinyInt, f.fromHour ?? 0);
-    req.input('to_hour', sql.TinyInt, f.toHour ?? 24);
-    req.input('patient_name', sql.NVarChar(200), f.patientName ?? null);
-    req.input('status_id', sql.Int, f.statusId ?? null);
-    req.input('client_code', sql.NVarChar(50), f.clientCode ?? null);
-    req.input('sid', sql.NVarChar(50), f.sid ?? null);
-    req.input('department_id', sql.Int, f.departmentId ?? null);
-    req.input('business_unit_id', sql.Int, f.businessUnitId ?? null);
-    req.input('test_code', sql.NVarChar(50), f.testCode ?? null);
-    req.input('pid', sql.Int, f.pid ?? null);
-    req.input('tat_only', sql.Bit, f.tatOnly ? 1 : 0);
-    req.input('include_unauthorized', sql.Bit, f.includeUnauthorized === false ? 0 : 1);
-    req.input('page', sql.Int, f.page ?? 1);
-    req.input('page_size', sql.Int, f.pageSize ?? 500);
-
-    const result = await req.execute<Record<string, unknown>>('dbo.usp_listec_worksheet_report_json');
-    const set = result.recordsets[0];
-    if (!set) return [];
-    return [...set].map((row) => rowToReportRow(row as Record<string, unknown>));
-  });
+  return withRetry(() =>
+    executeProcedure(
+      pool,
+      'dbo.usp_listec_worksheet_report_json',
+      (req) => {
+        req.input('from_date', sql.Date, f.fromDate);
+        req.input('to_date', sql.Date, f.toDate);
+        req.input('from_hour', sql.TinyInt, f.fromHour ?? 0);
+        req.input('to_hour', sql.TinyInt, f.toHour ?? 24);
+        req.input('patient_name', sql.NVarChar(200), f.patientName ?? null);
+        req.input('status_id', sql.Int, f.statusId ?? null);
+        req.input('client_code', sql.NVarChar(50), f.clientCode ?? null);
+        req.input('sid', sql.NVarChar(50), f.sid ?? null);
+        req.input('department_id', sql.Int, f.departmentId ?? null);
+        req.input('business_unit_id', sql.Int, f.businessUnitId ?? null);
+        req.input('test_code', sql.NVarChar(50), f.testCode ?? null);
+        req.input('pid', sql.Int, f.pid ?? null);
+        req.input('tat_only', sql.Bit, f.tatOnly ? 1 : 0);
+        req.input('include_unauthorized', sql.Bit, f.includeUnauthorized === false ? 0 : 1);
+        req.input('page', sql.Int, f.page ?? 1);
+        req.input('page_size', sql.Int, f.pageSize ?? 500);
+      },
+      signal,
+    ),
+  );
 }
 
 /**
  * Drain every page for the given filter window. Walks pages of `pageSize`
- * (defaults to 1000) until a partial page or a hard cap is reached. Use this
- * when you need the full result set for aggregation.
+ * (defaults to DEFAULT_DRAIN_PAGE_SIZE) until a partial page or a hard cap is
+ * reached. Use this when you need the full result set for aggregation.
  */
 export async function fetchAllWorksheetReports(
   filters: WorksheetReportFilters,
-  opts: { pageSize?: number; maxPages?: number } = {},
+  opts: { pageSize?: number; maxPages?: number; signal?: AbortSignal } = {},
 ): Promise<WorksheetReportRow[]> {
-  const pageSize = Math.min(Math.max(opts.pageSize ?? filters.pageSize ?? 1000, 1), 5000);
+  const pageSize = Math.min(Math.max(opts.pageSize ?? filters.pageSize ?? DEFAULT_DRAIN_PAGE_SIZE, 1), 5000);
   const maxPages = opts.maxPages ?? 100;
   const out: WorksheetReportRow[] = [];
   for (let page = 1; page <= maxPages; page++) {
-    const batch = await fetchWorksheetReports({ ...filters, page, pageSize });
+    throwIfAborted(opts.signal);
+    const batch = await fetchWorksheetReports({ ...filters, page, pageSize }, opts.signal);
     out.push(...batch);
-    if (batch.length < pageSize) break;
+    if (batch.length < pageSize) return out;
   }
+  // Fell out of the loop on the page cap rather than a short page, so there is
+  // very likely more data the caller never saw. Aggregates built on this are
+  // undercounts — say so rather than returning a truncated set silently.
+  console.warn(
+    `[listec] fetchAllWorksheetReports hit the ${maxPages}-page cap at ${pageSize}/page ` +
+      `(${out.length} rows); results may be incomplete for ${JSON.stringify({
+        fromDate: filters.fromDate,
+        toDate: filters.toDate,
+        businessUnitId: filters.businessUnitId,
+      })}.`,
+  );
   return out;
 }
 
@@ -211,34 +307,34 @@ function buildClientCodeListTvp(codes: string[]): sql.Table {
 export async function fetchWorksheetReportsByCodes(
   f: Omit<WorksheetReportFilters, 'clientCode'>,
   codes: string[],
+  signal?: AbortSignal,
 ): Promise<WorksheetReportRow[]> {
   const pool = await getListecPool();
-  return withRetry(async () => {
-    const req = pool.request();
-    req.input('from_date', sql.Date, f.fromDate);
-    req.input('to_date', sql.Date, f.toDate);
-    req.input('from_hour', sql.TinyInt, f.fromHour ?? 0);
-    req.input('to_hour', sql.TinyInt, f.toHour ?? 24);
-    req.input('patient_name', sql.NVarChar(200), f.patientName ?? null);
-    req.input('status_id', sql.Int, f.statusId ?? null);
-    req.input('sid', sql.NVarChar(50), f.sid ?? null);
-    req.input('department_id', sql.Int, f.departmentId ?? null);
-    req.input('business_unit_id', sql.Int, f.businessUnitId ?? null);
-    req.input('test_code', sql.NVarChar(50), f.testCode ?? null);
-    req.input('pid', sql.Int, f.pid ?? null);
-    req.input('tat_only', sql.Bit, f.tatOnly ? 1 : 0);
-    req.input('include_unauthorized', sql.Bit, f.includeUnauthorized === false ? 0 : 1);
-    req.input('page', sql.Int, f.page ?? 1);
-    req.input('page_size', sql.Int, f.pageSize ?? 500);
-    req.input('client_codes', buildClientCodeListTvp(codes));
-
-    const result = await req.execute<Record<string, unknown>>(
+  return withRetry(() =>
+    executeProcedure(
+      pool,
       'dbo.usp_listec_worksheet_report_by_codes',
-    );
-    const set = result.recordsets[0];
-    if (!set) return [];
-    return [...set].map((row) => rowToReportRow(row as Record<string, unknown>));
-  });
+      (req) => {
+        req.input('from_date', sql.Date, f.fromDate);
+        req.input('to_date', sql.Date, f.toDate);
+        req.input('from_hour', sql.TinyInt, f.fromHour ?? 0);
+        req.input('to_hour', sql.TinyInt, f.toHour ?? 24);
+        req.input('patient_name', sql.NVarChar(200), f.patientName ?? null);
+        req.input('status_id', sql.Int, f.statusId ?? null);
+        req.input('sid', sql.NVarChar(50), f.sid ?? null);
+        req.input('department_id', sql.Int, f.departmentId ?? null);
+        req.input('business_unit_id', sql.Int, f.businessUnitId ?? null);
+        req.input('test_code', sql.NVarChar(50), f.testCode ?? null);
+        req.input('pid', sql.Int, f.pid ?? null);
+        req.input('tat_only', sql.Bit, f.tatOnly ? 1 : 0);
+        req.input('include_unauthorized', sql.Bit, f.includeUnauthorized === false ? 0 : 1);
+        req.input('page', sql.Int, f.page ?? 1);
+        req.input('page_size', sql.Int, f.pageSize ?? 500);
+        req.input('client_codes', buildClientCodeListTvp(codes));
+      },
+      signal,
+    ),
+  );
 }
 
 /**
@@ -247,15 +343,21 @@ export async function fetchWorksheetReportsByCodes(
 export async function fetchAllWorksheetReportsByCodes(
   filters: Omit<WorksheetReportFilters, 'clientCode'>,
   codes: string[],
-  opts: { pageSize?: number; maxPages?: number } = {},
+  opts: { pageSize?: number; maxPages?: number; signal?: AbortSignal } = {},
 ): Promise<WorksheetReportRow[]> {
-  const pageSize = Math.min(Math.max(opts.pageSize ?? filters.pageSize ?? 1000, 1), 5000);
+  const pageSize = Math.min(Math.max(opts.pageSize ?? filters.pageSize ?? DEFAULT_DRAIN_PAGE_SIZE, 1), 5000);
   const maxPages = opts.maxPages ?? 100;
   const out: WorksheetReportRow[] = [];
   for (let page = 1; page <= maxPages; page++) {
-    const batch = await fetchWorksheetReportsByCodes({ ...filters, page, pageSize }, codes);
+    throwIfAborted(opts.signal);
+    const batch = await fetchWorksheetReportsByCodes({ ...filters, page, pageSize }, codes, opts.signal);
     out.push(...batch);
-    if (batch.length < pageSize) break;
+    if (batch.length < pageSize) return out;
   }
+  console.warn(
+    `[listec] fetchAllWorksheetReportsByCodes hit the ${maxPages}-page cap at ${pageSize}/page ` +
+      `(${out.length} rows, ${codes.length} client codes); results may be incomplete for ` +
+      `${JSON.stringify({ fromDate: filters.fromDate, toDate: filters.toDate })}.`,
+  );
   return out;
 }

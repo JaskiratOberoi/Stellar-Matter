@@ -340,23 +340,19 @@ body {
     gap: var(--sp-4);
 }
 
-.admin-users-table .admin-row-actions {
+/* The actions cell has to stay a table-cell: flexing the <td> itself pulls it
+   out of the row box, so its border-bottom shrink-wraps the buttons instead of
+   spanning the row — and disappears entirely on rows with no buttons. Flex the
+   inner wrapper instead. */
+.admin-users-table td.admin-row-actions {
+    text-align: right;
+    white-space: nowrap;
+}
+
+.admin-row-actions-inner {
     display: flex;
+    align-items: center;
+    flex-wrap: wrap;
     gap: var(--sp-2);
     justify-content: flex-end;
-}
-
-.admin-pw-form {
-    display: flex;
-    gap: var(--sp-2);
-    padding: var(--sp-2) 0;
-}
-
-.admin-pw-form input {
-    flex: 1;
-    background: rgb(var(--nx-surface-2));
-    color: rgb(var(--nx-ink));
-    border: 1px solid rgb(var(--nx-rule-soft));
-    padding: var(--sp-2) var(--sp-3);
-    border-radius: var(--r-sm);
 }

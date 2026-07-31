@@ -1,10 +1,21 @@
-export function RunProgress({ payload, fallbackText }) {
+export function RunProgress({ payload, fallbackText, onCancel, cancelling, cancelDisabled }) {
     if (!payload && !fallbackText) return null;
     return (
         <div className="run-progress-wrap">
             <div className="run-progress-bar" aria-hidden="true" />
             <div className="run-progress-strip eyebrow-lite" aria-live="polite">
                 {payload ? <FanOutLine payload={payload} /> : fallbackText}
+                {onCancel ? (
+                    <button
+                        type="button"
+                        className="run-progress-cancel"
+                        onClick={onCancel}
+                        disabled={cancelDisabled || cancelling}
+                        title="Abort the running query. Scopes already finished keep their tiles."
+                    >
+                        {cancelling ? 'Stopping…' : 'Stop run'}
+                    </button>
+                ) : null}
             </div>
         </div>
     );
@@ -23,7 +34,9 @@ function FanOutLine({ payload }) {
                       ? '\u23f3'
                       : it.state === 'failed'
                         ? '\u00d7'
-                        : '\u2026';
+                        : it.state === 'cancelled'
+                          ? '\u29b8'
+                          : '\u2026';
             return `${it.bu || '\u2014'} ${mark}`;
         })
         .join(' \u00b7 ');

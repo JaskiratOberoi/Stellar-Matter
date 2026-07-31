@@ -86,7 +86,7 @@ export function Topbar({ statusPill, lastUpdated, onOrgSwitched }) {
                                         Orgs
                                     </Link>
                                     <Link to="/admin/audit-log" className="chip chip-tool admin-nav-link">
-                                        Audit log
+                                        Audit trail
                                     </Link>
                                 </>
                             )}
@@ -212,7 +212,7 @@ export function Topbar({ statusPill, lastUpdated, onOrgSwitched }) {
                                                 className="chip chip-tool"
                                                 onClick={() => setMenuOpen(false)}
                                             >
-                                                Audit log
+                                                Audit trail
                                             </Link>
                                         </div>
                                     )}

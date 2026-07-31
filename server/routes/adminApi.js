@@ -45,14 +45,16 @@ router.get('/users', async (_req, res) => {
 });
 
 router.post('/users', adminWriteLimiter, async (req, res) => {
+    // Parsed outside the try so the duplicate-username handler below can still
+    // name the offending username instead of throwing a ReferenceError.
+    const username = req.body && req.body.username != null ? String(req.body.username).trim() : '';
+    const password = req.body && req.body.password != null ? String(req.body.password) : '';
+    const displayName = req.body && req.body.display_name != null ? String(req.body.display_name).trim() : '';
+    const requestedRole = req.body && req.body.role != null ? String(req.body.role) : 'operator';
     try {
         if (!useDatabase()) {
             return res.status(503).json({ error: 'Database not configured' });
         }
-        const username = req.body && req.body.username != null ? String(req.body.username).trim() : '';
-        const password = req.body && req.body.password != null ? String(req.body.password) : '';
-        const displayName = req.body && req.body.display_name != null ? String(req.body.display_name).trim() : '';
-        const requestedRole = req.body && req.body.role != null ? String(req.body.role) : 'operator';
         if (!username || !password || !displayName) {
             return res.status(400).json({ error: 'username, password, display_name required' });
         }
@@ -126,9 +128,22 @@ router.patch('/users/:id', adminWriteLimiter, async (req, res) => {
               }
             : null;
 
+        if (!beforeRow.rows.length) return res.status(404).json({ error: 'Not found' });
+
         // Footgun: super_admin cannot deactivate themselves.
         if (body.active === false && req.user && req.user.id === id) {
             return res.status(409).json({ error: 'You cannot deactivate your own account.' });
+        }
+
+        // Same protection the DELETE route gives super_admin rows: locking or
+        // demoting the account that guards this page would strand everyone.
+        if (beforeRow.rows[0].role === 'super_admin') {
+            if (body.role != null && String(body.role) !== 'super_admin') {
+                return res.status(409).json({ error: 'Cannot change the role of a super_admin via this endpoint.' });
+            }
+            if (body.active === false) {
+                return res.status(409).json({ error: 'Cannot deactivate a super_admin via this endpoint.' });
+            }
         }
 
         if (body.password != null) {
@@ -497,6 +512,16 @@ router.get('/audit-log', async (req, res) => {
             params.push(req.query.outcome);
             where.push(`outcome = $${params.length}`);
         }
+        // Free-text sweep across the columns an investigator actually types
+        // into: who, what, from where.
+        if (req.query.q && String(req.query.q).trim()) {
+            params.push(`%${String(req.query.q).trim()}%`);
+            const i = params.length;
+            where.push(
+                `(actor_username ILIKE $${i} OR action ILIKE $${i} OR ip ILIKE $${i}
+                  OR target_id ILIKE $${i} OR geo::text ILIKE $${i})`
+            );
+        }
         if (req.query.before_id) {
             const beforeId = Number(req.query.before_id);
             if (Number.isFinite(beforeId)) {
@@ -508,7 +533,8 @@ router.get('/audit-log', async (req, res) => {
         params.push(limit);
         const r = await pool.query(
             `SELECT id, created_at, actor_id, actor_username, action, target_type,
-                    target_id, outcome, ip, user_agent, "before", "after", metadata
+                    target_id, outcome, ip, user_agent, geo, method, path, status_code,
+                    "before", "after", metadata
              FROM audit_log
              ${whereSql}
              ORDER BY id DESC
@@ -517,6 +543,81 @@ router.get('/audit-log', async (req, res) => {
         );
         const next_cursor = r.rows.length === limit ? r.rows[r.rows.length - 1].id : null;
         res.json({ entries: r.rows, next_cursor });
+    } catch (err) {
+        res.status(500).json({ error: err.message || String(err) });
+    }
+});
+
+// Per-actor profile behind the username hover card in the audit trail: who the
+// account is, when they were first and last seen, and which addresses and
+// locations they have acted from.
+router.get('/audit-log/actor', async (req, res) => {
+    try {
+        if (!useDatabase()) {
+            return res.status(503).json({ error: 'Database not configured' });
+        }
+        const actorId = req.query.actor_id != null ? String(req.query.actor_id).trim() : '';
+        const username = req.query.username != null ? String(req.query.username).trim() : '';
+        if (!actorId && !username) {
+            return res.status(400).json({ error: 'actor_id or username required' });
+        }
+        const pool = getPool();
+        // Match on whichever identifier we have. Rows from failed logins carry a
+        // username with no actor_id, so both need to resolve to the same actor.
+        const match = actorId ? `actor_id = $1` : `actor_username = $1`;
+        const key = actorId || username;
+
+        const [account, stats, addresses, recent] = await Promise.all([
+            pool.query(
+                `SELECT id, username, display_name, role, active, created_at
+                 FROM users
+                 WHERE ${actorId ? 'id' : 'username'} = $1`,
+                [key]
+            ),
+            pool.query(
+                `SELECT COUNT(*)::int AS total_events,
+                        COUNT(*) FILTER (WHERE outcome = 'failure')::int AS failed_events,
+                        MIN(created_at) AS first_seen,
+                        MAX(created_at) AS last_seen,
+                        COUNT(DISTINCT ip)::int AS distinct_ips
+                 FROM audit_log
+                 WHERE ${match}`,
+                [key]
+            ),
+            pool.query(
+                `SELECT ip,
+                        COUNT(*)::int AS events,
+                        MAX(created_at) AS last_seen,
+                        (ARRAY_AGG(geo ORDER BY created_at DESC) FILTER (WHERE geo IS NOT NULL))[1] AS geo,
+                        (ARRAY_AGG(user_agent ORDER BY created_at DESC)
+                            FILTER (WHERE user_agent IS NOT NULL))[1] AS user_agent
+                 FROM audit_log
+                 WHERE ${match} AND ip IS NOT NULL
+                 GROUP BY ip
+                 ORDER BY MAX(created_at) DESC
+                 LIMIT 5`,
+                [key]
+            ),
+            pool.query(
+                `SELECT id, created_at, action, outcome, ip
+                 FROM audit_log
+                 WHERE ${match}
+                 ORDER BY id DESC
+                 LIMIT 5`,
+                [key]
+            )
+        ]);
+
+        res.json({
+            actor: {
+                actor_id: actorId || (account.rows[0] ? account.rows[0].id : null),
+                username: username || (account.rows[0] ? account.rows[0].username : null),
+                account: account.rows[0] || null
+            },
+            stats: stats.rows[0] || null,
+            addresses: addresses.rows,
+            recent: recent.rows
+        });
     } catch (err) {
         res.status(500).json({ error: err.message || String(err) });
     }

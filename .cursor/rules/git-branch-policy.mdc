@@ -1,0 +1,15 @@
+---
+description: Never create git branches unless the user explicitly asks
+alwaysApply: true
+---
+
+# Git branch policy
+
+**Never create a new git branch unless the user explicitly asks you to.**
+
+- Default workflow: commit and push on the branch the user is already on (usually `main` or `master`).
+- Do not run `git checkout -b`, `git switch -c`, or equivalent proactively — not for PRs, not for "best practice", not to isolate work.
+- If a PR is needed on the current branch, use `gh pr create` from that branch after push.
+- Only create a feature branch when the user clearly says to (e.g. "create a branch", "new branch for this", "branch off main").
+
+When unsure which branch to use, ask — do not branch on your own.

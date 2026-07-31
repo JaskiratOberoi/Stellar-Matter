@@ -297,6 +297,25 @@ function buildQueryString({ bu, fromDate, toDate, fromHour, toHour, bucketCodes,
     return params.toString();
 }
 
+/** Error thrown when a tracer batch is cancelled mid-flight. */
+function tracerCancelledError(what) {
+    const err = new Error(what ? `Tracer run cancelled (${what}).` : 'Tracer run cancelled.');
+    err.code = 'TRACER_CANCELLED';
+    return err;
+}
+
+/** @param {unknown} e */
+function isCancellation(e) {
+    if (!e) return false;
+    if (e.code === 'TRACER_CANCELLED') return true;
+    return e.name === 'AbortError';
+}
+
+/** @param {AbortSignal | undefined} signal */
+function throwIfCancelled(signal, what) {
+    if (signal && signal.aborted) throw tracerCancelledError(what);
+}
+
 /**
  * Bound-concurrency helper. We don't pull in p-limit — a 20-line semaphore
  * here is easier to audit than an external dep and matches the rest of this
@@ -307,7 +326,7 @@ function buildQueryString({ bu, fromDate, toDate, fromHour, toHour, bucketCodes,
  * @param {number} concurrency
  * @returns {Promise<T[]>}
  */
-async function runWithConcurrency(tasks, concurrency) {
+async function runWithConcurrency(tasks, concurrency, signal) {
     const cap = Math.max(1, Math.floor(concurrency || 1));
     const results = new Array(tasks.length);
     let nextIndex = 0;
@@ -315,6 +334,10 @@ async function runWithConcurrency(tasks, concurrency) {
         for (;;) {
             const i = nextIndex++;
             if (i >= tasks.length) return;
+            // Cancellation stops the queue draining: whatever is already in
+            // flight settles (its own fetch is aborted), but nothing new is
+            // dispatched at the LIS box.
+            if (signal && signal.aborted) return;
             results[i] = await tasks[i]();
         }
     }
@@ -323,6 +346,26 @@ async function runWithConcurrency(tasks, concurrency) {
     for (let i = 0; i < workerCount; i++) workers.push(worker());
     await Promise.all(workers);
     return results;
+}
+
+/**
+ * How many business units to drain at once.
+ *
+ * Each in-flight BU holds one Listec pool connection for the length of its
+ * page drain, and that pool is capped at 10 (listec.client.ts). Staying at 4
+ * by default leaves headroom for the lookup/health/region traffic that shares
+ * it, and keeps concurrent load on the production LIS box modest — these are
+ * long analytical scans, not point reads. Clamped to 8 for the same reason:
+ * saturating the pool would starve every other Listec route.
+ *
+ * @param {number|undefined|null} requested
+ * @returns {number}
+ */
+function resolveFanOutConcurrency(requested) {
+    const fromEnv = Number(process.env.TRACER_FANOUT_CONCURRENCY);
+    const raw = requested != null ? Number(requested) : Number.isFinite(fromEnv) && fromEnv > 0 ? fromEnv : 4;
+    if (!Number.isFinite(raw) || raw < 1) return 1;
+    return Math.min(Math.floor(raw), 8);
 }
 
 /**
@@ -636,7 +679,7 @@ function parseSalesPeople(raw) {
  * @param {{ kind: string; key: string; label: string }[]} salesTargets
  * @returns {Promise<Map<string, string[]>>}
  */
-async function fetchSalesCodesByListec(apiBase, salesTargets) {
+async function fetchSalesCodesByListec(apiBase, salesTargets, signal) {
     /** @type {Map<string, string[]>} */
     const map = new Map();
     if (!salesTargets.length) return map;
@@ -644,7 +687,7 @@ async function fetchSalesCodesByListec(apiBase, salesTargets) {
     if (!ids) return map;
     const base = apiBase.replace(/\/$/, '');
     const url = `${base}/api/tracer/sales-marketing-users/codes?ids=${encodeURIComponent(ids)}`;
-    const res = await fetch(url, { headers: { Accept: 'application/json' } });
+    const res = await fetch(url, { headers: { Accept: 'application/json' }, signal });
     const text = await res.text();
     if (!res.ok) {
         throw new Error(`Listec sales codes API ${res.status}: ${text.slice(0, 500)}`);
@@ -667,6 +710,106 @@ async function fetchSalesCodesByListec(apiBase, salesTargets) {
     return map;
 }
 
+/**
+ * Ask Listec for the numeric master id behind each business-unit string.
+ *
+ * @param {string} apiBase
+ * @param {string[]} names
+ * @returns {Promise<Map<string, number|null>>}
+ */
+async function fetchBusinessUnitIds(apiBase, names, signal) {
+    const base = apiBase.replace(/\/$/, '');
+    const qs = encodeURIComponent(names.join(','));
+    const url = `${base}/api/resolve/business-units?names=${qs}`;
+    const res = await fetch(url, { headers: { Accept: 'application/json' }, signal });
+    const text = await res.text();
+    if (!res.ok) {
+        throw new Error(`Listec BU resolve API ${res.status}: ${text.slice(0, 300)}`);
+    }
+    let payload;
+    try {
+        payload = JSON.parse(text);
+    } catch (e) {
+        throw new Error(`Listec BU resolve non-JSON: ${e.message}`);
+    }
+    const resolved = payload && payload.resolved && typeof payload.resolved === 'object' ? payload.resolved : {};
+    /** @type {Map<string, number|null>} */
+    const map = new Map();
+    for (const name of names) {
+        const v = resolved[name];
+        map.set(name, typeof v === 'number' ? v : null);
+    }
+    return map;
+}
+
+/**
+ * Collapse business-unit chips that point at the same master row.
+ *
+ * The Tracer chip list is built from Listec's lookup dump, which folds
+ * BusinessUnitCode and BusinessUnitName into one flat array. Eight of the
+ * twenty-six chips are therefore aliases of a unit already in the list
+ * (QUGEN / QUGEN PATHLABS -> 1, SRI NAGAR / SRINAGAR -> 5, JHANSI / NOBLE
+ * JHANSI LAB -> 10, ...). Running both halves of a pair fires the identical
+ * month-long SP drain twice and lands two identical tiles on the wall.
+ *
+ * Keeps the first chip seen for each id — input order is the user's selection
+ * order — and reports the rest as aliases so their progress rows can mirror
+ * the canonical result instead of hanging at "queued".
+ *
+ * Resolution failures are non-fatal: fall back to running every chip, which is
+ * exactly today's behaviour.
+ *
+ * @param {string} apiBase
+ * @param {string[]} names
+ * @returns {Promise<{ units: string[], aliasOf: Map<string, string> }>}
+ */
+async function dedupeBusinessUnits(apiBase, names, signal) {
+    /** @type {Map<string, string>} alias chip -> canonical chip */
+    const aliasOf = new Map();
+    if (names.length < 2) return { units: names.slice(), aliasOf };
+
+    let idByName;
+    try {
+        idByName = await fetchBusinessUnitIds(apiBase, names, signal);
+    } catch (e) {
+        if (isCancellation(e)) throw tracerCancelledError('BU alias dedupe');
+        console.warn(
+            `[tracer-sql] BU alias dedupe unavailable (${e && e.message ? e.message : e}); running every selected unit.`
+        );
+        return { units: names.slice(), aliasOf };
+    }
+
+    /** @type {Map<number, string>} */
+    const canonicalById = new Map();
+    const units = [];
+    for (const name of names) {
+        const id = idByName.get(name);
+        // Unresolved names are passed straight through — the SP call is the
+        // authority on whether a chip is valid, and swallowing it here would
+        // turn a bad selection into a silently missing tile.
+        if (id == null) {
+            units.push(name);
+            continue;
+        }
+        const canonical = canonicalById.get(id);
+        if (canonical != null) {
+            aliasOf.set(name, canonical);
+            continue;
+        }
+        canonicalById.set(id, name);
+        units.push(name);
+    }
+
+    if (aliasOf.size > 0) {
+        const pairs = [...aliasOf.entries()].map(([alias, canonical]) => `${alias} -> ${canonical}`).join(', ');
+        console.log(
+            `[tracer-sql] collapsed ${aliasOf.size} duplicate business unit(s): ${pairs} ` +
+                `(${units.length} distinct unit(s) to fetch)`
+        );
+    }
+    return { units, aliasOf };
+}
+
 /** @param {{ kind: string; key: string; label: string }} targ */
 function scopeProgressLabel(targ) {
     if (targ.kind === 'sales') return `Sales · ${targ.label}`;
@@ -674,7 +817,7 @@ function scopeProgressLabel(targ) {
     return `State · ${targ.label}`;
 }
 
-async function fetchTracerPayload(apiBase, { bu, fromDate, toDate, fromHour, toHour, cityKeys, stateKeys }) {
+async function fetchTracerPayload(apiBase, { bu, fromDate, toDate, fromHour, toHour, cityKeys, stateKeys, signal }) {
     const qs = buildQueryString({
         bu,
         fromDate,
@@ -687,8 +830,18 @@ async function fetchTracerPayload(apiBase, { bu, fromDate, toDate, fromHour, toH
     });
     const url = `${apiBase}/api/worksheet-reports/packages?${qs}`;
     console.log(`[tracer-sql] GET ${url}`);
-    const res = await fetch(url, { headers: { Accept: 'application/json' } });
-    const text = await res.text();
+    throwIfCancelled(signal, bu || 'global');
+    let res;
+    let text;
+    try {
+        res = await fetch(url, { headers: { Accept: 'application/json' }, signal });
+        text = await res.text();
+    } catch (e) {
+        // Aborting the fetch drops the socket, which Listec sees as a client
+        // disconnect and turns into request.cancel() on the SP.
+        if (signal && signal.aborted) throw tracerCancelledError(bu || 'global');
+        throw e;
+    }
     if (!res.ok) {
         throw new Error(`Listec API ${res.status} (${bu || 'global'}): ${text.slice(0, 500)}`);
     }
@@ -709,7 +862,7 @@ async function fetchTracerPayload(apiBase, { bu, fromDate, toDate, fromHour, toH
  */
 async function fetchTracerPayloadByCodes(
     apiBase,
-    { bu, fromDate, toDate, fromHour, toHour, codes }
+    { bu, fromDate, toDate, fromHour, toHour, codes, signal }
 ) {
     const params = new URLSearchParams();
     const fromIso = toIsoDate(fromDate);
@@ -742,8 +895,13 @@ async function fetchTracerPayloadByCodes(
         30_000,
         Number(process.env.TRACER_BY_CODES_TIMEOUT_MS) || 240_000
     );
+    throwIfCancelled(signal, bu || 'no-bu');
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    // A user cancel and the timeout both need to abort this fetch; forward the
+    // outer signal into the local controller so the two share one abort path.
+    const onOuterAbort = () => ctrl.abort();
+    if (signal) signal.addEventListener('abort', onOuterAbort, { once: true });
     let res;
     let text;
     try {
@@ -753,6 +911,7 @@ async function fetchTracerPayloadByCodes(
         });
         text = await res.text();
     } catch (e) {
+        if (signal && signal.aborted) throw tracerCancelledError(bu || 'no-bu');
         if (e && (e.name === 'AbortError' || /aborted/i.test(String(e.message)))) {
             throw new Error(
                 `Listec by-codes timeout after ${timeoutMs}ms (${bu || 'no-bu'}, ${codes.length} codes)`
@@ -761,6 +920,7 @@ async function fetchTracerPayloadByCodes(
         throw e;
     } finally {
         clearTimeout(timer);
+        if (signal) signal.removeEventListener('abort', onOuterAbort);
     }
     if (!res.ok) {
         throw new Error(
@@ -1053,9 +1213,12 @@ async function runTracerBatch(opts) {
     const outDir = path.isAbsolute(opts.outDir)
         ? opts.outDir
         : path.resolve(process.cwd(), opts.outDir || './out');
-    const concurrency = opts.concurrency != null ? Number(opts.concurrency) : 3;
+    const concurrency = resolveFanOutConcurrency(opts.concurrency);
     const onProgress = typeof opts.onProgress === 'function' ? opts.onProgress : () => {};
     const useByCodesForRegions = hasReg && tracerByCodesEnabled();
+    /** @type {AbortSignal | undefined} Fires when the operator cancels the run. */
+    const signal = opts.signal instanceof AbortSignal ? opts.signal : undefined;
+    const cancelled = () => !!(signal && signal.aborted);
 
     // Pre-resolve city/state -> client_codes per chip target so:
     //  - Region calls can hit the new dbo.usp_listec_worksheet_report_by_codes
@@ -1065,6 +1228,7 @@ async function runTracerBatch(opts) {
     //    reaches MSSQL.
     /** @type {Map<string, string[]>} key = `${kind}:${key}` -> code[] */
     const codesByTarget = new Map();
+    throwIfCancelled(signal, 'before scope resolve');
     if (useByCodesForRegions) {
         const resolverMod = await loadResolverModule();
         if (!resolverMod) {
@@ -1073,6 +1237,7 @@ async function runTracerBatch(opts) {
             );
         }
         for (const targ of targets) {
+            throwIfCancelled(signal, `resolve ${targ.kind}:${targ.key}`);
             const cityArg = targ.kind === 'city' ? [targ.key] : [];
             const stateArg = targ.kind === 'state' ? [targ.key] : [];
             const rows = await resolverMod.resolveClientCodes({
@@ -1084,7 +1249,7 @@ async function runTracerBatch(opts) {
         }
     }
     if (hasSales) {
-        const salesMap = await fetchSalesCodesByListec(apiBase, salesTargets);
+        const salesMap = await fetchSalesCodesByListec(apiBase, salesTargets, signal);
         for (const t of salesTargets) {
             codesByTarget.set(`sales:${t.key}`, salesMap.get(String(t.key).trim()) || []);
         }
@@ -1128,6 +1293,7 @@ async function runTracerBatch(opts) {
                     );
                 }
                 for (const targ of targets) {
+                    throwIfCancelled(signal, `resolve ${targ.kind}:${targ.key}`);
                     const cityArg = targ.kind === 'city' ? [targ.key] : [];
                     const stateArg = targ.kind === 'state' ? [targ.key] : [];
                     const rows = await resolverMod.resolveClientCodes({
@@ -1139,7 +1305,7 @@ async function runTracerBatch(opts) {
                 }
             }
             if (hasSales) {
-                const salesMap = await fetchSalesCodesByListec(apiBase, salesTargets);
+                const salesMap = await fetchSalesCodesByListec(apiBase, salesTargets, signal);
                 for (const t of salesTargets) {
                     codesByTarget.set(`sales:${t.key}`, salesMap.get(String(t.key).trim()) || []);
                 }
@@ -1163,11 +1329,13 @@ async function runTracerBatch(opts) {
                         fromHour: opts.fromHour,
                         toHour: opts.toHour,
                         cityKeys: [],
-                        stateKeys: []
+                        stateKeys: [],
+                        signal
                     });
                     assertTracerPayload(payload, { needGeo: false, label: `BU=${bu}` });
                     return payload;
                 } catch (e) {
+                    if (isCancellation(e) || cancelled()) return null;
                     console.warn(
                         `[tracer-sql] collate BU=${bu} failed: ${e && e.message ? e.message : e}`
                     );
@@ -1198,10 +1366,12 @@ async function runTracerBatch(opts) {
                         toDate: opts.toDate,
                         fromHour: opts.fromHour,
                         toHour: opts.toHour,
-                        codes
+                        codes,
+                        signal
                     });
                     return payload;
                 } catch (e) {
+                    if (isCancellation(e) || cancelled()) return null;
                     console.warn(
                         `[tracer-sql] collate scope ${targ.kind}:${targ.key} failed: ${e && e.message ? e.message : e}`
                     );
@@ -1210,9 +1380,14 @@ async function runTracerBatch(opts) {
             });
 
             const [buPayloads, regPayloads] = await Promise.all([
-                runWithConcurrency(buTasks, concurrency),
-                runWithConcurrency(regionTasks, regionConcurrencyForCollate)
+                runWithConcurrency(buTasks, concurrency, signal),
+                runWithConcurrency(regionTasks, regionConcurrencyForCollate, signal)
             ]);
+
+            // Collate writes one artefact set from the merged union, so a
+            // cancel here leaves nothing half-written on disk — bail before
+            // the merge rather than publishing a partial tile.
+            throwIfCancelled(signal, 'collate merge');
 
             const collected = [...buPayloads, ...regPayloads].filter(Boolean);
             if (collected.length === 0) {
@@ -1261,11 +1436,13 @@ async function runTracerBatch(opts) {
                 buPayloadList: [],
                 collatedItems: [collatedItem],
                 collatedCompleted: [collatedItem.bu],
-                collatedFailed: []
+                collatedFailed: [],
+                cancelled: false
             };
         } catch (e) {
-            collatedItem.state = 'failed';
-            collatedItem.error = String(e && e.message ? e.message : e);
+            const wasCancelled = isCancellation(e) || cancelled();
+            collatedItem.state = wasCancelled ? 'cancelled' : 'failed';
+            collatedItem.error = wasCancelled ? null : String(e && e.message ? e.message : e);
             onProgress({ ...collatedItem });
             return {
                 items: [],
@@ -1277,7 +1454,8 @@ async function runTracerBatch(opts) {
                 buPayloadList: [],
                 collatedItems: [collatedItem],
                 collatedCompleted: [],
-                collatedFailed: [collatedItem.bu]
+                collatedFailed: wasCancelled ? [] : [collatedItem.bu],
+                cancelled: wasCancelled
             };
         }
     }
@@ -1306,8 +1484,22 @@ async function runTracerBatch(opts) {
         const geoKeysForFetch =
             hasReg && !useByCodesForRegions ? { cityKeys, stateKeys } : { cityKeys: [], stateKeys: [] };
 
-        const tasks = businessUnits.map((bu, i) => async () => {
-            const item = items[i];
+        // Collapse chips that resolve to the same master id, then fetch only
+        // the distinct units. Alias chips keep their progress row and mirror
+        // the canonical unit's outcome below.
+        const { units: fetchUnits, aliasOf } = await dedupeBusinessUnits(apiBase, businessUnits, signal);
+        const itemIndexByBu = new Map(businessUnits.map((bu, i) => [bu, i]));
+        /** @type {Map<string, number[]>} canonical chip -> item indices of its aliases */
+        const aliasIndicesByCanonical = new Map();
+        for (const [alias, canonical] of aliasOf) {
+            const idx = itemIndexByBu.get(alias);
+            if (idx == null) continue;
+            if (!aliasIndicesByCanonical.has(canonical)) aliasIndicesByCanonical.set(canonical, []);
+            aliasIndicesByCanonical.get(canonical).push(idx);
+        }
+
+        const tasks = fetchUnits.map((bu, i) => async () => {
+            const item = items[itemIndexByBu.get(bu)];
             item.state = 'running';
             onProgress({ ...item });
             try {
@@ -1318,8 +1510,13 @@ async function runTracerBatch(opts) {
                     fromHour: opts.fromHour,
                     toHour: opts.toHour,
                     cityKeys: geoKeysForFetch.cityKeys,
-                    stateKeys: geoKeysForFetch.stateKeys
+                    stateKeys: geoKeysForFetch.stateKeys,
+                    signal
                 });
+                // Artefacts are written per unit, so a unit that finished
+                // before the cancel keeps its tiles; this one stops short of
+                // writing anything.
+                throwIfCancelled(signal, `BU=${bu}`);
                 // Geo bucketing is needed only when the legacy synthetic-merge
                 // path will consume it (i.e. region targets exist AND we are
                 // NOT using by-codes).
@@ -1338,7 +1535,15 @@ async function runTracerBatch(opts) {
                     url,
                     orgId,
                     outDir,
-                    baseMsOffset: Date.now()
+                    // Artefact filenames are derived from this stamp
+                    // (`run-<iso>.json`, one per mode at baseMsOffset + modeIndex).
+                    // A bare Date.now() is only unique while units run one at a
+                    // time — with the fan-out running several at once, two units
+                    // finishing in the same millisecond would generate identical
+                    // run ids and silently overwrite each other's artefacts.
+                    // Spacing by index (as the region and sales paths already do)
+                    // keeps every unit's 10-file block disjoint.
+                    baseMsOffset: Date.now() + i * 60000
                 });
                 item.runIds = w.runIds;
                 item.lastOutMainPath = w.lastOutMainPath;
@@ -1346,18 +1551,38 @@ async function runTracerBatch(opts) {
                 item.state = 'done';
                 item.error = null;
             } catch (e) {
-                item.state = 'failed';
-                item.error = String(e && e.message ? e.message : e);
+                const wasCancelled = isCancellation(e) || cancelled();
+                item.state = wasCancelled ? 'cancelled' : 'failed';
+                item.error = wasCancelled ? null : String(e && e.message ? e.message : e);
             }
             onProgress({ ...item });
+            // Alias chips share this unit's master row, so they share its
+            // outcome. They deliberately get no runIds of their own: one drain
+            // produced one set of artefacts, and minting a second tile from it
+            // is exactly the duplication this dedupe exists to remove.
+            for (const ai of aliasIndicesByCanonical.get(bu) || []) {
+                const alias = items[ai];
+                alias.state = item.state;
+                alias.error = item.error;
+                alias.duplicateOf = bu;
+                onProgress({ ...alias });
+            }
             return item;
         });
 
-        await runWithConcurrency(tasks, concurrency);
+        await runWithConcurrency(tasks, concurrency, signal);
+        if (cancelled()) {
+            for (const it of items) {
+                if (it.state === 'queued' || it.state === 'running') {
+                    it.state = 'cancelled';
+                    onProgress({ ...it });
+                }
+            }
+        }
     }
 
     /** Legacy global region-only fetch, only used when region by-codes is OFF. */
-    if (!hasBu && hasReg && !useByCodesForRegions) {
+    if (!hasBu && hasReg && !useByCodesForRegions && !cancelled()) {
         const { url, payload } = await fetchTracerPayload(apiBase, {
             bu: undefined,
             fromDate: opts.fromDate,
@@ -1365,7 +1590,8 @@ async function runTracerBatch(opts) {
             fromHour: opts.fromHour,
             toHour: opts.toHour,
             cityKeys,
-            stateKeys
+            stateKeys,
+            signal
         });
         assertTracerPayload(payload, { needGeo: true, label: 'global-region' });
         buPayloadList.push(payload);
@@ -1401,7 +1627,12 @@ async function runTracerBatch(opts) {
         }
         for (const rit of regionItems) onProgress({ ...rit });
 
-        if (useByCodesForRegions || hasSales) {
+        if (cancelled()) {
+            for (const rit of regionItems) {
+                rit.state = 'cancelled';
+                onProgress({ ...rit });
+            }
+        } else if (useByCodesForRegions || hasSales) {
             /** Region chips (PG-resolved) and/or salesperson scopes (Listec LIS mapping). */
             const byCodeScopeTargets = [];
             if (useByCodesForRegions) {
@@ -1442,7 +1673,8 @@ async function runTracerBatch(opts) {
                                     toDate: opts.toDate,
                                     fromHour: opts.fromHour,
                                     toHour: opts.toHour,
-                                    codes
+                                    codes,
+                                    signal
                                 })
                             )
                         );
@@ -1461,11 +1693,13 @@ async function runTracerBatch(opts) {
                             toDate: opts.toDate,
                             fromHour: opts.fromHour,
                             toHour: opts.toHour,
-                            codes
+                            codes,
+                            signal
                         });
                         payload = r.payload;
                         lastUrl = r.url;
                     }
+                    throwIfCancelled(signal, progressLabel);
                     const assertLabel =
                         targ.kind === 'sales' ? `Sales · ${targ.label}` : `Region ${progressLabel}`;
                     assertTracerPayload(payload, {
@@ -1498,13 +1732,22 @@ async function runTracerBatch(opts) {
                     rit.error = null;
                     regionCompleted.push(progressLabel);
                 } catch (e) {
-                    rit.state = 'failed';
-                    rit.error = String(e && e.message ? e.message : e);
-                    regionFailed.push(String(rit.bu));
+                    const wasCancelled = isCancellation(e) || cancelled();
+                    rit.state = wasCancelled ? 'cancelled' : 'failed';
+                    rit.error = wasCancelled ? null : String(e && e.message ? e.message : e);
+                    if (!wasCancelled) regionFailed.push(String(rit.bu));
                 }
                 onProgress({ ...rit });
             });
-            await runWithConcurrency(regionTasks, regionConcurrency);
+            await runWithConcurrency(regionTasks, regionConcurrency, signal);
+            if (cancelled()) {
+                for (const rit of regionItems) {
+                    if (rit.state === 'queued' || rit.state === 'running') {
+                        rit.state = 'cancelled';
+                        onProgress({ ...rit });
+                    }
+                }
+            }
         } else if (buPayloadList.length === 0 && hasReg && !hasSales) {
             // Legacy geo path: BU calls all failed and we have no global payload.
             for (const rit of regionItems) {
@@ -1572,7 +1815,8 @@ async function runTracerBatch(opts) {
         buPayloadList,
         collatedItems: [],
         collatedCompleted: [],
-        collatedFailed: []
+        collatedFailed: [],
+        cancelled: cancelled()
     };
 }
 

@@ -26,7 +26,14 @@ export function App() {
     const { tiles, errors, loadError, loadedAt, reload: reloadTiles } = useTiles();
     const { options, error: buError, selected: buSelected, toggle, selectAll, clear: clearBu } = useBuOptions();
 
-    const { status, running, submitError: runStatusError, submit } = useRunStatus({
+    const {
+        status,
+        running,
+        submitError: runStatusError,
+        submit,
+        cancel,
+        cancelling
+    } = useRunStatus({
         onIdle: () => {
             reloadTiles();
         }
@@ -104,6 +111,9 @@ export function App() {
                     submit={handleSubmit}
                     running={running}
                     runFanOut={fanOut}
+                    onCancelRun={cancel}
+                    cancelling={cancelling}
+                    cancellable={!!(status && status.cancellable)}
                     clientPagesByNorm={clientPagesByNorm}
                     buOptions={{ options, error: buError }}
                     buSelected={buSelected}

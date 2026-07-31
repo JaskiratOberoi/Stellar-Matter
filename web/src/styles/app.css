@@ -691,11 +691,37 @@ kbd {
 }
 
 .run-progress-strip {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--sp-3);
     padding: var(--sp-3) var(--sp-4);
     font-size: var(--fs-xs);
     line-height: var(--lh-snug);
     word-break: break-word;
     color: rgb(var(--nx-ink-2));
+}
+
+.run-progress-cancel {
+    flex-shrink: 0;
+    padding: 2px var(--sp-3);
+    border: 1px solid rgb(var(--nx-signal-danger) / 0.55);
+    border-radius: var(--r-sm);
+    background: rgb(var(--nx-signal-danger) / 0.08);
+    color: rgb(var(--nx-signal-danger));
+    font: inherit;
+    letter-spacing: inherit;
+    text-transform: inherit;
+    cursor: pointer;
+}
+
+.run-progress-cancel:hover:not(:disabled) {
+    background: rgb(var(--nx-signal-danger) / 0.18);
+}
+
+.run-progress-cancel:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
 }
 
 .results-error {
@@ -1842,15 +1868,132 @@ table.packages td.envelope-cell {
 }
 
 .audit-filter select {
-    background: rgb(var(--surface));
-    color: rgb(var(--ink));
-    border: 1px solid rgb(var(--border));
+    background: rgb(var(--nx-surface));
+    color: rgb(var(--nx-ink));
+    border: 1px solid rgb(var(--nx-rule-soft));
     border-radius: 6px;
     padding: 6px 8px;
 }
 
+/* `.row-between button` is more specific than `.btn-primary`, so the admin
+   header's primary action was rendering on the secondary surface. */
+.admin-header .btn-primary {
+    background: rgb(var(--nx-accent));
+    border-color: rgb(var(--nx-accent));
+    color: rgb(var(--nx-accent-ink));
+    font-weight: 650;
+}
+
+/* -- Admin users: inline row editor ------------------------------------- */
+
+.admin-row-note {
+    color: rgb(var(--nx-ink-3));
+    font: 600 var(--fs-3xs) / 1 var(--font-mono);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+
+.admin-users-table tbody tr.admin-edit-row td {
+    background: rgb(var(--nx-surface-2));
+    padding: var(--sp-4);
+}
+
+.admin-users-table tbody tr.is-editing > td {
+    background: rgb(var(--nx-surface-2));
+    border-bottom-color: transparent;
+}
+
+.admin-edit-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-3);
+}
+
+.admin-edit-title {
+    margin: 0;
+    color: rgb(var(--nx-ink-2));
+}
+
+.admin-edit-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+    gap: var(--sp-3);
+}
+
+.admin-edit-form input,
+.admin-edit-form select {
+    background: rgb(var(--nx-surface));
+    color: rgb(var(--nx-ink));
+    border: 1px solid rgb(var(--nx-rule-soft));
+    border-radius: var(--r-sm);
+    padding: var(--sp-2) var(--sp-3);
+    font-size: var(--fs-sm);
+    min-height: 34px;
+}
+
+.admin-edit-form input:focus,
+.admin-edit-form select:focus {
+    outline: none;
+    border-color: rgb(var(--nx-accent));
+}
+
+.admin-edit-form input:disabled,
+.admin-edit-form select:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+.admin-edit-hint {
+    margin: 0;
+    color: rgb(var(--nx-ink-3));
+    font-size: var(--fs-2xs);
+}
+
+.admin-edit-actions {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--sp-3);
+    margin: 0;
+    padding: 0;
+    position: static;
+    background: none;
+}
+
+.admin-notice {
+    margin: 0;
+    font-size: var(--fs-sm);
+}
+
+.admin-notice.is-error {
+    color: rgb(var(--nx-signal-danger));
+}
+
+.admin-notice.is-success {
+    color: rgb(var(--nx-signal-success));
+}
+
+@media (max-width: 640px) {
+    .admin-users-table td.admin-row-actions {
+        white-space: normal;
+    }
+
+    .admin-row-actions-inner {
+        justify-content: flex-start;
+    }
+
+    .admin-edit-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .admin-edit-actions .btn-primary,
+    .admin-edit-actions .chip {
+        flex: 1 1 auto;
+    }
+}
+
 .admin-audit-table td.audit-detail-cell {
-    background: rgb(var(--surface-2, var(--surface)));
+    background: rgb(var(--nx-surface-2));
     padding: 12px 16px;
 }
 
@@ -1862,8 +2005,8 @@ table.packages td.envelope-cell {
 
 .audit-json {
     background: rgba(0, 0, 0, 0.25);
-    color: rgb(var(--ink));
-    border: 1px solid rgb(var(--border));
+    color: rgb(var(--nx-ink));
+    border: 1px solid rgb(var(--nx-rule-soft));
     border-radius: 6px;
     padding: 8px 10px;
     font-size: 12px;
@@ -1876,6 +2019,191 @@ table.packages td.envelope-cell {
 .audit-loadmore {
     margin-top: 16px;
     text-align: center;
+}
+
+.audit-filter-search input {
+    background: rgb(var(--nx-surface));
+    color: rgb(var(--nx-ink));
+    border: 1px solid rgb(var(--nx-rule-soft));
+    border-radius: 6px;
+    padding: 6px 8px;
+}
+
+/* Outcome reads at a glance: green for success, red for failure. The generic
+   env-* chips map to envelope sizes, which colours failures like a highlight. */
+.env-chip.audit-outcome.is-success {
+    background: rgb(var(--nx-signal-success) / 0.14);
+    color: rgb(var(--nx-signal-success));
+    border-color: rgb(var(--nx-signal-success) / 0.4);
+}
+
+.env-chip.audit-outcome.is-failure {
+    background: rgb(var(--nx-signal-danger) / 0.16);
+    color: rgb(var(--nx-signal-danger));
+    border-color: rgb(var(--nx-signal-danger) / 0.45);
+}
+
+.audit-endpoint {
+    display: block;
+    font-weight: 400;
+    opacity: 0.75;
+}
+
+/* -- Actor hover card -------------------------------------------------- */
+
+.audit-actor-wrap {
+    display: inline-block;
+}
+
+.audit-actor {
+    background: none;
+    border: 0;
+    padding: 0;
+    color: rgb(var(--nx-ink));
+    font: inherit;
+    cursor: help;
+    border-bottom: 1px dotted rgb(var(--nx-ink) / 0.5);
+}
+
+.audit-actor:hover,
+.audit-actor:focus-visible,
+.audit-actor.is-open {
+    border-bottom-style: solid;
+    color: rgb(var(--nx-accent));
+}
+
+.audit-hovercard {
+    position: fixed;
+    z-index: 80;
+    background: rgb(var(--nx-surface));
+    border: 1px solid rgb(var(--nx-rule-soft));
+    border-radius: 10px;
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+    max-height: 60vh;
+    overflow: auto;
+}
+
+.audit-hovercard-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.audit-hovercard-name {
+    font-weight: 600;
+}
+
+.audit-hovercard-grid {
+    display: grid;
+    grid-template-columns: 88px 1fr;
+    gap: 2px 10px;
+    margin: 4px 0 2px;
+    font-size: 12px;
+}
+
+.audit-hovercard-grid dt {
+    opacity: 0.6;
+}
+
+.audit-hovercard-grid dd {
+    margin: 0;
+    word-break: break-word;
+}
+
+.audit-hovercard-list {
+    list-style: none;
+    margin: 0 0 4px;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    font-size: 12px;
+}
+
+.audit-hovercard-list li {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 10px;
+}
+
+.audit-hovercard-list li > span {
+    flex: 1 1 auto;
+    text-align: right;
+    min-width: 0;
+}
+
+.audit-hovercard-list code {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* -- Sales chip code list (hover) -------------------------------------- */
+
+.sales-codes-hovercard {
+    position: fixed;
+    z-index: 80;
+    background: rgb(var(--nx-surface));
+    border: 1px solid rgb(var(--nx-rule-soft));
+    border-radius: 10px;
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+    max-height: 300px;
+    overflow: auto;
+}
+
+.sales-codes-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    position: sticky;
+    top: 0;
+    background: rgb(var(--nx-surface));
+    padding-bottom: 4px;
+}
+
+.sales-codes-name {
+    font-weight: 600;
+}
+
+.sales-codes-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    font-size: 12px;
+}
+
+.sales-codes-list li {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 10px;
+}
+
+.sales-codes-list li > span {
+    flex: 1 1 auto;
+    text-align: right;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.sales-codes-list code {
+    flex: 0 0 auto;
 }
 
 /* -- Org switcher chip ------------------------------------------------- */

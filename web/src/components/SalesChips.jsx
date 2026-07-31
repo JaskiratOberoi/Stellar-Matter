@@ -1,3 +1,5 @@
+import { SalesCodesHoverCard } from './SalesCodesHoverCard.jsx';
+
 /**
  * @param {{
  *   users: { userId: number, label: string, codeCount?: number }[],
@@ -29,22 +31,13 @@ export function SalesChips({ users, loading, lookupError, selectedIds, onToggle,
                 <div className="chip-grid" role="group" aria-label="Salesperson chips">
                     {users.map((u) => {
                         const id = String(u.userId);
-                        const sel = selectedIds.has(id);
-                        const cc = u.codeCount != null ? ` ${u.codeCount}` : '';
                         return (
-                            <button
+                            <SalesCodesHoverCard
                                 key={id}
-                                type="button"
-                                className={`chip bu-chip${sel ? ' is-selected' : ''}`}
-                                aria-pressed={sel ? 'true' : 'false'}
-                                onClick={() => onToggle(id, u.label)}
-                                title={`Mapped client codes:${cc}`}
-                            >
-                                {u.label}
-                                {u.codeCount != null ? (
-                                    <span className="region-chip-count">{u.codeCount}</span>
-                                ) : null}
-                            </button>
+                                user={u}
+                                selected={selectedIds.has(id)}
+                                onToggle={() => onToggle(id, u.label)}
+                            />
                         );
                     })}
                 </div>

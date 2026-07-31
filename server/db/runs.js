@@ -135,18 +135,34 @@ function projectRun(id, { main, pkg, mainPath, pkgPath }, normalizedMap) {
                       String((filtRegion || reqRegion).key || '').trim()
               }
             : null;
+    const collatedSrc =
+        (filter.collated && typeof filter.collated === 'object' ? filter.collated : null) ||
+        (req.collated && typeof req.collated === 'object' ? req.collated : null);
+    const collatedObj = collatedSrc
+        ? {
+              label: String(collatedSrc.label || 'Collated').trim() || 'Collated',
+              businessUnits: Array.isArray(collatedSrc.businessUnits) ? collatedSrc.businessUnits.slice() : [],
+              regionTargets: Array.isArray(collatedSrc.regionTargets) ? collatedSrc.regionTargets.slice() : []
+          }
+        : null;
     let tracerScopeNorm =
         String(filter.tracerScope || '').trim().toLowerCase() ||
         String(req.tracerScope || '').trim().toLowerCase() ||
         '';
-    if (tracerScopeNorm !== 'region' && regionObj) tracerScopeNorm = 'region';
-    if (!tracerScopeNorm || tracerScopeNorm === 'bu') tracerScopeNorm = regionObj ? 'region' : 'bu';
+    if (tracerScopeNorm !== 'collated' && collatedObj) tracerScopeNorm = 'collated';
+    if (tracerScopeNorm !== 'collated') {
+        if (tracerScopeNorm !== 'region' && regionObj) tracerScopeNorm = 'region';
+        if (!tracerScopeNorm || tracerScopeNorm === 'bu') tracerScopeNorm = regionObj ? 'region' : 'bu';
+    }
     let bu =
         (filter.bu != null && String(filter.bu).trim()) ||
         (req.bu != null && String(req.bu).trim()) ||
         null;
     if ((!bu || String(bu).trim() === '') && tracerScopeNorm === 'region' && regionObj) {
         bu = regionObj.label || regionObj.key;
+    }
+    if ((!bu || String(bu).trim() === '') && tracerScopeNorm === 'collated' && collatedObj) {
+        bu = collatedObj.label;
     }
     const source = (main && main.source) || (pkg && pkg.source) || 'scrape';
     const mode =
@@ -553,19 +569,33 @@ function tileFromRow(r, labelRows) {
             : {};
     const filtRegion =
         filt.region && typeof filt.region === 'object' && String(filt.region.key || '').trim() ? filt.region : null;
+    const filtCollated =
+        filt.collated && typeof filt.collated === 'object' && !Array.isArray(filt.collated) ? filt.collated : null;
     let tracerScopeFromFilter = String(filt.tracerScope || '').trim().toLowerCase();
-    if (tracerScopeFromFilter !== 'region' && filtRegion) tracerScopeFromFilter = 'region';
-    if (!tracerScopeFromFilter || tracerScopeFromFilter === 'bu') tracerScopeFromFilter = filtRegion ? 'region' : 'bu';
-    const kind = tracerScopeFromFilter === 'region' ? 'region' : 'bu';
+    if (tracerScopeFromFilter !== 'collated' && filtCollated) tracerScopeFromFilter = 'collated';
+    if (tracerScopeFromFilter !== 'collated') {
+        if (tracerScopeFromFilter !== 'region' && filtRegion) tracerScopeFromFilter = 'region';
+        if (!tracerScopeFromFilter || tracerScopeFromFilter === 'bu')
+            tracerScopeFromFilter = filtRegion ? 'region' : 'bu';
+    }
+    const kind =
+        tracerScopeFromFilter === 'collated' ? 'collated' : tracerScopeFromFilter === 'region' ? 'region' : 'bu';
     const region =
-        filtRegion
+        kind !== 'collated' && filtRegion
             ? {
                   kind: String(filtRegion.kind || '').trim(),
                   key: String(filtRegion.key || '').trim(),
                   label: String(filtRegion.label || filtRegion.key || '').trim()
               }
             : null;
-    const tracerScope = kind === 'region' ? 'region' : 'bu';
+    const collated = filtCollated
+        ? {
+              label: String(filtCollated.label || 'Collated').trim() || 'Collated',
+              businessUnits: Array.isArray(filtCollated.businessUnits) ? filtCollated.businessUnits.slice() : [],
+              regionTargets: Array.isArray(filtCollated.regionTargets) ? filtCollated.regionTargets.slice() : []
+          }
+        : null;
+    const tracerScope = kind;
     const occurrences = labelRows.reduce((s, x) => s + (Number(x.count) || 0), 0) + (r.other_tests_row_count || 0);
     return {
         id: r.id,
@@ -574,6 +604,7 @@ function tileFromRow(r, labelRows) {
         tracerScope,
         kind,
         region,
+        collated,
         source: r.source,
         mode: r.mode,
         urineContainers: r.urine_containers || null,
