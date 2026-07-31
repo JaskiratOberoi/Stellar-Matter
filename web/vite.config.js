@@ -2,6 +2,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
+import { VitePWA } from 'vite-plugin-pwa';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Repo root (parent of /web) — env at the root drives both server and SPA proxy.
@@ -30,7 +31,120 @@ export default defineConfig(({ mode }) => {
     const apiProxy = buildApiProxy(env);
 
     return {
-        plugins: [react()],
+        plugins: [
+            react(),
+            VitePWA({
+                registerType: 'prompt',
+                includeAssets: [
+                    'favicon.svg',
+                    'apple-touch-icon.png',
+                    'pwa-192x192.png',
+                    'pwa-512x512.png',
+                    'pwa-512x512-maskable.png'
+                ],
+                manifest: {
+                    name: 'Stellar Matter',
+                    short_name: 'Inventory',
+                    description: 'Inventory tracker and Tracer for Qugen Pathlabs materials.',
+                    theme_color: '#0A0A0A',
+                    background_color: '#0A0A0A',
+                    display: 'standalone',
+                    orientation: 'any',
+                    scope: '/',
+                    start_url: '/',
+                    lang: 'en',
+                    categories: ['business', 'productivity'],
+                    icons: [
+                        {
+                            src: 'pwa-192x192.png',
+                            sizes: '192x192',
+                            type: 'image/png'
+                        },
+                        {
+                            src: 'pwa-512x512.png',
+                            sizes: '512x512',
+                            type: 'image/png'
+                        },
+                        {
+                            src: 'pwa-512x512-maskable.png',
+                            sizes: '512x512',
+                            type: 'image/png',
+                            purpose: 'maskable'
+                        }
+                    ]
+                },
+                workbox: {
+                    navigateFallback: '/index.html',
+                    // Skip auth endpoints so login never serves a stale offline response.
+                    navigateFallbackDenylist: [/^\/api\//],
+                    globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2,webmanifest}'],
+                    runtimeCaching: [
+                        {
+                            // Production API (cross-origin Hostinger → api-matter).
+                            // NetworkFirst so last-viewed GETs still render offline.
+                            urlPattern: ({ url, request }) =>
+                                request.method === 'GET' &&
+                                url.hostname === 'api-matter.stellarinfomatica.com' &&
+                                !url.pathname.startsWith('/api/auth'),
+                            handler: 'NetworkFirst',
+                            options: {
+                                cacheName: 'matter-api-get',
+                                networkTimeoutSeconds: 4,
+                                expiration: {
+                                    maxEntries: 80,
+                                    maxAgeSeconds: 60 * 60 * 24
+                                },
+                                cacheableResponse: {
+                                    statuses: [0, 200]
+                                }
+                            }
+                        },
+                        {
+                            // Dev proxy path (same-origin /api during vite/preview).
+                            urlPattern: ({ url, request }) =>
+                                request.method === 'GET' &&
+                                url.origin === self.location.origin &&
+                                url.pathname.startsWith('/api/') &&
+                                !url.pathname.startsWith('/api/auth'),
+                            handler: 'NetworkFirst',
+                            options: {
+                                cacheName: 'matter-api-get-local',
+                                networkTimeoutSeconds: 4,
+                                expiration: {
+                                    maxEntries: 80,
+                                    maxAgeSeconds: 60 * 60 * 24
+                                },
+                                cacheableResponse: {
+                                    statuses: [0, 200]
+                                }
+                            }
+                        },
+                        {
+                            urlPattern: ({ url }) =>
+                                url.pathname.startsWith('/inventory-photos/') ||
+                                (url.hostname === 'api-matter.stellarinfomatica.com' &&
+                                    url.pathname.startsWith('/inventory-photos/')),
+                            handler: 'StaleWhileRevalidate',
+                            options: {
+                                cacheName: 'matter-photos',
+                                expiration: {
+                                    maxEntries: 60,
+                                    maxAgeSeconds: 60 * 60 * 24 * 7
+                                },
+                                cacheableResponse: {
+                                    statuses: [0, 200]
+                                }
+                            }
+                        }
+                    ]
+                },
+                devOptions: {
+                    // Keep SW off in `vite` HMR; enable only for production builds /
+                    // `vite preview` so installability can be verified there.
+                    enabled: false
+                }
+            })
+        ],
         server: {
             port: 5174,
             fs: { allow: ['..'] },

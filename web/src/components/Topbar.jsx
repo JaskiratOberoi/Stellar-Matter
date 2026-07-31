@@ -1,34 +1,60 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext.jsx';
+import { BrandMark } from './BrandMark.jsx';
 
 export function Topbar({ statusPill, lastUpdated, onOrgSwitched }) {
     const { user, orgs, authRequired, logout, switchOrg } = useAuth();
     const location = useLocation();
     const isInventory = location.pathname.startsWith('/inventory');
+    const [menuOpen, setMenuOpen] = useState(false);
+    const drawerRef = useRef(null);
+
+    useEffect(() => {
+        setMenuOpen(false);
+    }, [location.pathname]);
+
+    useEffect(() => {
+        if (!menuOpen) return undefined;
+        const onKey = (e) => {
+            if (e.key === 'Escape') setMenuOpen(false);
+        };
+        document.addEventListener('keydown', onKey);
+        const prev = document.body.style.overflow;
+        document.body.style.overflow = 'hidden';
+        return () => {
+            document.removeEventListener('keydown', onKey);
+            document.body.style.overflow = prev;
+        };
+    }, [menuOpen]);
+
+    const switchOrgHandler = async (orgId) => {
+        const r = await switchOrg(orgId);
+        if (r.ok && typeof onOrgSwitched === 'function') onOrgSwitched(orgId);
+        else if (!r.ok) window.alert(r.error || 'Org switch failed');
+    };
+
+    const navLink = !isInventory ? (
+        <Link to="/inventory" className="chip chip-tool tracer-ui-link" title="Open the inventory tracker">
+            Inventory
+        </Link>
+    ) : (
+        <Link to="/" className="chip chip-tool tracer-ui-link" title="Return to Tracer">
+            ← Tracer
+        </Link>
+    );
 
     return (
         <header className="topbar" role="banner">
             <div className="topbar-bar">
                 <div className="topbar-left">
                     <div className="topbar-brand">
+                        <BrandMark size={34} className="topbar-brand-mark" />
                         <div className="topbar-brand-text">
                             <h1 className="wordmark">Stellar Matter</h1>
                             <p className="topbar-tagline">Official tally for materials in Genomics</p>
                         </div>
-                        {!isInventory ? (
-                            <Link
-                                to="/inventory"
-                                className="chip chip-tool tracer-ui-link"
-                                title="Open the inventory tracker"
-                            >
-                                Inventory
-                            </Link>
-                        ) : (
-                            <Link to="/" className="chip chip-tool tracer-ui-link" title="Return to Tracer">
-                                ← Tracer
-                            </Link>
-                        )}
+                        <span className="topbar-desktop-nav">{navLink}</span>
                     </div>
                 </div>
                 <div className="topbar-right">
@@ -44,16 +70,8 @@ export function Topbar({ statusPill, lastUpdated, onOrgSwitched }) {
                         </span>
                     )}
                     {authRequired && user && (
-                        <span className="user-chip">
-                            <OrgSwitcher
-                                user={user}
-                                orgs={orgs}
-                                onSwitch={async (orgId) => {
-                                    const r = await switchOrg(orgId);
-                                    if (r.ok && typeof onOrgSwitched === 'function') onOrgSwitched(orgId);
-                                    else if (!r.ok) window.alert(r.error || 'Org switch failed');
-                                }}
-                            />
+                        <span className="user-chip topbar-desktop-user">
+                            <OrgSwitcher user={user} orgs={orgs} onSwitch={switchOrgHandler} />
                             {user.role === 'super_admin' && (
                                 <>
                                     <Link to="/admin/users" className="chip chip-tool admin-nav-link">
@@ -77,8 +95,85 @@ export function Topbar({ statusPill, lastUpdated, onOrgSwitched }) {
                             </button>
                         </span>
                     )}
+                    {authRequired && user && (
+                        <button
+                            type="button"
+                            className="topbar-menu-btn"
+                            aria-label={menuOpen ? 'Close menu' : 'Open menu'}
+                            aria-expanded={menuOpen ? 'true' : 'false'}
+                            aria-controls="topbar-drawer"
+                            onClick={() => setMenuOpen((v) => !v)}
+                        >
+                            <span className={`topbar-menu-ico${menuOpen ? ' is-open' : ''}`} aria-hidden="true" />
+                        </button>
+                    )}
                 </div>
             </div>
+
+            {menuOpen && (
+                <div className="topbar-drawer-root">
+                    <button
+                        type="button"
+                        className="topbar-drawer-scrim"
+                        aria-label="Close menu"
+                        onClick={() => setMenuOpen(false)}
+                    />
+                    <nav
+                        id="topbar-drawer"
+                        className="topbar-drawer"
+                        ref={drawerRef}
+                        aria-label="App menu"
+                    >
+                        <div className="topbar-drawer-section">
+                            <p className="eyebrow">Navigate</p>
+                            {navLink}
+                        </div>
+                        {user && (
+                            <>
+                                <div className="topbar-drawer-section">
+                                    <p className="eyebrow">Account</p>
+                                    <p className="topbar-drawer-user">
+                                        {user.display_name || user.username}
+                                        {user.role === 'super_admin' && ' · super admin'}
+                                        {user.role === 'admin' && ' · admin'}
+                                    </p>
+                                    <OrgSwitcher user={user} orgs={orgs} onSwitch={switchOrgHandler} />
+                                </div>
+                                {user.role === 'super_admin' && (
+                                    <div className="topbar-drawer-section">
+                                        <p className="eyebrow">Admin</p>
+                                        <Link to="/admin/users" className="chip chip-tool" onClick={() => setMenuOpen(false)}>
+                                            Users
+                                        </Link>
+                                        <Link to="/admin/orgs" className="chip chip-tool" onClick={() => setMenuOpen(false)}>
+                                            Orgs
+                                        </Link>
+                                        <Link
+                                            to="/admin/audit-log"
+                                            className="chip chip-tool"
+                                            onClick={() => setMenuOpen(false)}
+                                        >
+                                            Audit log
+                                        </Link>
+                                    </div>
+                                )}
+                                <div className="topbar-drawer-section">
+                                    <button
+                                        type="button"
+                                        className="chip chip-tool user-logout"
+                                        onClick={() => {
+                                            setMenuOpen(false);
+                                            logout();
+                                        }}
+                                    >
+                                        Log out
+                                    </button>
+                                </div>
+                            </>
+                        )}
+                    </nav>
+                </div>
+            )}
         </header>
     );
 }

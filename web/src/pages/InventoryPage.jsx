@@ -782,7 +782,7 @@ function ReceiveView({ inventory, canMove, onDone, onGoto }) {
                                         const unit = m ? m.base_unit : '';
                                         return (
                                             <tr key={l.key}>
-                                                <td className="inv-lt-mat">
+                                                <td className="inv-lt-mat" data-label="Material">
                                                     <MaterialSelect
                                                         value={l.materialId}
                                                         onChange={(v) => onPickMaterial(l.key, v)}
@@ -790,24 +790,24 @@ function ReceiveView({ inventory, canMove, onDone, onGoto }) {
                                                         vendor={vendor}
                                                     />
                                                 </td>
-                                                <td className="inv-lt-num">
+                                                <td className="inv-lt-num" data-label="Pack size">
                                                     <StepInput
                                                         value={l.packSize}
                                                         onChange={(v) => updateLine(l.key, { packSize: v })}
                                                         ariaLabel="Pack size"
                                                     />
                                                 </td>
-                                                <td className="inv-lt-num">
+                                                <td className="inv-lt-num" data-label="Packs">
                                                     <StepInput
                                                         value={l.packQty}
                                                         onChange={(v) => updateLine(l.key, { packQty: v })}
                                                         ariaLabel="Number of packs"
                                                     />
                                                 </td>
-                                                <td className="inv-lt-num inv-lt-total">
+                                                <td className="inv-lt-num inv-lt-total" data-label="= Units">
                                                     {lineTotal > 0 ? `${fmt(lineTotal)}${unit ? ` ${unit}` : ''}` : '—'}
                                                 </td>
-                                                <td className="inv-lt-photo">
+                                                <td className="inv-lt-photo" data-label="Photo">
                                                     <LinePhoto
                                                         url={l.photoUrl}
                                                         uploading={l.uploading}
@@ -815,7 +815,7 @@ function ReceiveView({ inventory, canMove, onDone, onGoto }) {
                                                         onClear={() => updateLine(l.key, { photoUrl: '' })}
                                                     />
                                                 </td>
-                                                <td className="inv-lt-x">
+                                                <td className="inv-lt-x" data-label="">
                                                     <button
                                                         type="button"
                                                         className="inv-line-remove"
@@ -1132,7 +1132,7 @@ function DispatchView({ inventory, canMove, onDone, onGoto }) {
                                         const unit = m ? m.base_unit : '';
                                         return (
                                             <tr key={l.key} className={l.overdraw ? 'is-overdraw' : ''}>
-                                                <td className="inv-lt-mat">
+                                                <td className="inv-lt-mat" data-label="Material">
                                                     <MaterialSelect
                                                         value={l.materialId}
                                                         onChange={(v) => onPickMaterial(l.key, v)}
@@ -1140,27 +1140,30 @@ function DispatchView({ inventory, canMove, onDone, onGoto }) {
                                                         vendor={null}
                                                     />
                                                 </td>
-                                                <td className="inv-lt-num">
+                                                <td className="inv-lt-num" data-label="Pack size">
                                                     <StepInput
                                                         value={l.packSize}
                                                         onChange={(v) => updateLine(l.key, { packSize: v })}
                                                         ariaLabel="Pack size"
                                                     />
                                                 </td>
-                                                <td className="inv-lt-num">
+                                                <td className="inv-lt-num" data-label="Packs">
                                                     <StepInput
                                                         value={l.packQty}
                                                         onChange={(v) => updateLine(l.key, { packQty: v })}
                                                         ariaLabel="Number of packs"
                                                     />
                                                 </td>
-                                                <td className="inv-lt-num inv-lt-total">
+                                                <td className="inv-lt-num inv-lt-total" data-label="= Units">
                                                     {l.qty > 0 ? `${fmt(l.required)}${unit ? ` ${unit}` : ''}` : '—'}
                                                 </td>
-                                                <td className={`inv-lt-num${l.overdraw ? ' inv-lt-danger' : ''}`}>
+                                                <td
+                                                    className={`inv-lt-num${l.overdraw ? ' inv-lt-danger' : ''}`}
+                                                    data-label="Available"
+                                                >
                                                     {l.materialId ? fmt(l.available) : '—'}
                                                 </td>
-                                                <td className="inv-lt-photo">
+                                                <td className="inv-lt-photo" data-label="Photo">
                                                     <LinePhoto
                                                         url={l.photoUrl}
                                                         uploading={l.uploading}
@@ -1168,7 +1171,7 @@ function DispatchView({ inventory, canMove, onDone, onGoto }) {
                                                         onClear={() => updateLine(l.key, { photoUrl: '' })}
                                                     />
                                                 </td>
-                                                <td className="inv-lt-x">
+                                                <td className="inv-lt-x" data-label="">
                                                     <button
                                                         type="button"
                                                         className="inv-line-remove"

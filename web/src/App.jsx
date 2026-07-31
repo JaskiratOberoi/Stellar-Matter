@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { Topbar } from './components/Topbar.jsx';
 import { RoleGate } from './components/RoleGate.jsx';
+import { InstallPrompt } from './components/InstallPrompt.jsx';
 import { LoginPage } from './pages/LoginPage.jsx';
 import { AdminUsersPage } from './pages/AdminUsersPage.jsx';
 import { AdminAuditLogPage } from './pages/AdminAuditLogPage.jsx';
@@ -76,10 +77,13 @@ export function App() {
     }
     if (authRequired && !user) {
         return (
-            <Routes>
-                <Route path="/login" element={<LoginPage />} />
-                <Route path="*" element={<Navigate to="/login" replace />} />
-            </Routes>
+            <>
+                <Routes>
+                    <Route path="/login" element={<LoginPage />} />
+                    <Route path="*" element={<Navigate to="/login" replace />} />
+                </Routes>
+                <InstallPrompt />
+            </>
         );
     }
 
@@ -120,44 +124,47 @@ export function App() {
     );
 
     return (
-        <Routes>
-            <Route path="/login" element={<LoginPage />} />
-            <Route
-                path="/admin/users"
-                element={
-                    <RoleGate roles={['super_admin']}>
-                        <AdminUsersPage />
-                    </RoleGate>
-                }
-            />
-            <Route
-                path="/admin/audit-log"
-                element={
-                    <RoleGate roles={['super_admin']}>
-                        <AdminAuditLogPage />
-                    </RoleGate>
-                }
-            />
-            <Route
-                path="/admin/orgs"
-                element={
-                    <RoleGate roles={['super_admin']}>
-                        <AdminOrgsPage />
-                    </RoleGate>
-                }
-            />
-            <Route
-                path="/inventory"
-                element={
-                    <RoleGate roles={['super_admin', 'admin', 'operator', 'viewer']}>
-                        {inventoryView}
-                    </RoleGate>
-                }
-            />
-            <Route path="/" element={tracerView} />
-            <Route path="/dashboard" element={<Navigate to="/" replace />} />
-            <Route path="/tracer" element={<Navigate to="/" replace />} />
-            <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+        <>
+            <Routes>
+                <Route path="/login" element={<LoginPage />} />
+                <Route
+                    path="/admin/users"
+                    element={
+                        <RoleGate roles={['super_admin']}>
+                            <AdminUsersPage />
+                        </RoleGate>
+                    }
+                />
+                <Route
+                    path="/admin/audit-log"
+                    element={
+                        <RoleGate roles={['super_admin']}>
+                            <AdminAuditLogPage />
+                        </RoleGate>
+                    }
+                />
+                <Route
+                    path="/admin/orgs"
+                    element={
+                        <RoleGate roles={['super_admin']}>
+                            <AdminOrgsPage />
+                        </RoleGate>
+                    }
+                />
+                <Route
+                    path="/inventory"
+                    element={
+                        <RoleGate roles={['super_admin', 'admin', 'operator', 'viewer']}>
+                            {inventoryView}
+                        </RoleGate>
+                    }
+                />
+                <Route path="/" element={tracerView} />
+                <Route path="/dashboard" element={<Navigate to="/" replace />} />
+                <Route path="/tracer" element={<Navigate to="/" replace />} />
+                <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+            <InstallPrompt />
+        </>
     );
 }

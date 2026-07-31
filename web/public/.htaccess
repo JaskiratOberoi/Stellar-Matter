@@ -10,10 +10,23 @@
   RewriteRule . /index.html [L]
 </IfModule>
 
-# Long-cache hashed Vite assets; never cache the entry HTML.
+# Correct MIME for the Web App Manifest (older Apache builds default to text/plain).
+<IfModule mod_mime.c>
+  AddType application/manifest+json .webmanifest
+</IfModule>
+
+# Long-cache hashed Vite assets; never cache the entry HTML or the service
+# worker / manifest (immutable would freeze SW updates for a year).
 <IfModule mod_headers.c>
-  <FilesMatch "\.(?:js|css|woff2?|ttf|otf|eot|svg|png|jpg|jpeg|gif|webp|ico)$">
+  <FilesMatch "\.(?:css|woff2?|ttf|otf|eot|svg|png|jpg|jpeg|gif|webp|ico)$">
     Header set Cache-Control "public, max-age=31536000, immutable"
+  </FilesMatch>
+  # Hashed app bundles only — exclude SW / workbox / register helpers.
+  <FilesMatch "^(?!sw\.js$|registerSW\.js$|workbox-)[A-Za-z0-9._-]+\.js$">
+    Header set Cache-Control "public, max-age=31536000, immutable"
+  </FilesMatch>
+  <FilesMatch "(sw\.js|registerSW\.js|workbox-.*\.js|manifest\.webmanifest)$">
+    Header set Cache-Control "no-store"
   </FilesMatch>
   <FilesMatch "\.html$">
     Header set Cache-Control "no-store"

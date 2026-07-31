@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Navigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext.jsx';
+import { BrandMark } from '../components/BrandMark.jsx';
 
 export function LoginPage() {
     const { user, authRequired, loading, login } = useAuth();
@@ -24,7 +25,10 @@ export function LoginPage() {
     return (
         <main className="login-shell">
             <div className="nexus-card login-card">
-                <p className="eyebrow">Stellar Matter</p>
+                <div className="login-brand">
+                    <BrandMark size={40} className="login-brand-mark" />
+                    <p className="eyebrow">Stellar Matter</p>
+                </div>
                 <h1 className="wordmark login-title">Sign in</h1>
                 <p className="muted small login-sub">Use the credentials seeded by your administrator.</p>
                 <form onSubmit={onSubmit} className="login-form">
