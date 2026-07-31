@@ -403,11 +403,14 @@ async function consolidateDefaultOrg(client) {
 // so it shares the same connection and runs on every boot, idempotently.
 // ---------------------------------------------------------------------------
 
-// The 12 seed materials, each linked to the dashboard metric kind whose usage
-// it should eventually be compared against. Envelopes split into BIG/SMALL to
-// match how tiles already report them; letterheads count sheets 1:1 with the
-// dashboard's page metric. base_unit is the smallest countable item; packs are
-// entered as pack_size x pack_qty and stored as base units.
+// The standard catalog. The first block is linked to the dashboard metric kind
+// whose usage it should eventually be compared against. Envelopes split into
+// BIG/SMALL to match how tiles already report them; letterheads count sheets
+// 1:1 with the dashboard's page metric. base_unit is the smallest countable
+// item; packs are entered as pack_size x pack_qty and stored as base units.
+//
+// Everything after the metric-linked block is inventory-only: metricKind stays
+// null so these consumables never surface as Tracer tiles or dashboard metrics.
 const INVENTORY_MATERIAL_SEEDS = [
     { id: 'invmat-letterheads', name: 'Letter Heads', metricKind: 'letterheads', baseUnit: 'sheet', packSize: 500, packLabel: 'ream' },
     { id: 'invmat-envelopes-big', name: 'Envelopes (Big)', metricKind: 'envelopes', baseUnit: 'envelope', packSize: 100, packLabel: 'box' },
@@ -420,7 +423,47 @@ const INVENTORY_MATERIAL_SEEDS = [
     { id: 'invmat-l-heparin', name: 'L.Heparin', metricKind: 'l_heparin', baseUnit: 'vial', packSize: 100, packLabel: 'box' },
     { id: 'invmat-lbc', name: 'LBC', metricKind: 'lbc', baseUnit: 'sample', packSize: 50, packLabel: 'box' },
     { id: 'invmat-barcode-labels', name: 'Barcode Labels', metricKind: 'barcode', baseUnit: 'label', packSize: 1000, packLabel: 'roll' },
-    { id: 'invmat-serum-tubes', name: 'Serum Tubes', metricKind: 'serum', baseUnit: 'tube', packSize: 100, packLabel: 'box' }
+    { id: 'invmat-serum-tubes', name: 'Serum Tubes', metricKind: 'serum', baseUnit: 'tube', packSize: 100, packLabel: 'box' },
+
+    // -- Tubes, vacuum tubes and containers --
+    { id: 'invmat-multipurpose-tube', name: 'Multipurpose Tube', metricKind: null, baseUnit: 'tube', packSize: 100, packLabel: 'box' },
+    { id: 'invmat-edta-vacuum', name: 'EDTA Vacuum', metricKind: null, baseUnit: 'tube', packSize: 100, packLabel: 'box' },
+    { id: 'invmat-serum-vacuum', name: 'Serum Vacuum', metricKind: null, baseUnit: 'tube', packSize: 100, packLabel: 'box' },
+    { id: 'invmat-flouride-vacuum', name: 'Flouride Vacuum', metricKind: null, baseUnit: 'tube', packSize: 100, packLabel: 'box' },
+    { id: 'invmat-sst-tubes', name: 'SST Tubes', metricKind: null, baseUnit: 'tube', packSize: 100, packLabel: 'box' },
+    { id: 'invmat-capillary-tube', name: 'Capillary Tube', metricKind: null, baseUnit: 'tube', packSize: 100, packLabel: 'box' },
+    { id: 'invmat-caplin-jar', name: 'Caplin Jar', metricKind: null, baseUnit: 'jar', packSize: 100, packLabel: 'box' },
+
+    // -- Stationery and paperwork --
+    { id: 'invmat-noble-letterhead', name: 'Noble Letterhead', metricKind: null, baseUnit: 'sheet', packSize: 500, packLabel: 'ream' },
+    { id: 'invmat-khetrapal-letterhead', name: 'Khetrapal Letterhead', metricKind: null, baseUnit: 'sheet', packSize: 500, packLabel: 'ream' },
+    { id: 'invmat-samarpan-letterhead', name: 'Samarpan Letterhead', metricKind: null, baseUnit: 'sheet', packSize: 500, packLabel: 'ream' },
+    { id: 'invmat-hemal-letterhead', name: 'Hemal Letterhead', metricKind: null, baseUnit: 'sheet', packSize: 500, packLabel: 'ream' },
+    { id: 'invmat-trf-5-line', name: 'TRF - 5 Line', metricKind: null, baseUnit: 'form', packSize: 100, packLabel: 'pad' },
+    { id: 'invmat-trf-big', name: 'TRF Big', metricKind: null, baseUnit: 'form', packSize: 100, packLabel: 'pad' },
+    { id: 'invmat-trf-single-page', name: 'TRF Single Page', metricKind: null, baseUnit: 'form', packSize: 100, packLabel: 'pad' },
+    { id: 'invmat-xray-envelopes', name: 'X-ray Envelopes', metricKind: null, baseUnit: 'envelope', packSize: 50, packLabel: 'pack' },
+    { id: 'invmat-ziplock-bags', name: 'Ziplock Bags', metricKind: null, baseUnit: 'bag', packSize: 100, packLabel: 'pack' },
+
+    // -- Phlebotomy consumables --
+    { id: 'invmat-vacuum-needle', name: 'Vacuum Needle', metricKind: null, baseUnit: 'needle', packSize: 100, packLabel: 'box' },
+    { id: 'invmat-syringe-1ml', name: 'Syringe 1ml', metricKind: null, baseUnit: 'syringe', packSize: 100, packLabel: 'box' },
+    { id: 'invmat-syringe-3ml', name: 'Syringe 3ml', metricKind: null, baseUnit: 'syringe', packSize: 100, packLabel: 'box' },
+    { id: 'invmat-syringe-5ml', name: 'Syringe 5ml', metricKind: null, baseUnit: 'syringe', packSize: 100, packLabel: 'box' },
+    { id: 'invmat-syringe-10ml', name: 'Syringe 10ml', metricKind: null, baseUnit: 'syringe', packSize: 100, packLabel: 'box' },
+    { id: 'invmat-cotton-roll', name: 'Cotton Roll', metricKind: null, baseUnit: 'roll', packSize: 1, packLabel: 'roll' },
+    { id: 'invmat-bandages', name: 'Bandages', metricKind: null, baseUnit: 'piece', packSize: 100, packLabel: 'box' },
+    { id: 'invmat-swab-sticks', name: 'Swab Sticks', metricKind: null, baseUnit: 'stick', packSize: 100, packLabel: 'pack' },
+
+    // -- PPE, hygiene and waste --
+    { id: 'invmat-gloves', name: 'Gloves', metricKind: null, baseUnit: 'pair', packSize: 100, packLabel: 'box' },
+    { id: 'invmat-mask', name: 'Mask', metricKind: null, baseUnit: 'mask', packSize: 50, packLabel: 'box' },
+    { id: 'invmat-spirit', name: 'Spirit', metricKind: null, baseUnit: 'bottle', packSize: 1, packLabel: 'bottle' },
+    { id: 'invmat-sanitizer', name: 'Sanitizer', metricKind: null, baseUnit: 'bottle', packSize: 1, packLabel: 'bottle' },
+    { id: 'invmat-sharp-container-blue', name: 'Sharp Container - Blue', metricKind: null, baseUnit: 'container', packSize: 1, packLabel: 'unit' },
+    { id: 'invmat-sharp-container-white', name: 'Sharp Container - White', metricKind: null, baseUnit: 'container', packSize: 1, packLabel: 'unit' },
+    { id: 'invmat-biowaste-polybags-yellow', name: 'Biowaste Polybags - Yellow', metricKind: null, baseUnit: 'bag', packSize: 100, packLabel: 'pack' },
+    { id: 'invmat-biowaste-polybags-red', name: 'Biowaste Polybags - Red', metricKind: null, baseUnit: 'bag', packSize: 100, packLabel: 'pack' }
 ];
 
 async function migrateInventory(client) {
@@ -521,6 +564,58 @@ async function migrateInventory(client) {
          ON inventory_movements (to_location_id) WHERE to_location_id IS NOT NULL;`
     );
 
+    // Vendors we buy stock from. Free-form contact details; gst_number is stored
+    // as given (trimmed/uppercased) rather than format-validated so unusual
+    // registrations are not rejected. The materials a vendor supplies live in
+    // the join table below so a receipt can suggest what they typically provide.
+    await client.query(`
+        CREATE TABLE IF NOT EXISTS inventory_vendors (
+            id TEXT PRIMARY KEY,
+            org_id TEXT NOT NULL DEFAULT 'org-default'
+                REFERENCES organizations(id) ON DELETE RESTRICT,
+            name TEXT NOT NULL,
+            contact_person TEXT,
+            phone TEXT,
+            email TEXT,
+            address TEXT,
+            gst_number TEXT,
+            note TEXT,
+            active BOOLEAN NOT NULL DEFAULT true,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            UNIQUE (org_id, name)
+        );
+    `);
+    await client.query(
+        `CREATE INDEX IF NOT EXISTS inventory_vendors_org_idx
+         ON inventory_vendors (org_id) WHERE active = true;`
+    );
+
+    // Which catalog materials each vendor supplies. Both sides cascade: dropping
+    // a vendor or a material just removes the link, never a movement.
+    await client.query(`
+        CREATE TABLE IF NOT EXISTS inventory_vendor_materials (
+            vendor_id TEXT NOT NULL REFERENCES inventory_vendors(id) ON DELETE CASCADE,
+            material_id TEXT NOT NULL REFERENCES inventory_materials(id) ON DELETE CASCADE,
+            PRIMARY KEY (vendor_id, material_id)
+        );
+    `);
+    await client.query(
+        `CREATE INDEX IF NOT EXISTS inventory_vendor_materials_material_idx
+         ON inventory_vendor_materials (material_id);`
+    );
+
+    // Link receipts back to a vendor entity. The legacy free-text vendor column
+    // above stays for any historical rows; new receipts set vendor_id instead.
+    await client.query(
+        `ALTER TABLE inventory_movements
+         ADD COLUMN IF NOT EXISTS vendor_id TEXT
+             REFERENCES inventory_vendors(id) ON DELETE SET NULL;`
+    );
+    await client.query(
+        `CREATE INDEX IF NOT EXISTS inventory_movements_vendor_idx
+         ON inventory_movements (vendor_id) WHERE vendor_id IS NOT NULL;`
+    );
+
     // Derived balances: inflows to a location minus outflows from it, ignoring
     // voided rows. Recreated idempotently so schema edits ship cleanly.
     await client.query(`
@@ -558,6 +653,35 @@ async function migrateInventory(client) {
                  VALUES ($1, $2, $3, $4, $5, $6, $7)
                  ON CONFLICT (org_id, name) DO NOTHING`,
                 [m.id, DEFAULT_ORG_ID, m.name, m.metricKind, m.baseUnit, m.packSize, m.packLabel]
+            );
+        }
+    }
+
+    await backfillCatalogMaterials(client);
+}
+
+// Orgs that were seeded before a material joined the standard catalog would
+// otherwise never see it, since the seed block above only runs for a fresh org.
+// Top up every org that already has a catalog. Safe to repeat: names are unique
+// per org, and disabling a material keeps the row, so nothing is resurrected.
+async function backfillCatalogMaterials(client) {
+    const orgs = await client.query(`SELECT DISTINCT org_id FROM inventory_materials`);
+    for (const { org_id: orgId } of orgs.rows) {
+        for (const m of INVENTORY_MATERIAL_SEEDS) {
+            await client.query(
+                `INSERT INTO inventory_materials
+                    (id, org_id, name, metric_kind, base_unit, default_pack_size, default_pack_label)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7)
+                 ON CONFLICT (org_id, name) DO NOTHING`,
+                [
+                    `invmat-${crypto.randomBytes(8).toString('hex')}`,
+                    orgId,
+                    m.name,
+                    m.metricKind,
+                    m.baseUnit,
+                    m.packSize,
+                    m.packLabel
+                ]
             );
         }
     }

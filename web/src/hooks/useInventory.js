@@ -37,6 +37,7 @@ async function request(path, init) {
 export function useInventory() {
     const { loading: authLoading, authRequired } = useAuth();
     const [materials, setMaterials] = useState([]);
+    const [vendors, setVendors] = useState([]);
     const [locations, setLocations] = useState([]);
     const [balances, setBalances] = useState([]);
     const [summary, setSummary] = useState(null);
@@ -51,13 +52,15 @@ export function useInventory() {
         setError(null);
         try {
             const locQs = opts.ensureBus ? '?include_inactive=1&ensure_bus=1' : '?include_inactive=1';
-            const [mats, locs, bals, summ] = await Promise.all([
+            const [mats, vends, locs, bals, summ] = await Promise.all([
                 request('/api/inventory/materials?include_inactive=1'),
+                request('/api/inventory/vendors?include_inactive=1'),
                 request(`/api/inventory/locations${locQs}`),
                 request('/api/inventory/balances'),
                 request('/api/inventory/summary')
             ]);
             setMaterials(mats.materials || []);
+            setVendors(vends.vendors || []);
             setLocations(locs.locations || []);
             setBalances(bals.balances || []);
             setSummary(summ.summary || null);
@@ -105,6 +108,14 @@ export function useInventory() {
         (id, body) => request(`/api/inventory/materials/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
         []
     );
+    const createVendor = useCallback(
+        (body) => request('/api/inventory/vendors', { method: 'POST', body: JSON.stringify(body) }),
+        []
+    );
+    const updateVendor = useCallback(
+        (id, body) => request(`/api/inventory/vendors/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+        []
+    );
     const createLocation = useCallback(
         (body) => request('/api/inventory/locations', { method: 'POST', body: JSON.stringify(body) }),
         []
@@ -150,6 +161,7 @@ export function useInventory() {
 
     return {
         materials,
+        vendors,
         locations,
         balances,
         summary,
@@ -159,6 +171,8 @@ export function useInventory() {
         reload,
         createMaterial,
         updateMaterial,
+        createVendor,
+        updateVendor,
         createLocation,
         updateLocation,
         createMovement,

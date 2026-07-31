@@ -13,6 +13,7 @@ const VIEWS = [
     { id: 'receive', label: 'Receive', icon: 'in', caption: 'Vendor intake' },
     { id: 'dispatch', label: 'Dispatch', icon: 'out', caption: 'Ship & transfer' },
     { id: 'ledger', label: 'Ledger', icon: 'list', caption: 'Movement history' },
+    { id: 'vendors', label: 'Vendors', icon: 'truck', caption: 'Suppliers & GST' },
     { id: 'catalog', label: 'Catalog', icon: 'tag', caption: 'Materials & sites', adminOnly: true }
 ];
 
@@ -68,6 +69,8 @@ function Icon({ name, className }) {
             return (<svg {...p}><path d="M8 6h13" /><path d="M8 12h13" /><path d="M8 18h13" /><path d="M3 6h.01" /><path d="M3 12h.01" /><path d="M3 18h.01" /></svg>);
         case 'tag':
             return (<svg {...p}><path d="M3 7v5l9 9 5-5-9-9H3z" /><circle cx="7" cy="11" r="1.4" /></svg>);
+        case 'truck':
+            return (<svg {...p}><path d="M3 6h11v9H3z" /><path d="M14 9h4l3 3v3h-7z" /><circle cx="7" cy="18" r="1.6" /><circle cx="17.5" cy="18" r="1.6" /></svg>);
         case 'box':
             return (<svg {...p}><path d="M21 8 12 3 3 8l9 5 9-5z" /><path d="M3 8v8l9 5 9-5V8" /><path d="M12 13v8" /></svg>);
         case 'warn':
@@ -231,6 +234,9 @@ export function InventoryPage() {
                             <DispatchView inventory={inventory} canMove={canMove} onDone={showFlash} onGoto={goto} />
                         )}
                         {view === 'ledger' && <LedgerView inventory={inventory} canMove={canMove} onDone={showFlash} />}
+                        {view === 'vendors' && (
+                            <VendorsView inventory={inventory} canManageCatalog={canManageCatalog} onDone={showFlash} />
+                        )}
                         {view === 'catalog' && canManageCatalog && (
                             <CatalogView inventory={inventory} onDone={showFlash} seeding={seeding} onSeed={handleSeed} />
                         )}
@@ -287,8 +293,8 @@ function OnboardingBoard({ canManageCatalog, seeding, onSeed, onManual }) {
             </ol>
 
             <p className="inv-board-foot muted small">
-                The starter catalog adds 12 standard materials (letter heads, envelopes, vials, tubes…)
-                and a Central Store. You can edit or add more anytime.
+                The starter catalog adds the standard materials list (letter heads, envelopes, vials,
+                tubes, consumables…) and a Central Store. You can edit or add more anytime.
             </p>
         </section>
     );
@@ -310,6 +316,11 @@ function FiguresStrip({ summary, onLowStock }) {
                 <span className="inv-figure-num">{fmt(summary.locations)}</span>
                 <span className="inv-figure-label">Locations</span>
                 <span className="inv-figure-cap">stores, BUs and labs</span>
+            </div>
+            <div className="inv-figure">
+                <span className="inv-figure-num">{fmt(summary.vendors)}</span>
+                <span className="inv-figure-label">Vendors</span>
+                <span className="inv-figure-cap">onboarded suppliers</span>
             </div>
             <div className="inv-figure">
                 <span className="inv-figure-num">{fmt(summary.movements)}</span>
@@ -489,23 +500,31 @@ function StockView({ inventory, onGoto }) {
 // -- Receive ---------------------------------------------------------------
 
 function ReceiveView({ inventory, canMove, onDone, onGoto }) {
-    const { materials, locations, balances, createMovement, reload } = inventory;
+    const { materials, vendors, locations, balances, createMovement, reload } = inventory;
     const activeMaterials = materials.filter((m) => m.active);
+    const activeVendors = (vendors || []).filter((v) => v.active);
     const activeLocations = locations.filter((l) => l.active);
     const stores = activeLocations.filter((l) => l.kind === 'store');
     const balMap = useBalanceMap(balances);
 
     const [materialId, setMaterialId] = useState('');
+    const [vendorId, setVendorId] = useState('');
     const [toLocationId, setToLocationId] = useState('');
     const [packSize, setPackSize] = useState('');
     const [packQty, setPackQty] = useState('');
-    const [vendor, setVendor] = useState('');
     const [reference, setReference] = useState('');
     const [note, setNote] = useState('');
     const [busy, setBusy] = useState(false);
     const [err, setErr] = useState(null);
 
     const material = activeMaterials.find((m) => m.id === materialId) || null;
+    const vendor = activeVendors.find((v) => v.id === vendorId) || null;
+
+    // When a vendor is picked, split the material dropdown into what they supply
+    // and everything else. Grouping (not filtering) keeps off-list receipts easy.
+    const suppliedIds = useMemo(() => new Set(vendor ? vendor.material_ids || [] : []), [vendor]);
+    const suppliedMaterials = vendor ? activeMaterials.filter((m) => suppliedIds.has(m.id)) : [];
+    const otherMaterials = vendor ? activeMaterials.filter((m) => !suppliedIds.has(m.id)) : activeMaterials;
 
     useEffect(() => {
         if (!toLocationId && stores.length) setToLocationId(stores[0].id);
@@ -533,7 +552,7 @@ function ReceiveView({ inventory, canMove, onDone, onGoto }) {
                 to_location_id: toLocationId,
                 pack_size: Number(packSize) || 1,
                 pack_qty: Number(packQty),
-                vendor: vendor || undefined,
+                vendor_id: vendorId || undefined,
                 reference: reference || undefined,
                 note: note || undefined
             });
@@ -571,14 +590,40 @@ function ReceiveView({ inventory, canMove, onDone, onGoto }) {
             <section className="inv-panel">
                 <SectionHead title="Receive from vendor" caption="Logs an inbound receipt against the ledger" />
                 <form id="inv-receive-form" className="inv-form" onSubmit={onSubmit}>
-                    <FormStep n="01" title="What arrived" hint="Material and where it lands">
+                    <FormStep n="01" title="What arrived" hint="Vendor, material and where it lands">
+                        <label className="inv-field">
+                            <span>Vendor</span>
+                            <select value={vendorId} onChange={(e) => setVendorId(e.target.value)}>
+                                <option value="">— none —</option>
+                                {activeVendors.map((v) => (
+                                    <option key={v.id} value={v.id}>{v.name}</option>
+                                ))}
+                            </select>
+                        </label>
                         <label className="inv-field">
                             <span>Material</span>
                             <select value={materialId} onChange={(e) => setMaterialId(e.target.value)} required>
                                 <option value="">— select —</option>
-                                {activeMaterials.map((m) => (
-                                    <option key={m.id} value={m.id}>{m.name}</option>
-                                ))}
+                                {vendor && suppliedMaterials.length > 0 && (
+                                    <optgroup label={`Supplied by ${vendor.name}`}>
+                                        {suppliedMaterials.map((m) => (
+                                            <option key={m.id} value={m.id}>{m.name}</option>
+                                        ))}
+                                    </optgroup>
+                                )}
+                                {vendor ? (
+                                    otherMaterials.length > 0 && (
+                                        <optgroup label="Other materials">
+                                            {otherMaterials.map((m) => (
+                                                <option key={m.id} value={m.id}>{m.name}</option>
+                                            ))}
+                                        </optgroup>
+                                    )
+                                ) : (
+                                    activeMaterials.map((m) => (
+                                        <option key={m.id} value={m.id}>{m.name}</option>
+                                    ))
+                                )}
                             </select>
                         </label>
                         <label className="inv-field">
@@ -609,10 +654,6 @@ function ReceiveView({ inventory, canMove, onDone, onGoto }) {
 
                     <FormStep n="03" title="Paperwork" hint="Optional, but useful in the audit trail">
                         <label className="inv-field">
-                            <span>Vendor</span>
-                            <input value={vendor} onChange={(e) => setVendor(e.target.value)} placeholder="Optional" />
-                        </label>
-                        <label className="inv-field">
                             <span>Reference / invoice #</span>
                             <input value={reference} onChange={(e) => setReference(e.target.value)} placeholder="Optional" />
                         </label>
@@ -631,6 +672,7 @@ function ReceiveView({ inventory, canMove, onDone, onGoto }) {
                     <span className="inv-docket-unit">{unit}</span>
                 </div>
                 <dl className="inv-docket-dl">
+                    <div><dt>Vendor</dt><dd>{vendor ? vendor.name : '—'}</dd></div>
                     <div><dt>Material</dt><dd>{material ? material.name : '—'}</dd></div>
                     <div><dt>Destination</dt><dd>{destination ? destination.name : '—'}</dd></div>
                     <div>
@@ -1079,11 +1121,11 @@ function LedgerView({ inventory, canMove, onDone }) {
                                         {fmt(r.qty_base)}<span className="inv-unit">{r.base_unit}</span>
                                     </td>
                                     <td className="muted small inv-details">
-                                        {r.vendor && <div>Vendor: {r.vendor}</div>}
+                                        {(r.vendor_name || r.vendor) && <div>Vendor: {r.vendor_name || r.vendor}</div>}
                                         {r.reference && <div>Ref: {r.reference}</div>}
                                         {r.note && <div>{r.note}</div>}
                                         {r.voided_at && <span className="inv-void-tag">voided</span>}
-                                        {!r.vendor && !r.reference && !r.note && !r.voided_at && (
+                                        {!r.vendor_name && !r.vendor && !r.reference && !r.note && !r.voided_at && (
                                             <span className="inv-dash">·</span>
                                         )}
                                     </td>
@@ -1123,6 +1165,292 @@ function LedgerView({ inventory, canMove, onDone }) {
     );
 }
 
+// -- Vendors ---------------------------------------------------------------
+
+function VendorMaterialPicker({ materials, selected, onToggle }) {
+    if (!materials.length) {
+        return <p className="muted small">No materials in the catalog yet. Add materials first to link them.</p>;
+    }
+    return (
+        <div className="inv-vendor-picker chip-grid" role="group" aria-label="Materials supplied">
+            {materials.map((m) => {
+                const on = selected.has(m.id);
+                return (
+                    <button
+                        key={m.id}
+                        type="button"
+                        className="chip"
+                        aria-pressed={on ? 'true' : 'false'}
+                        onClick={() => onToggle(m.id)}
+                    >
+                        {m.name}
+                    </button>
+                );
+            })}
+        </div>
+    );
+}
+
+function VendorForm({ vendor, materials, onSubmit, onCancel, busy, err }) {
+    const [name, setName] = useState(vendor ? vendor.name : '');
+    const [contactPerson, setContactPerson] = useState(vendor ? vendor.contact_person || '' : '');
+    const [phone, setPhone] = useState(vendor ? vendor.phone || '' : '');
+    const [email, setEmail] = useState(vendor ? vendor.email || '' : '');
+    const [address, setAddress] = useState(vendor ? vendor.address || '' : '');
+    const [gst, setGst] = useState(vendor ? vendor.gst_number || '' : '');
+    const [note, setNote] = useState(vendor ? vendor.note || '' : '');
+    const [selected, setSelected] = useState(() => new Set(vendor ? vendor.material_ids || [] : []));
+
+    const activeMaterials = materials.filter((m) => m.active);
+
+    const toggle = useCallback((id) => {
+        setSelected((prev) => {
+            const next = new Set(prev);
+            if (next.has(id)) next.delete(id);
+            else next.add(id);
+            return next;
+        });
+    }, []);
+
+    function submit(e) {
+        e.preventDefault();
+        onSubmit({
+            name: name.trim(),
+            contact_person: contactPerson.trim() || undefined,
+            phone: phone.trim() || undefined,
+            email: email.trim() || undefined,
+            address: address.trim() || undefined,
+            gst_number: gst.trim() || undefined,
+            note: note.trim() || undefined,
+            material_ids: [...selected]
+        });
+    }
+
+    return (
+        <form className="inv-inline-form inv-vendor-form" onSubmit={submit}>
+            <div className="inv-fs-grid">
+                <label className="inv-field">
+                    <span>Vendor name</span>
+                    <input value={name} onChange={(e) => setName(e.target.value)} required autoFocus />
+                </label>
+                <label className="inv-field">
+                    <span>Contact person</span>
+                    <input value={contactPerson} onChange={(e) => setContactPerson(e.target.value)} placeholder="Optional" />
+                </label>
+                <label className="inv-field">
+                    <span>Mobile number</span>
+                    <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Optional" />
+                </label>
+                <label className="inv-field">
+                    <span>Email</span>
+                    <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Optional" />
+                </label>
+                <label className="inv-field">
+                    <span>GST number</span>
+                    <input
+                        value={gst}
+                        onChange={(e) => setGst(e.target.value.toUpperCase())}
+                        placeholder="Optional"
+                    />
+                </label>
+                <label className="inv-field inv-field-wide">
+                    <span>Address</span>
+                    <input value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Optional" />
+                </label>
+                <label className="inv-field inv-field-wide">
+                    <span>Note</span>
+                    <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Optional" />
+                </label>
+            </div>
+            <div className="inv-vendor-materials">
+                <span className="inv-vendor-materials-label">Materials supplied ({selected.size})</span>
+                <VendorMaterialPicker materials={activeMaterials} selected={selected} onToggle={toggle} />
+            </div>
+            {err && <p className="login-err">{err}</p>}
+            <div className="form-actions">
+                <button type="submit" className="btn-primary" disabled={busy}>
+                    {busy ? 'Saving…' : vendor ? 'Save vendor' : 'Add vendor'}
+                </button>
+                <button type="button" className="chip chip-tool" onClick={onCancel} disabled={busy}>
+                    Cancel
+                </button>
+            </div>
+        </form>
+    );
+}
+
+function VendorsView({ inventory, canManageCatalog, onDone }) {
+    const { vendors, materials, createVendor, updateVendor, reload } = inventory;
+    const [mode, setMode] = useState(null); // null | 'new' | vendorId being edited
+    const [busy, setBusy] = useState(false);
+    const [err, setErr] = useState(null);
+
+    const materialName = useMemo(() => {
+        const map = new Map();
+        for (const m of materials) map.set(m.id, m.name);
+        return map;
+    }, [materials]);
+
+    const editing = typeof mode === 'string' && mode !== 'new' ? vendors.find((v) => v.id === mode) || null : null;
+
+    async function handleSubmit(body) {
+        setErr(null);
+        if (!body.name) return setErr('Vendor name is required.');
+        setBusy(true);
+        try {
+            if (mode === 'new') {
+                await createVendor(body);
+                onDone(`Onboarded vendor “${body.name}”.`);
+            } else {
+                await updateVendor(mode, body);
+                onDone(`Updated vendor “${body.name}”.`);
+            }
+            await reload();
+            setMode(null);
+        } catch (e) {
+            setErr(String(e.message || e));
+        } finally {
+            setBusy(false);
+        }
+    }
+
+    async function toggleActive(v) {
+        try {
+            await updateVendor(v.id, { active: !v.active });
+            await reload();
+        } catch (e) {
+            window.alert(String(e.message || e));
+        }
+    }
+
+    if (!canManageCatalog && !vendors.length) {
+        return (
+            <EmptyState icon="truck" title="No vendors yet">
+                No suppliers have been onboarded. Ask an admin to add vendors.
+            </EmptyState>
+        );
+    }
+
+    return (
+        <section className="inv-panel">
+            <SectionHead title="Vendors" caption={`${fmt(vendors.length)} onboarded suppliers`}>
+                {canManageCatalog && mode == null && (
+                    <button type="button" className="btn-primary btn-sm" onClick={() => { setErr(null); setMode('new'); }}>
+                        + New vendor
+                    </button>
+                )}
+            </SectionHead>
+
+            {canManageCatalog && mode === 'new' && (
+                <VendorForm
+                    materials={materials}
+                    onSubmit={handleSubmit}
+                    onCancel={() => setMode(null)}
+                    busy={busy}
+                    err={err}
+                />
+            )}
+
+            {vendors.length ? (
+                <div className="inv-table-wrap">
+                    <table className="inv-table">
+                        <thead>
+                            <tr>
+                                <th>Vendor</th>
+                                <th>Contact</th>
+                                <th>Phone</th>
+                                <th>GST</th>
+                                <th>Supplies</th>
+                                {canManageCatalog && <th />}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {vendors.map((v) => (
+                                <VendorRow
+                                    key={v.id}
+                                    vendor={v}
+                                    materials={materials}
+                                    materialName={materialName}
+                                    canManageCatalog={canManageCatalog}
+                                    isEditing={editing && editing.id === v.id}
+                                    onEdit={() => { setErr(null); setMode(v.id); }}
+                                    onCancel={() => setMode(null)}
+                                    onToggle={() => toggleActive(v)}
+                                    onSubmit={handleSubmit}
+                                    busy={busy}
+                                    err={err}
+                                />
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            ) : (
+                <EmptyState icon="truck" title="No vendors yet" action={
+                    canManageCatalog ? (
+                        <button type="button" className="btn-primary" onClick={() => setMode('new')}>
+                            Onboard your first vendor
+                        </button>
+                    ) : null
+                }>
+                    Vendors you buy stock from will appear here, and become selectable in the Receive tab.
+                </EmptyState>
+            )}
+        </section>
+    );
+}
+
+function VendorRow({ vendor, materials, materialName, canManageCatalog, isEditing, onEdit, onCancel, onToggle, onSubmit, busy, err }) {
+    const v = vendor;
+    const supplies = (v.material_ids || []).map((id) => materialName.get(id)).filter(Boolean);
+    const colSpan = canManageCatalog ? 6 : 5;
+
+    if (isEditing) {
+        return (
+            <tr>
+                <td colSpan={colSpan} className="inv-vendor-edit-cell">
+                    <VendorForm
+                        vendor={v}
+                        materials={materials}
+                        onSubmit={onSubmit}
+                        onCancel={onCancel}
+                        busy={busy}
+                        err={err}
+                    />
+                </td>
+            </tr>
+        );
+    }
+
+    return (
+        <tr className={v.active ? '' : 'inv-voided'}>
+            <td className="inv-mat-cell">
+                {v.name}
+                {v.address && <span className="inv-vendor-addr">{v.address}</span>}
+            </td>
+            <td className="muted small">{v.contact_person || '·'}</td>
+            <td className="muted small nowrap">{v.phone || '·'}</td>
+            <td className="muted small nowrap">{v.gst_number || '·'}</td>
+            <td className="muted small inv-vendor-supplies">
+                {supplies.length ? (
+                    <span title={supplies.join(', ')}>
+                        {supplies.length} material{supplies.length === 1 ? '' : 's'}
+                    </span>
+                ) : (
+                    '·'
+                )}
+            </td>
+            {canManageCatalog && (
+                <td className="inv-row-actions">
+                    <button type="button" className="chip chip-tool" onClick={onEdit}>Edit</button>
+                    <button type="button" className="chip chip-tool" onClick={onToggle}>
+                        {v.active ? 'Disable' : 'Enable'}
+                    </button>
+                </td>
+            )}
+        </tr>
+    );
+}
+
 // -- Catalog (admin) -------------------------------------------------------
 
 function CatalogView({ inventory, onDone, seeding, onSeed }) {
@@ -1137,7 +1465,7 @@ function CatalogView({ inventory, onDone, seeding, onSeed }) {
                         <button type="button" className="inv-linkbtn" onClick={onSeed} disabled={seeding}>
                             {seeding ? 'setting up…' : 'Create the starter catalog'}
                         </button>{' '}
-                        to add 12 standard materials and a Central Store, or add items manually below.
+                        to add the standard materials list and a Central Store, or add items manually below.
                     </span>
                 </div>
             )}

@@ -151,6 +151,95 @@ router.patch('/materials/:id', requireCatalogAdmin, adminWriteLimiter, async (re
     }
 });
 
+// -- Vendors ---------------------------------------------------------------
+//
+// Reads are open to any authenticated user (operators need the vendor list to
+// record receipts); onboarding and edits are catalog-admin only, like
+// materials. material_ids is an array of catalog material ids this vendor
+// supplies; unknown ids are silently dropped by the data layer.
+
+router.get('/vendors', async (req, res) => {
+    if (!dbGuard(res)) return;
+    try {
+        const includeInactive = req.query.include_inactive === '1' || req.query.include_inactive === 'true';
+        const vendors = await inv.listVendors(orgOf(req), { includeInactive });
+        res.json({ vendors });
+    } catch (err) {
+        sendError(res, err);
+    }
+});
+
+function vendorFieldsFromBody(body, { partial = false } = {}) {
+    const fields = {};
+    const setStr = (key, col) => {
+        if (body[key] !== undefined) fields[col] = trimStr(body[key]) || null;
+    };
+    setStr('contact_person', 'contactPerson');
+    setStr('phone', 'phone');
+    setStr('email', 'email');
+    setStr('address', 'address');
+    setStr('note', 'note');
+    if (body.gst_number !== undefined) {
+        fields.gstNumber = trimStr(body.gst_number).toUpperCase() || null;
+    }
+    if (Array.isArray(body.material_ids)) {
+        fields.materialIds = body.material_ids.map((m) => trimStr(m)).filter(Boolean);
+    } else if (!partial && body.material_ids === undefined) {
+        fields.materialIds = [];
+    }
+    return fields;
+}
+
+router.post('/vendors', requireCatalogAdmin, adminWriteLimiter, async (req, res) => {
+    if (!dbGuard(res)) return;
+    try {
+        const body = req.body || {};
+        const name = trimStr(body.name);
+        if (!name) return res.status(400).json({ error: 'name is required' });
+        const fields = { name, ...vendorFieldsFromBody(body) };
+        const vendor = await inv.createVendor(orgOf(req), fields);
+        await logAudit(req, {
+            action: 'inventory.vendor.create',
+            targetType: 'inventory_vendor',
+            targetId: vendor.id,
+            outcome: 'success',
+            after: { name: vendor.name, materials: vendor.material_ids.length }
+        });
+        res.json({ vendor });
+    } catch (err) {
+        sendError(res, err);
+    }
+});
+
+router.patch('/vendors/:id', requireCatalogAdmin, adminWriteLimiter, async (req, res) => {
+    if (!dbGuard(res)) return;
+    try {
+        const orgId = orgOf(req);
+        const before = await inv.getVendor(orgId, req.params.id);
+        if (!before) return res.status(404).json({ error: 'Vendor not found' });
+        const body = req.body || {};
+        const fields = vendorFieldsFromBody(body, { partial: true });
+        if (body.name !== undefined) {
+            const name = trimStr(body.name);
+            if (!name) return res.status(400).json({ error: 'name cannot be empty' });
+            fields.name = name;
+        }
+        if (typeof body.active === 'boolean') fields.active = body.active;
+        const vendor = await inv.updateVendor(orgId, req.params.id, fields);
+        await logAudit(req, {
+            action: 'inventory.vendor.update',
+            targetType: 'inventory_vendor',
+            targetId: req.params.id,
+            outcome: 'success',
+            before: { name: before.name, active: before.active, materials: before.material_ids.length },
+            after: vendor ? { name: vendor.name, active: vendor.active, materials: vendor.material_ids.length } : null
+        });
+        res.json({ vendor });
+    } catch (err) {
+        sendError(res, err);
+    }
+});
+
 // -- Locations -------------------------------------------------------------
 
 router.get('/locations', async (req, res) => {
@@ -418,6 +507,7 @@ router.post('/movements', requireMover, adminWriteLimiter, async (req, res) => {
             packSize: packSize ?? null,
             packQty: packQty ?? null,
             vendor: body.vendor != null ? trimStr(body.vendor) || null : null,
+            vendorId: body.vendor_id != null ? trimStr(body.vendor_id) || null : null,
             reference: body.reference != null ? trimStr(body.reference) || null : null,
             note: body.note != null ? trimStr(body.note) || null : null,
             occurredAt

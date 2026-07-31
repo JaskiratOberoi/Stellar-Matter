@@ -2960,6 +2960,49 @@ td.inv-low {
     border-left: 2px solid rgb(var(--nx-accent));
 }
 
+/* Vendors — inline onboarding form + supplies chip picker. */
+.inv-vendor-form .inv-vendor-materials {
+    margin-top: var(--sp-4);
+}
+
+.inv-vendor-materials-label {
+    display: block;
+    margin-bottom: var(--sp-2);
+    font: 600 var(--fs-3xs) / 1 var(--font-mono);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: rgb(var(--nx-ink-3));
+}
+
+.inv-vendor-picker {
+    max-height: 220px;
+    overflow-y: auto;
+    padding: var(--sp-1) 0;
+}
+
+.inv-vendor-edit-cell {
+    padding: 0;
+    background: rgb(var(--nx-surface-2));
+}
+
+.inv-vendor-edit-cell .inv-inline-form {
+    margin-bottom: 0;
+    border-left: 0;
+    background: transparent;
+}
+
+.inv-vendor-addr {
+    display: block;
+    margin-top: 2px;
+    font-size: var(--fs-2xs);
+    color: rgb(var(--nx-ink-3));
+    font-weight: 400;
+}
+
+.inv-vendor-supplies {
+    white-space: nowrap;
+}
+
 /* Docket — the sticky receipt beside a form: figure, breakdown, action. */
 .inv-docket {
     position: sticky;
