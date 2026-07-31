@@ -1539,6 +1539,61 @@ tbody tr.selected {
     align-items: baseline;
 }
 
+/* Code-wise breakdown: 15 numeric columns, so it needs more width than the
+   label tables the modal was built for, and horizontal scroll below that. */
+.code-wise-modal .run-modal-inner {
+    max-width: min(1400px, 98vw);
+}
+
+.code-wise-actions {
+    display: flex;
+    flex-shrink: 0;
+    gap: 0.4rem;
+}
+
+.code-wise-empty {
+    margin: 0.75rem 0;
+}
+
+table.code-wise-table {
+    width: 100%;
+    font-size: 0.82rem;
+    white-space: nowrap;
+}
+
+table.code-wise-table th,
+table.code-wise-table td {
+    padding: 6px 8px;
+}
+
+table.code-wise-table th.num {
+    text-align: right;
+}
+
+table.code-wise-table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: rgb(var(--nx-surface-2));
+}
+
+table.code-wise-table td code {
+    font-size: 0.8rem;
+}
+
+.th-sort {
+    padding: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+}
+
+.th-sort:hover {
+    color: rgb(var(--nx-accent));
+}
+
 table.packages {
     width: 100%;
     border-collapse: separate;

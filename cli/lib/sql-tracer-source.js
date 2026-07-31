@@ -120,6 +120,26 @@ function normaliseLabelBracket(raw) {
     return raw.replace(/\s+/g, ' ').trim();
 }
 
+/** @param {string} text @returns {Record<string, number>} */
+function countBracketLabels(text) {
+    /** @type {Record<string, number>} */
+    const counts = {};
+    BRACKET_RE.lastIndex = 0;
+    let m;
+    while ((m = BRACKET_RE.exec(text)) !== null) {
+        const label = normaliseLabelBracket(m[1] ?? '');
+        if (!label) continue;
+        counts[label] = (counts[label] ?? 0) + 1;
+    }
+    return counts;
+}
+
+/** @param {unknown} raw @returns {string|null} */
+function normaliseClientCode(raw) {
+    const s = String(raw ?? '').trim().toUpperCase();
+    return s === '' ? null : s;
+}
+
 function aggregateBracketsFromPackageRows(sliceRows) {
     const rows = Array.isArray(sliceRows) ? sliceRows : [];
     const labelOccurrences = {};
@@ -127,22 +147,15 @@ function aggregateBracketsFromPackageRows(sliceRows) {
     const sidSet = new Set();
     let rowsWithBrackets = 0;
     let otherTestsRowCount = 0;
-    /** @type {{ sid: string, testNamesText: string }[]} */
+    /** @type {{ sid: string, testNamesText: string, clientCode: string|null }[]} */
     const rowsOut = [];
 
     for (const row of rows) {
         const sid = String(row.sid ?? '').trim();
         const text = row.testNamesText ?? '';
-        rowsOut.push({ sid, testNamesText: text });
+        rowsOut.push({ sid, testNamesText: text, clientCode: normaliseClientCode(row.clientCode) });
         if (sid) sidSet.add(sid);
-        BRACKET_RE.lastIndex = 0;
-        const counts = {};
-        let m;
-        while ((m = BRACKET_RE.exec(text)) !== null) {
-            const label = normaliseLabelBracket(m[1] ?? '');
-            if (!label) continue;
-            counts[label] = (counts[label] ?? 0) + 1;
-        }
+        const counts = countBracketLabels(text);
         const labels = Object.keys(counts);
         if (labels.length === 0) {
             otherTestsRowCount++;
@@ -153,12 +166,7 @@ function aggregateBracketsFromPackageRows(sliceRows) {
             labelOccurrences[label] = (labelOccurrences[label] || 0) + c;
         }
         if (!sid) continue;
-        const seenLbl = new Set();
-        BRACKET_RE.lastIndex = 0;
-        while ((m = BRACKET_RE.exec(text)) !== null) {
-            const label = normaliseLabelBracket(m[1] ?? '');
-            if (!label || seenLbl.has(label)) continue;
-            seenLbl.add(label);
+        for (const label of labels) {
             if (!labelToSidSets[label]) labelToSidSets[label] = new Set();
             labelToSidSets[label].add(sid);
         }
@@ -179,6 +187,111 @@ function aggregateBracketsFromPackageRows(sliceRows) {
         sids: [...sidSet].sort(),
         rows: rowsOut
     };
+}
+
+/**
+ * Partition every tile metric by the row's client (MCC) code so the Tracer
+ * banner can show a code-wise table for a scope without re-querying the LIS.
+ *
+ * Letter heads and envelopes are deliberately left as raw `labelOccurrences`
+ * per code: the pages-per-report map that turns labels into pages/envelope
+ * sizes lives with the dashboard (packages-pages.json), not here, and the
+ * frontend already resolves it for the tile headlines. Specialty counts are
+ * unique-SID counts per code — same "one tube per sample" semantics as the
+ * mode blobs — so a code column sums to the tile headline unless a SID
+ * somehow carries two client codes.
+ *
+ * @param {object} payload - a Listec /packages(-by-codes) body, or a merged one
+ * @returns {{ scope: 'client_code', unassignedKey: string, codes: object[] } | null}
+ */
+function buildCodeWiseStats(payload) {
+    const rows = Array.isArray(payload && payload.rows) ? payload.rows : [];
+    if (rows.length === 0) return null;
+
+    const UNASSIGNED = '';
+    /** @type {Map<string, string>} sid -> client code (or UNASSIGNED) */
+    const codeBySid = new Map();
+    /** @type {Map<string, { sids: Set<string>, rowCount: number, otherTestsRowCount: number, labelOccurrences: Record<string, number> }>} */
+    const buckets = new Map();
+    const bucketFor = (code) => {
+        let b = buckets.get(code);
+        if (!b) {
+            b = { sids: new Set(), rowCount: 0, otherTestsRowCount: 0, labelOccurrences: {} };
+            buckets.set(code, b);
+        }
+        return b;
+    };
+
+    let sawAnyCode = false;
+    for (const row of rows) {
+        const code = normaliseClientCode(row && row.clientCode) ?? UNASSIGNED;
+        if (code !== UNASSIGNED) sawAnyCode = true;
+        const sid = String((row && row.sid) ?? '').trim();
+        const bucket = bucketFor(code);
+        bucket.rowCount += 1;
+        if (sid) {
+            bucket.sids.add(sid);
+            // First writer wins: a SID belongs to exactly one client in the
+            // LIS, so a second code for the same SID would be a data anomaly
+            // we don't want to double-count downstream.
+            if (!codeBySid.has(sid)) codeBySid.set(sid, code);
+        }
+        const counts = countBracketLabels((row && row.testNamesText) ?? '');
+        const labels = Object.keys(counts);
+        if (labels.length === 0) {
+            bucket.otherTestsRowCount += 1;
+            continue;
+        }
+        for (const [label, c] of Object.entries(counts)) {
+            bucket.labelOccurrences[label] = (bucket.labelOccurrences[label] || 0) + c;
+        }
+    }
+
+    // Nothing to break down by: an older Listec that doesn't send client_code
+    // yet. Returning null keeps the artefact clean rather than writing a table
+    // where every row is "unassigned".
+    if (!sawAnyCode) return null;
+
+    /** @type {Map<string, Record<string, number>>} code -> mode key -> unique SIDs */
+    const modeCounts = new Map();
+    const tallyByCode = (modeKey, sidIterable) => {
+        for (const rawSid of sidIterable) {
+            const sid = String(rawSid).trim();
+            if (!sid) continue;
+            const code = codeBySid.get(sid);
+            if (code == null) continue;
+            let perMode = modeCounts.get(code);
+            if (!perMode) {
+                perMode = {};
+                modeCounts.set(code, perMode);
+            }
+            perMode[modeKey] = (perMode[modeKey] || 0) + 1;
+        }
+    };
+
+    for (const { key, codes } of SPECIALTY_BREAKDOWN_GROUPS) {
+        tallyByCode(key, unionSidsForCodes(payload, codes));
+    }
+    const allSids = Array.isArray(payload.sids) ? payload.sids : [];
+    tallyByCode('barcode', allSids);
+    const specialtyUnion = unionAllSpecialtySids(payload);
+    tallyByCode(
+        'serum',
+        allSids.filter((s) => !specialtyUnion.has(String(s)))
+    );
+
+    const codes = [...buckets.entries()]
+        .map(([code, b]) => ({
+            code: code === UNASSIGNED ? null : code,
+            sids: b.sids.size,
+            rowCount: b.rowCount,
+            otherTestsRowCount: b.otherTestsRowCount,
+            labelOccurrences: b.labelOccurrences,
+            modes: modeCounts.get(code) || {}
+        }))
+        .sort((a, b) => b.sids - a.sids || String(a.code || '').localeCompare(String(b.code || '')));
+
+    return { scope: 'client_code', unassignedKey: UNASSIGNED, codes };
 }
 
 /** @param {object} payload */
@@ -460,6 +573,12 @@ function writeModeArtefact(ctx) {
         };
     }
 
+    // Only the general artefact carries the code-wise table. Every mode for a
+    // scope is synthesised from the same payload, so writing it 11× would
+    // multiply identical rows across disk and Postgres for nothing — the
+    // banner reads it off the general tile.
+    const codeWise = mode === 'general' ? buildCodeWiseStats(payload) : null;
+
     const collatedBlock =
         target.type === 'collated'
             ? {
@@ -550,6 +669,7 @@ function writeModeArtefact(ctx) {
             completedPagerPages: [1],
             lastCompletedPagerPage: 1
         },
+        codeWise,
         errors: []
     };
     if (modeBlob) {
@@ -571,6 +691,7 @@ function writeModeArtefact(ctx) {
         labelToSids,
         labelOccurrences,
         otherTestsRowCount,
+        codeWise,
         urineContainers: mode === 'urine_containers' ? modeBlob : null,
         edtaVials: mode === 'edta_vials' ? modeBlob : null,
         citrateVials: mode === 'citrate_vials' ? modeBlob : null,
@@ -1822,6 +1943,7 @@ async function runTracerBatch(opts) {
 
 module.exports = {
     runTracerBatch,
+    buildCodeWiseStats,
     parseTracerRegions: parseRegions,
     parseTracerSalesPeople: parseSalesPeople,
     ALL_SPECIALTY_CODES,

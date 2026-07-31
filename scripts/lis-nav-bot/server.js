@@ -403,6 +403,9 @@ function buildTileFromRunFiles(outDir, packagesFileName) {
         flourideVials,
         barcode,
         serum,
+        codeWise:
+            (pkg.codeWise && typeof pkg.codeWise === 'object' && Array.isArray(pkg.codeWise.codes) && pkg.codeWise) ||
+            (main && main.codeWise && Array.isArray(main.codeWise.codes) ? main.codeWise : null),
         orgId,
         bu,
         fromDate: filter.fromDate != null ? String(filter.fromDate) : req.fromDate != null ? String(req.fromDate) : null,
@@ -848,6 +851,48 @@ app.get('/api/tracer/sales-marketing-users/codes', async (req, res) => {
         res.json({ ...payload, clientsByCode });
     } catch (e) {
         res.status(502).json({ error: String(e && e.message ? e.message : e) });
+    }
+});
+
+/**
+ * Name a set of MCC codes from the Postgres `client_locations` mirror. The
+ * tracer artefacts only ever store the raw code, so the code-wise view fetches
+ * names lazily when the operator opens it. Unknown codes are omitted rather
+ * than erroring — a stale mirror should degrade to bare codes, not a failure.
+ */
+app.get('/api/tracer/client-codes', async (req, res) => {
+    const raw = typeof req.query.codes === 'string' ? req.query.codes : '';
+    const codes = [
+        ...new Set(
+            raw
+                .split(',')
+                .map((c) => c.trim().toUpperCase())
+                .filter(Boolean)
+        )
+    ].slice(0, 2000);
+    if (codes.length === 0) return res.json({ clientsByCode: {} });
+    if (!useDatabase()) return res.json({ clientsByCode: {} });
+    try {
+        const q = await getPool().query(
+            `SELECT code, name, city_label, state_label, business_unit_name, active
+               FROM client_locations
+              WHERE code = ANY($1::text[])`,
+            [codes]
+        );
+        /** @type {Record<string, object>} */
+        const clientsByCode = {};
+        for (const row of q.rows) {
+            clientsByCode[String(row.code).toUpperCase()] = {
+                name: row.name || null,
+                city: row.city_label || null,
+                state: row.state_label || null,
+                businessUnit: row.business_unit_name || null,
+                active: row.active !== false
+            };
+        }
+        res.json({ clientsByCode });
+    } catch (e) {
+        res.status(500).json({ error: String(e && e.message ? e.message : e), clientsByCode: {} });
     }
 });
 

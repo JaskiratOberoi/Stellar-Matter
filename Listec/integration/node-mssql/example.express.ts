@@ -167,8 +167,8 @@ app.get('/api/worksheet-reports', async (req, res) => {
 
 /**
  * Drains every page for the filter window and returns rows mapped into
- * { sid, testNamesText } pairs plus pre-computed totals — purpose-built
- * for lis-nav-bot's package-label aggregator.
+ * { sid, testNamesText, clientCode } triples plus pre-computed totals —
+ * purpose-built for lis-nav-bot's package-label aggregator.
  */
 app.get('/api/worksheet-reports/packages', async (req, res) => {
   const signal = abortOnDisconnect(req, res);

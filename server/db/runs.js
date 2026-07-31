@@ -238,6 +238,9 @@ function projectRun(id, { main, pkg, mainPath, pkgPath }, normalizedMap) {
 
     const fromHour = numericOrNull(filter.fromHour, req.fromHour);
     const toHour = numericOrNull(filter.toHour, req.toHour);
+    const codeWiseSrc = (pkg && pkg.codeWise) || (main && main.codeWise) || null;
+    const codeWise =
+        codeWiseSrc && typeof codeWiseSrc === 'object' && Array.isArray(codeWiseSrc.codes) ? codeWiseSrc : null;
 
     return {
         id,
@@ -270,6 +273,7 @@ function projectRun(id, { main, pkg, mainPath, pkgPath }, normalizedMap) {
         flourideVials,
         barcode,
         serum,
+        codeWise,
         filter,
         filtersApplied,
         filtersRequested: req,
@@ -330,7 +334,7 @@ async function ingestRun(client, outDir, id, opts = {}) {
             urine_containers, edta_vials, citrate_vials, s_heparin, l_heparin,
             lbc, flouride_vials, barcode, serum,
             filter, filters_applied, filters_requested, paths,
-            source_file_mtime
+            source_file_mtime, code_wise
          )
          VALUES (
             $1, $2, $3, $4, $5, $6, $7,
@@ -340,7 +344,7 @@ async function ingestRun(client, outDir, id, opts = {}) {
             $22, $23, $24, $25, $26,
             $27, $28, $29, $30,
             $31, $32, $33, $34,
-            $35
+            $35, $36
          )
          ON CONFLICT (id) DO UPDATE SET
             org_id = EXCLUDED.org_id,
@@ -376,7 +380,8 @@ async function ingestRun(client, outDir, id, opts = {}) {
             filters_applied = EXCLUDED.filters_applied,
             filters_requested = EXCLUDED.filters_requested,
             paths = EXCLUDED.paths,
-            source_file_mtime = EXCLUDED.source_file_mtime`,
+            source_file_mtime = EXCLUDED.source_file_mtime,
+            code_wise = EXCLUDED.code_wise`,
         [
             projected.id,
             projected.orgId,
@@ -412,7 +417,8 @@ async function ingestRun(client, outDir, id, opts = {}) {
             projected.filtersApplied ? JSON.stringify(projected.filtersApplied) : null,
             JSON.stringify(projected.filtersRequested || {}),
             JSON.stringify(projected.paths),
-            mtime
+            mtime,
+            projected.codeWise ? JSON.stringify(projected.codeWise) : null
         ]
     );
 
@@ -616,6 +622,7 @@ function tileFromRow(r, labelRows) {
         flourideVials: r.flouride_vials || null,
         barcode: r.barcode || null,
         serum: r.serum || null,
+        codeWise: r.code_wise || null,
         orgId: r.org_id,
         bu: r.bu || '—',
         fromDate: r.from_date,

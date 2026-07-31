@@ -15,7 +15,13 @@ export interface PackagesAggregate {
     labelOccurrences: Record<string, number>;
     labelToSids: Record<string, string[]>;
     sids: string[];
-    rows: { sid: string; testNamesText: string }[];
+    /**
+     * `clientCode` is the row's MCC unit code. The Tracer pipeline partitions
+     * every count by it (code-wise expand view), and the merge helpers rely on
+     * it surviving a row-level concat/dedupe, so it has to travel per row
+     * rather than as a pre-aggregated bucket.
+     */
+    rows: { sid: string; testNamesText: string; clientCode: string | null }[];
     /**
      * Tracer-only opt-in. When `bucketCodes` is passed, we walk each row's
      * `results` array and bucket SIDs / result-row counts by test_code. This
@@ -92,6 +98,7 @@ export function aggregatePackages(
     const rows = rawRows.map((r) => ({
         sid: String(r.sid ?? '').trim(),
         testNamesText: r.test_names_csv ?? '',
+        clientCode: String(r.client_code ?? '').trim().toUpperCase() || null,
     }));
 
     const labelOccurrences: Record<string, number> = {};

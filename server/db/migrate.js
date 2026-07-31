@@ -249,6 +249,11 @@ async function migrate() {
         await client.query(`ALTER TABLE runs ADD COLUMN IF NOT EXISTS flouride_vials JSONB`);
         await client.query(`ALTER TABLE runs ADD COLUMN IF NOT EXISTS barcode JSONB`);
         await client.query(`ALTER TABLE runs ADD COLUMN IF NOT EXISTS serum JSONB`);
+        // Per-client-code partition of every tile metric for the scope. Only
+        // general-mode tracer runs populate it (see writeModeArtefact); runs
+        // ingested before this column existed stay NULL and the banner's
+        // code-wise view simply asks for a re-run.
+        await client.query(`ALTER TABLE runs ADD COLUMN IF NOT EXISTS code_wise JSONB`);
 
         // run_packages: one row per (run_id, label). position preserves the
         // count-desc ordering buildTileFromRunFiles() computes so the

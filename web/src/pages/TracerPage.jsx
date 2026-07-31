@@ -13,6 +13,7 @@ import { TracerBanner } from '../components/TracerBanner.jsx';
 import '../styles/tracer.css';
 import { TracerForm } from '../components/TracerForm.jsx';
 import { RunModal } from '../components/RunModal.jsx';
+import { CodeWiseModal } from '../components/CodeWiseModal.jsx';
 import { RunProgress } from '../components/RunProgress.jsx';
 
 /**
@@ -89,6 +90,8 @@ export function TracerPage({
     const [tracerBusy, setTracerBusy] = useState(false);
     const [openTile, setOpenTile] = useState( /** @type {object | null} */ (null));
     const [openTileKind, setOpenTileKind] = useState('letterheads');
+    /** Scope whose code-wise table is open: { tile, bu, fromDate, toDate }. */
+    const [codeWiseScope, setCodeWiseScope] = useState(/** @type {object | null} */ (null));
     /** Print focus: BU key (`bu:normalized`) or region `tracerRegionRowKey`. */
     const [printFocusKey, setPrintFocusKey] = useState( /** @type {string | null} */ (null));
 
@@ -373,6 +376,14 @@ export function TracerPage({
                                     setOpenTile(tile);
                                     setOpenTileKind(kind);
                                 }}
+                                onExpandCodeWise={() =>
+                                    setCodeWiseScope({
+                                        tile: collatedBannerRow.generalTile,
+                                        bu: collatedBannerRow.label,
+                                        fromDate: collatedBannerRow.fromDate,
+                                        toDate: collatedBannerRow.toDate
+                                    })
+                                }
                             />
                         </div>
                     </>
@@ -403,6 +414,14 @@ export function TracerPage({
                                 setOpenTile(tile);
                                 setOpenTileKind(kind);
                             }}
+                            onExpandCodeWise={() =>
+                                setCodeWiseScope({
+                                    tile: row.generalTile,
+                                    bu: row.bu,
+                                    fromDate: row.fromDate,
+                                    toDate: row.toDate
+                                })
+                            }
                         />
                     ))}
                 </div>
@@ -438,6 +457,14 @@ export function TracerPage({
                                 setOpenTile(tile);
                                 setOpenTileKind(kind);
                             }}
+                            onExpandCodeWise={() =>
+                                setCodeWiseScope({
+                                    tile: row.generalTile,
+                                    bu: row.label,
+                                    fromDate: row.fromDate,
+                                    toDate: row.toDate
+                                })
+                            }
                         />
                     ))}
                 </div>
@@ -457,6 +484,17 @@ export function TracerPage({
                     indexFromOne={indexFromOne(openTile)}
                     clientPagesByNorm={clientPagesByNorm}
                     onClose={() => setOpenTile(null)}
+                />
+            )}
+
+            {codeWiseScope && codeWiseScope.tile && (
+                <CodeWiseModal
+                    tile={codeWiseScope.tile}
+                    bu={codeWiseScope.bu}
+                    fromDate={codeWiseScope.fromDate}
+                    toDate={codeWiseScope.toDate}
+                    clientPagesByNorm={clientPagesByNorm}
+                    onClose={() => setCodeWiseScope(null)}
                 />
             )}
         </div>

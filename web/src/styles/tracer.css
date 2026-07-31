@@ -116,6 +116,12 @@
     flex-shrink: 0;
 }
 
+.tracer-banner-tools {
+    display: flex;
+    flex-shrink: 0;
+    gap: 0.4rem;
+}
+
 .tracer-banner-bu {
     margin: 0;
     font-size: 1.1rem;

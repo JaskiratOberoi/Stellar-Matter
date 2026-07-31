@@ -35,7 +35,7 @@ function StatCard({ title, headline, subline, est, onOpen }) {
     );
 }
 
-/** @param {{ bu: string, fromDate: string, toDate: string, generalTile: object|null, urineTile: object|null, edtaTile: object|null, flourideTile: object|null, citrateTile: object|null, sHeparinTile: object|null, lHeparinTile: object|null, lbcTile: object|null, barcodeTile: object|null, serumTile: object|null, clientPagesByNorm: Record<string, number>, isPrintTarget?: boolean, onPrintSection?: () => void, onOpenDetail?: (tile: object | null, kind: string) => void }} props */
+/** @param {{ bu: string, fromDate: string, toDate: string, generalTile: object|null, urineTile: object|null, edtaTile: object|null, flourideTile: object|null, citrateTile: object|null, sHeparinTile: object|null, lHeparinTile: object|null, lbcTile: object|null, barcodeTile: object|null, serumTile: object|null, clientPagesByNorm: Record<string, number>, isPrintTarget?: boolean, onPrintSection?: () => void, onOpenDetail?: (tile: object | null, kind: string) => void, onExpandCodeWise?: () => void }} props */
 export function TracerBanner({
     bu,
     fromDate,
@@ -53,7 +53,8 @@ export function TracerBanner({
     clientPagesByNorm,
     isPrintTarget,
     onPrintSection,
-    onOpenDetail
+    onOpenDetail,
+    onExpandCodeWise
 }) {
     const lh = generalTile ? projectLetterheads(generalTile, clientPagesByNorm) : { headline: '0', subline: 'No data', estimated: false };
     const env = generalTile ? projectEnvelopes(generalTile, clientPagesByNorm) : { headline: '0 BIG / 0 SMALL', subline: '0 total', estimated: false };
@@ -75,11 +76,23 @@ export function TracerBanner({
                     <h2 className="tracer-banner-bu">{bu}</h2>
                     <p className="muted small tracer-banner-range">{rangeLabel}</p>
                 </div>
-                {onPrintSection ? (
-                    <button type="button" className="chip chip-tool tracer-banner-print tracer-hide-print" onClick={onPrintSection}>
-                        Download PDF
-                    </button>
-                ) : null}
+                <div className="tracer-banner-tools tracer-hide-print">
+                    {onPrintSection ? (
+                        <button type="button" className="chip chip-tool tracer-banner-print" onClick={onPrintSection}>
+                            Download PDF
+                        </button>
+                    ) : null}
+                    {onExpandCodeWise && generalTile ? (
+                        <button
+                            type="button"
+                            className="chip chip-tool tracer-banner-expand"
+                            onClick={onExpandCodeWise}
+                            title="Code-wise count for this scope"
+                        >
+                            Expand
+                        </button>
+                    ) : null}
+                </div>
             </div>
             <div className="tracer-stat-row" role="group" aria-label={`Material stats for ${bu}`}>
                 <StatCard
