@@ -3387,6 +3387,150 @@ td.inv-low {
     grid-column: 1 / -1;
 }
 
+/* -- Location combobox (search + add new) ------------------------------ */
+.inv-combo {
+    position: relative;
+}
+
+.inv-combo-trigger,
+.inv-combo-input {
+    display: block;
+    width: 100%;
+    padding: var(--sp-3);
+    background: rgb(var(--nx-surface));
+    border: 1px solid rgb(var(--nx-rule-soft));
+    border-radius: var(--r-sm);
+    color: rgb(var(--nx-ink));
+    font: inherit;
+    font-size: var(--fs-sm);
+    text-align: left;
+    cursor: pointer;
+    transition: border-color var(--dur-fast) var(--ease);
+}
+
+.inv-combo-trigger.is-placeholder {
+    color: rgb(var(--nx-ink-3));
+}
+
+.inv-combo-trigger:hover:not(:disabled),
+.inv-combo-input:hover:not(:disabled) {
+    border-color: rgb(var(--nx-rule-strong));
+}
+
+.inv-combo.is-open .inv-combo-input,
+.inv-combo-trigger:focus-visible {
+    outline: none;
+    border-color: rgb(var(--nx-accent));
+}
+
+.inv-combo-input {
+    cursor: text;
+}
+
+.inv-combo-required {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    border: 0;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.inv-combo-menu {
+    position: absolute;
+    z-index: 40;
+    top: calc(100% + 4px);
+    left: 0;
+    right: 0;
+    max-height: 280px;
+    overflow: auto;
+    background: rgb(var(--nx-surface-2));
+    border: 1px solid rgb(var(--nx-rule-soft));
+    border-radius: var(--r-sm);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+    padding: var(--sp-1);
+}
+
+.inv-combo-group + .inv-combo-group {
+    margin-top: var(--sp-1);
+    padding-top: var(--sp-1);
+    border-top: 1px solid rgb(var(--nx-rule-soft));
+}
+
+.inv-combo-group-label {
+    padding: var(--sp-2) var(--sp-3) var(--sp-1);
+    font: 600 var(--fs-3xs) / 1.3 var(--font-mono);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: rgb(var(--nx-ink-3));
+}
+
+.inv-combo-option {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--sp-2);
+    width: 100%;
+    padding: var(--sp-2) var(--sp-3);
+    border: 0;
+    border-radius: calc(var(--r-sm) - 2px);
+    background: transparent;
+    color: rgb(var(--nx-ink));
+    font: inherit;
+    font-size: var(--fs-sm);
+    text-align: left;
+    cursor: pointer;
+}
+
+.inv-combo-option:hover,
+.inv-combo-option.is-active {
+    background: rgba(var(--nx-accent), 0.12);
+}
+
+.inv-combo-kind {
+    flex-shrink: 0;
+    font: 600 var(--fs-3xs) / 1 var(--font-mono);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: rgb(var(--nx-ink-3));
+}
+
+.inv-combo-add {
+    color: rgb(var(--nx-accent));
+    font-weight: 600;
+}
+
+.inv-combo-new-badge {
+    flex-shrink: 0;
+    padding: 2px 6px;
+    border-radius: 999px;
+    background: rgba(var(--nx-accent), 0.18);
+    color: rgb(var(--nx-accent));
+    font: 700 var(--fs-3xs) / 1.2 var(--font-mono);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.inv-combo-empty,
+.inv-combo-err {
+    padding: var(--sp-3);
+    font-size: var(--fs-sm);
+    color: rgb(var(--nx-ink-3));
+}
+
+.inv-combo-err {
+    color: rgb(var(--nx-danger, 220 80 80));
+}
+
+.inv-combo.is-disabled .inv-combo-trigger {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
 /* -- Order forms (multi-line Receive / Dispatch) ----------------------- */
 .inv-order-form {
     display: block;

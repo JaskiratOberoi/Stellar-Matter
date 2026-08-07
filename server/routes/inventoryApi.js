@@ -273,7 +273,9 @@ router.post('/ensure-bus-locations', requireMover, adminWriteLimiter, async (req
     }
 });
 
-router.post('/locations', requireCatalogAdmin, adminWriteLimiter, async (req, res) => {
+// Movers can create locations inline from Receive/Dispatch comboboxes
+// (same people who already sync BU sites via ensure-bus-locations).
+router.post('/locations', requireMover, adminWriteLimiter, async (req, res) => {
     if (!dbGuard(res)) return;
     try {
         const body = req.body || {};
@@ -652,6 +654,13 @@ router.post('/movements/batch', requireMover, adminWriteLimiter, async (req, res
             };
         });
 
+        let occurredAt = null;
+        if (body.occurred_at != null && trimStr(body.occurred_at)) {
+            const d = new Date(body.occurred_at);
+            if (Number.isNaN(d.getTime())) return res.status(400).json({ error: 'occurred_at is not a valid date' });
+            occurredAt = d.toISOString();
+        }
+
         const header = {
             kind,
             fromLocationId,
@@ -659,7 +668,8 @@ router.post('/movements/batch', requireMover, adminWriteLimiter, async (req, res
             toAllBus,
             vendorId: body.vendor_id != null ? trimStr(body.vendor_id) || null : null,
             reference: body.reference != null ? trimStr(body.reference) || null : null,
-            note: body.note != null ? trimStr(body.note) || null : null
+            note: body.note != null ? trimStr(body.note) || null : null,
+            occurredAt
         };
         const allowNegative = body.allow_negative === true || body.allow_negative === 'true';
 
@@ -679,7 +689,8 @@ router.post('/movements/batch', requireMover, adminWriteLimiter, async (req, res
                 movements: result.movements.length,
                 from_location_id: fromLocationId,
                 to_location_id: toLocationId,
-                to_all_bus: toAllBus || undefined
+                to_all_bus: toAllBus || undefined,
+                occurred_at: occurredAt || undefined
             },
             metadata: allowNegative ? { allow_negative: true } : undefined
         });

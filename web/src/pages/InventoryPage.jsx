@@ -111,6 +111,234 @@ function FormStep({ n, title, hint, children }) {
     );
 }
 
+function todayDateInput() {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/** Local calendar date → ISO; noon avoids timezone day-shift. */
+function dateInputToIso(dateStr) {
+    if (!dateStr) return undefined;
+    const d = new Date(`${dateStr}T12:00:00`);
+    if (Number.isNaN(d.getTime())) return undefined;
+    return d.toISOString();
+}
+
+/**
+ * Searchable location picker with inline “+ Add new …” create.
+ * `groups` = [{ label, items }]; `specialOptions` = [{ value, label }] (e.g. All BUs).
+ */
+function LocationCombobox({
+    value,
+    onChange,
+    locations = [],
+    groups = null,
+    specialOptions = [],
+    placeholder = '— select —',
+    required = false,
+    allowCreate = true,
+    defaultKind = 'business_unit',
+    createLocation,
+    reload,
+    disabled = false
+}) {
+    const rootRef = useRef(null);
+    const inputRef = useRef(null);
+    const [open, setOpen] = useState(false);
+    const [query, setQuery] = useState('');
+    const [creating, setCreating] = useState(false);
+    const [createErr, setCreateErr] = useState(null);
+
+    const selectedSpecial = specialOptions.find((o) => o.value === value) || null;
+    const selectedLoc = locations.find((l) => l.id === value) || null;
+    const displayLabel = selectedSpecial
+        ? selectedSpecial.label
+        : selectedLoc
+            ? selectedLoc.name
+            : '';
+
+    const q = query.trim().toLowerCase();
+
+    const filteredSpecial = specialOptions.filter(
+        (o) => !q || o.label.toLowerCase().includes(q)
+    );
+
+    const filteredGroups = useMemo(() => {
+        const source = groups
+            ? groups
+            : locations.length
+                ? [{ label: null, items: locations }]
+                : [];
+        return source
+            .map((g) => ({
+                label: g.label,
+                items: (g.items || []).filter((l) => !q || l.name.toLowerCase().includes(q))
+            }))
+            .filter((g) => g.items.length > 0);
+    }, [groups, locations, q]);
+
+    const flatMatches = filteredGroups.flatMap((g) => g.items);
+    const exactNameMatch = [...locations, ...specialOptions.map((o) => ({ name: o.label }))].some(
+        (l) => l.name && l.name.trim().toLowerCase() === q
+    );
+    const canAdd =
+        allowCreate &&
+        Boolean(createLocation) &&
+        q.length > 0 &&
+        !exactNameMatch &&
+        !creating;
+
+    useEffect(() => {
+        if (!open) return undefined;
+        function onDoc(e) {
+            if (rootRef.current && !rootRef.current.contains(e.target)) {
+                setOpen(false);
+                setQuery('');
+                setCreateErr(null);
+            }
+        }
+        document.addEventListener('mousedown', onDoc);
+        return () => document.removeEventListener('mousedown', onDoc);
+    }, [open]);
+
+    function openMenu() {
+        if (disabled) return;
+        setOpen(true);
+        setQuery('');
+        setCreateErr(null);
+        requestAnimationFrame(() => {
+            if (inputRef.current) inputRef.current.focus();
+        });
+    }
+
+    function pick(next) {
+        onChange(next);
+        setOpen(false);
+        setQuery('');
+        setCreateErr(null);
+    }
+
+    async function onAddNew() {
+        const name = query.trim();
+        if (!name || !createLocation) return;
+        setCreating(true);
+        setCreateErr(null);
+        try {
+            const res = await createLocation({ name, kind: defaultKind });
+            const loc = res && res.location ? res.location : res;
+            if (reload) await reload();
+            if (loc && loc.id) onChange(loc.id);
+            setOpen(false);
+            setQuery('');
+        } catch (e) {
+            setCreateErr(String(e.message || e));
+        } finally {
+            setCreating(false);
+        }
+    }
+
+    const showEmpty = filteredSpecial.length === 0 && flatMatches.length === 0 && !canAdd;
+
+    return (
+        <div className={`inv-combo${open ? ' is-open' : ''}${disabled ? ' is-disabled' : ''}`} ref={rootRef}>
+            {open ? (
+                <input
+                    ref={inputRef}
+                    className="inv-combo-input"
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    onKeyDown={(e) => {
+                        if (e.key === 'Escape') {
+                            setOpen(false);
+                            setQuery('');
+                        } else if (e.key === 'Enter' && canAdd && flatMatches.length === 0 && filteredSpecial.length === 0) {
+                            e.preventDefault();
+                            onAddNew();
+                        }
+                    }}
+                    placeholder={displayLabel || 'Type to search…'}
+                    disabled={disabled || creating}
+                    aria-autocomplete="list"
+                    aria-expanded="true"
+                    role="combobox"
+                    autoComplete="off"
+                />
+            ) : (
+                <button
+                    type="button"
+                    className={`inv-combo-trigger${value ? '' : ' is-placeholder'}`}
+                    onClick={openMenu}
+                    disabled={disabled}
+                    aria-haspopup="listbox"
+                    aria-expanded="false"
+                >
+                    {displayLabel || placeholder}
+                </button>
+            )}
+            {/* Keep a native required check for form submit when closed empty */}
+            {required && (
+                <input
+                    className="inv-combo-required"
+                    tabIndex={-1}
+                    value={value || ''}
+                    onChange={() => {}}
+                    required
+                    aria-hidden="true"
+                />
+            )}
+            {open && (
+                <div className="inv-combo-menu" role="listbox">
+                    {filteredSpecial.map((o) => (
+                        <button
+                            key={o.value}
+                            type="button"
+                            className={`inv-combo-option${o.value === value ? ' is-active' : ''}`}
+                            role="option"
+                            aria-selected={o.value === value}
+                            onClick={() => pick(o.value)}
+                        >
+                            {o.label}
+                        </button>
+                    ))}
+                    {filteredGroups.map((g) => (
+                        <div key={g.label || '_'} className="inv-combo-group">
+                            {g.label && <div className="inv-combo-group-label">{g.label}</div>}
+                            {g.items.map((l) => (
+                                <button
+                                    key={l.id}
+                                    type="button"
+                                    className={`inv-combo-option${l.id === value ? ' is-active' : ''}`}
+                                    role="option"
+                                    aria-selected={l.id === value}
+                                    onClick={() => pick(l.id)}
+                                >
+                                    <span>{l.name}</span>
+                                    {l.kind === 'lab' && <span className="inv-combo-kind">lab</span>}
+                                </button>
+                            ))}
+                        </div>
+                    ))}
+                    {canAdd && (
+                        <button
+                            type="button"
+                            className="inv-combo-option inv-combo-add"
+                            onClick={onAddNew}
+                            disabled={creating}
+                        >
+                            <span>+ Add new &ldquo;{query.trim()}&rdquo;</span>
+                            <span className="inv-combo-new-badge">{creating ? '…' : 'NEW'}</span>
+                        </button>
+                    )}
+                    {showEmpty && (
+                        <div className="inv-combo-empty">No locations match</div>
+                    )}
+                    {createErr && <div className="inv-combo-err">{createErr}</div>}
+                </div>
+            )}
+        </div>
+    );
+}
+
 export function InventoryPage() {
     const { user, authRequired } = useAuth();
     const inventory = useInventory();
@@ -624,7 +852,7 @@ function StepInput({ value, onChange, min = 1, ariaLabel }) {
 // -- Receive ---------------------------------------------------------------
 
 function ReceiveView({ inventory, canMove, onDone, onGoto }) {
-    const { materials, vendors, locations, createMovementsBatch, uploadPhoto, reload } = inventory;
+    const { materials, vendors, locations, createMovementsBatch, createLocation, uploadPhoto, reload } = inventory;
     const activeMaterials = materials.filter((m) => m.active);
     const activeVendors = (vendors || []).filter((v) => v.active);
     const activeLocations = locations.filter((l) => l.active);
@@ -633,6 +861,7 @@ function ReceiveView({ inventory, canMove, onDone, onGoto }) {
 
     const [vendorId, setVendorId] = useState('');
     const [toLocationId, setToLocationId] = useState('');
+    const [occurredOn, setOccurredOn] = useState(todayDateInput);
     const [reference, setReference] = useState('');
     const [note, setNote] = useState('');
     const [busy, setBusy] = useState(false);
@@ -682,6 +911,7 @@ function ReceiveView({ inventory, canMove, onDone, onGoto }) {
                 vendor_id: vendorId || undefined,
                 reference: reference || undefined,
                 note: note || undefined,
+                occurred_at: dateInputToIso(occurredOn),
                 lines: validLines.map((l) => ({
                     material_id: l.materialId,
                     pack_size: Number(l.packSize) || 1,
@@ -695,6 +925,7 @@ function ReceiveView({ inventory, canMove, onDone, onGoto }) {
             resetLines();
             setReference('');
             setNote('');
+            setOccurredOn(todayDateInput());
         } catch (e2) {
             setErr(String(e2.message || e2));
         } finally {
@@ -738,12 +969,24 @@ function ReceiveView({ inventory, canMove, onDone, onGoto }) {
                         </label>
                         <label className="inv-field">
                             <span>Destination store</span>
-                            <select value={toLocationId} onChange={(e) => setToLocationId(e.target.value)} required>
-                                <option value="">— select —</option>
-                                {activeLocations.map((l) => (
-                                    <option key={l.id} value={l.id}>{l.name}</option>
-                                ))}
-                            </select>
+                            <LocationCombobox
+                                value={toLocationId}
+                                onChange={setToLocationId}
+                                locations={activeLocations}
+                                required
+                                defaultKind="store"
+                                createLocation={createLocation}
+                                reload={reload}
+                            />
+                        </label>
+                        <label className="inv-field">
+                            <span>Date</span>
+                            <input
+                                type="date"
+                                value={occurredOn}
+                                onChange={(e) => setOccurredOn(e.target.value)}
+                                required
+                            />
                         </label>
                         <label className="inv-field">
                             <span>Reference / invoice #</span>
@@ -848,6 +1091,7 @@ function ReceiveView({ inventory, canMove, onDone, onGoto }) {
                 <dl className="inv-docket-dl">
                     <div><dt>Vendor</dt><dd>{vendor ? vendor.name : '—'}</dd></div>
                     <div><dt>Destination</dt><dd>{destination ? destination.name : '—'}</dd></div>
+                    <div><dt>Date</dt><dd>{occurredOn || '—'}</dd></div>
                     <div><dt>Materials</dt><dd>{fmt(validLines.length)}</dd></div>
                     <div><dt>With photo</dt><dd>{fmt(validLines.filter((l) => l.photoUrl).length)}</dd></div>
                 </dl>
@@ -870,7 +1114,7 @@ function ReceiveView({ inventory, canMove, onDone, onGoto }) {
 // -- Dispatch --------------------------------------------------------------
 
 function DispatchView({ inventory, canMove, onDone, onGoto }) {
-    const { materials, locations, balances, createMovementsBatch, uploadPhoto, reload, syncBusLocations } = inventory;
+    const { materials, locations, balances, createMovementsBatch, createLocation, uploadPhoto, reload, syncBusLocations } = inventory;
     const buOptions = useBuOptions();
     const activeMaterials = materials.filter((m) => m.active);
     const activeLocations = locations.filter((l) => l.active);
@@ -884,6 +1128,7 @@ function DispatchView({ inventory, canMove, onDone, onGoto }) {
 
     const [fromLocationId, setFromLocationId] = useState('');
     const [toLocationId, setToLocationId] = useState('');
+    const [occurredOn, setOccurredOn] = useState(todayDateInput);
     const [reference, setReference] = useState('');
     const [note, setNote] = useState('');
     const [busy, setBusy] = useState(false);
@@ -919,6 +1164,31 @@ function DispatchView({ inventory, canMove, onDone, onGoto }) {
     const destCount = isAllBus ? Math.max(allBuEstimate, 1) : 1;
     const source = activeLocations.find((l) => l.id === fromLocationId) || null;
     const dest = activeLocations.find((l) => l.id === toLocationId) || null;
+
+    const fromGroups = useMemo(() => {
+        const g = [];
+        if (stores.length) g.push({ label: 'Stores & warehouses', items: stores });
+        if (buLabLocations.length) g.push({ label: 'Business units & labs', items: buLabLocations });
+        if (otherLocations.length) g.push({ label: 'Other locations', items: otherLocations });
+        return g;
+    }, [stores, buLabLocations, otherLocations]);
+
+    const toGroups = useMemo(() => {
+        const g = [];
+        if (buLabDestinations.length) g.push({ label: 'Business units & labs', items: buLabDestinations });
+        if (otherDestinations.length) g.push({ label: 'Other locations', items: otherDestinations });
+        return g;
+    }, [buLabDestinations, otherDestinations]);
+
+    const toSpecialOptions = useMemo(() => {
+        if (allBuEstimate > 0 || buOptions.options.length > 0) {
+            return [{
+                value: ALL_BUS_DEST,
+                label: `All BUs & labs${allBuEstimate > 0 ? ` (${allBuEstimate})` : ''}`
+            }];
+        }
+        return [];
+    }, [allBuEstimate, buOptions.options.length]);
 
     function onPickMaterial(key, materialId) {
         const m = matById.get(materialId);
@@ -968,6 +1238,7 @@ function DispatchView({ inventory, canMove, onDone, onGoto }) {
                 ...(isAllBus ? { to_all_bus: true } : { to_location_id: toLocationId }),
                 reference: reference || undefined,
                 note: note || undefined,
+                occurred_at: dateInputToIso(occurredOn),
                 lines: validLines.map((l) => ({
                     material_id: l.materialId,
                     pack_size: Number(l.packSize) || 1,
@@ -986,6 +1257,7 @@ function DispatchView({ inventory, canMove, onDone, onGoto }) {
             resetLines();
             setReference('');
             setNote('');
+            setOccurredOn(todayDateInput());
         } catch (e2) {
             setErr(String(e2.message || e2));
         } finally {
@@ -1036,60 +1308,39 @@ function DispatchView({ inventory, canMove, onDone, onGoto }) {
                     <FormStep n="01" title="Route & paperwork" hint="Applies to every line below">
                         <label className="inv-field">
                             <span>From</span>
-                            <select value={fromLocationId} onChange={(e) => setFromLocationId(e.target.value)} required>
-                                <option value="">— select —</option>
-                                {stores.length > 0 && (
-                                    <optgroup label="Stores & warehouses">
-                                        {stores.map((l) => (
-                                            <option key={l.id} value={l.id}>{l.name}</option>
-                                        ))}
-                                    </optgroup>
-                                )}
-                                {buLabLocations.length > 0 && (
-                                    <optgroup label="Business units & labs">
-                                        {buLabLocations.map((l) => (
-                                            <option key={l.id} value={l.id}>
-                                                {l.name}{l.kind === 'lab' ? ' (lab)' : ''}
-                                            </option>
-                                        ))}
-                                    </optgroup>
-                                )}
-                                {otherLocations.length > 0 && (
-                                    <optgroup label="Other locations">
-                                        {otherLocations.map((l) => (
-                                            <option key={l.id} value={l.id}>{l.name}</option>
-                                        ))}
-                                    </optgroup>
-                                )}
-                            </select>
+                            <LocationCombobox
+                                value={fromLocationId}
+                                onChange={setFromLocationId}
+                                locations={activeLocations}
+                                groups={fromGroups}
+                                required
+                                defaultKind="store"
+                                createLocation={createLocation}
+                                reload={reload}
+                            />
                         </label>
                         <label className="inv-field">
                             <span>To</span>
-                            <select value={toLocationId} onChange={(e) => setToLocationId(e.target.value)} required>
-                                <option value="">— select —</option>
-                                {(allBuEstimate > 0 || buOptions.options.length > 0) && (
-                                    <option value={ALL_BUS_DEST}>
-                                        All BUs &amp; labs
-                                        {allBuEstimate > 0 ? ` (${allBuEstimate})` : ''}
-                                    </option>
-                                )}
-                                {buLabDestinations.length > 0 && (
-                                    <optgroup label="Business units & labs">
-                                        {buLabDestinations.map((l) => (
-                                            <option key={l.id} value={l.id}>
-                                                {l.name}{l.kind === 'lab' ? ' (lab)' : ''}
-                                            </option>
-                                        ))}
-                                    </optgroup>
-                                )}
-                                {otherDestinations.length > 0 && (
-                                    <optgroup label="Other locations">
-                                        {otherDestinations.map((l) => (
-                                            <option key={l.id} value={l.id}>{l.name}</option>
-                                        ))}
-                                    </optgroup>
-                                )}
-                            </select>
+                            <LocationCombobox
+                                value={toLocationId}
+                                onChange={setToLocationId}
+                                locations={activeLocations.filter((l) => l.id !== fromLocationId)}
+                                groups={toGroups}
+                                specialOptions={toSpecialOptions}
+                                required
+                                defaultKind="business_unit"
+                                createLocation={createLocation}
+                                reload={reload}
+                            />
+                        </label>
+                        <label className="inv-field">
+                            <span>Date</span>
+                            <input
+                                type="date"
+                                value={occurredOn}
+                                onChange={(e) => setOccurredOn(e.target.value)}
+                                required
+                            />
                         </label>
                         <label className="inv-field">
                             <span>Reference</span>
@@ -1207,6 +1458,7 @@ function DispatchView({ inventory, canMove, onDone, onGoto }) {
                         <dt>To</dt>
                         <dd>{isAllBus ? `All BUs & labs (${fmt(destCount)})` : dest ? dest.name : '—'}</dd>
                     </div>
+                    <div><dt>Date</dt><dd>{occurredOn || '—'}</dd></div>
                     <div><dt>Materials</dt><dd>{fmt(validLines.length)}</dd></div>
                     {isAllBus && destCount > 1 && (
                         <div><dt>Per destination</dt><dd>{fmt(validLines.reduce((s, l) => s + l.qty, 0))} units</dd></div>
