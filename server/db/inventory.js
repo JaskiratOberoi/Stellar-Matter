@@ -531,11 +531,12 @@ async function getMovement(orgId, id) {
 }
 
 /**
- * Insert a movement. Runs in a transaction; for any outflow (a row with a
- * from_location_id, i.e. dispatch or negative adjustment) it locks the
- * material row and rejects a shortfall with status 409 unless
- * opts.allowNegative is set. Material and location existence are validated
- * here so callers get clean 404s instead of FK violations.
+ * Insert a movement. Runs in a transaction; for a dispatch outflow it locks
+ * the material row and rejects a shortfall with status 409 unless
+ * opts.allowNegative is set. Adjustments are exempt from the guard — they
+ * exist to correct the ledger, so they may take a location negative.
+ * Material and location existence are validated here so callers get clean
+ * 404s instead of FK violations.
  *
  * @param {object} input material_id/kind/from/to/qty_base + optional pack/vendor/etc.
  * @param {object} [opts] { allowNegative, createdBy }
@@ -573,8 +574,9 @@ async function insertMovementTx(client, orgId, input, opts = {}) {
         if (!ven.rows.length) throw httpError('Unknown vendor', 404);
     }
 
-    // Negative-stock guard on the source location.
-    if (input.fromLocationId && !opts.allowNegative) {
+    // Negative-stock guard on the source location. Adjustments are exempt:
+    // correcting the ledger must never be blocked by the ledger.
+    if (input.fromLocationId && input.kind !== 'adjustment' && !opts.allowNegative) {
         const available = await onHandAt(client, orgId, input.materialId, input.fromLocationId);
         if (available < input.qtyBase) {
             throw httpError(
