@@ -1229,13 +1229,17 @@ function DispatchView({ inventory, canMove, onDone, onGoto }) {
         if (isAllBus && allBuEstimate === 0) {
             return setErr('No business units or labs available. Sync client locations or add destinations in Catalog.');
         }
-        if (anyOverdraw) return setErr('One or more lines exceed available stock at the source.');
         setBusy(true);
         try {
             const result = await createMovementsBatch({
                 kind: 'dispatch',
                 from_location_id: fromLocationId,
                 ...(isAllBus ? { to_all_bus: true } : { to_location_id: toLocationId }),
+                // Unrecorded receipts still get dispatched — let stock go negative
+                // so the shortfall is visible in the ledger instead of unrecorded.
+                // Sent unconditionally: client-side balances can be stale, and a
+                // dispatch must never bounce on the server's stock guard.
+                allow_negative: true,
                 reference: reference || undefined,
                 note: note || undefined,
                 occurred_at: dateInputToIso(occurredOn),
@@ -1409,7 +1413,7 @@ function DispatchView({ inventory, canMove, onDone, onGoto }) {
                                                     {l.qty > 0 ? `${fmt(l.required)}${unit ? ` ${unit}` : ''}` : '—'}
                                                 </td>
                                                 <td
-                                                    className={`inv-lt-num${l.overdraw ? ' inv-lt-danger' : ''}`}
+                                                    className={`inv-lt-num${l.overdraw ? ' inv-lt-warn' : ''}`}
                                                     data-label="Available"
                                                 >
                                                     {l.materialId ? fmt(l.available) : '—'}
@@ -1446,7 +1450,7 @@ function DispatchView({ inventory, canMove, onDone, onGoto }) {
                 </form>
             </section>
 
-            <aside className={`inv-docket${anyOverdraw ? ' is-error' : ''}`}>
+            <aside className={`inv-docket${anyOverdraw ? ' is-warn' : ''}`}>
                 <p className="inv-docket-head">Dispatch preview</p>
                 <div className="inv-docket-big">
                     −{fmt(totalOut)}
@@ -1467,8 +1471,10 @@ function DispatchView({ inventory, canMove, onDone, onGoto }) {
                 </dl>
                 {anyOverdraw && (
                     <p className="inv-docket-note">
-                        One or more lines exceed available stock at the source
+                        One or more lines exceed recorded stock at the source
                         {isAllBus && destCount > 1 ? ` across ${fmt(destCount)} destinations` : ''}.
+                        Dispatching will take the source negative — fine for stock that was never
+                        recorded on receipt.
                     </p>
                 )}
                 {err && <p className="login-err inv-docket-err">{err}</p>}
@@ -1477,7 +1483,7 @@ function DispatchView({ inventory, canMove, onDone, onGoto }) {
                         type="submit"
                         form="inv-dispatch-form"
                         className="btn-primary"
-                        disabled={busy || anyUploading || !validLines.length || anyOverdraw || (isAllBus && allBuEstimate === 0)}
+                        disabled={busy || anyUploading || !validLines.length || (isAllBus && allBuEstimate === 0)}
                     >
                         {busy ? 'Dispatching…' : anyUploading ? 'Uploading photo…' : isAllBus ? 'Dispatch to all BUs/labs' : 'Record dispatch'}
                     </button>

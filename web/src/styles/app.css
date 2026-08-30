@@ -3739,13 +3739,13 @@ td.inv-low {
     white-space: nowrap;
 }
 
-.inv-lt-danger {
-    color: rgb(var(--nx-signal-danger));
+.inv-lt-warn {
+    color: rgb(var(--nx-signal-warning));
     font-weight: 600;
 }
 
 .inv-line-table tr.is-overdraw td {
-    background: rgb(var(--nx-signal-danger) / 0.06);
+    background: rgb(var(--nx-signal-warning) / 0.06);
 }
 
 .inv-line-remove {
@@ -3917,8 +3917,8 @@ td.inv-low {
     border-radius: 0 0 var(--r-md) var(--r-md);
 }
 
-.inv-docket.is-error {
-    border-top-color: rgb(var(--nx-signal-danger));
+.inv-docket.is-warn {
+    border-top-color: rgb(var(--nx-signal-warning));
 }
 
 .inv-docket-head {
@@ -3944,8 +3944,8 @@ td.inv-low {
     font-variant-numeric: tabular-nums;
 }
 
-.inv-docket.is-error .inv-docket-big {
-    color: rgb(var(--nx-signal-danger));
+.inv-docket.is-warn .inv-docket-big {
+    color: rgb(var(--nx-signal-warning));
 }
 
 .inv-docket-unit {
@@ -4003,7 +4003,7 @@ td.inv-low {
     margin: var(--sp-4) 0 0;
     font-size: var(--fs-xs);
     line-height: 1.45;
-    color: rgb(var(--nx-signal-danger));
+    color: rgb(var(--nx-signal-warning));
 }
 
 .inv-docket-err {
@@ -4489,7 +4489,7 @@ tr.inv-voided td:nth-child(3) {
     }
 
     .inv-line-table tbody tr.is-overdraw {
-        border-color: rgb(var(--nx-signal-danger) / 0.45);
+        border-color: rgb(var(--nx-signal-warning) / 0.45);
     }
 
     .inv-line-table td {
