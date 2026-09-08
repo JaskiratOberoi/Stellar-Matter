@@ -3044,8 +3044,8 @@ table.packages td.envelope-cell {
     border-radius: var(--r-full);
     background: rgb(var(--nx-ink-3));
     box-shadow: var(--shadow-1);
-    transition: transform var(--motion-fast, 140ms) cubic-bezier(0.34, 1.56, 0.64, 1),
-        background var(--motion-fast, 140ms) ease;
+    transition: transform var(--dur-base) var(--ease),
+        background var(--dur-fast) var(--ease);
 }
 
 .inv-toggle-input:checked + .inv-toggle-track {
@@ -4160,6 +4160,111 @@ tr.inv-voided td:nth-child(3) {
     font-size: var(--fs-3xs);
     color: rgb(var(--nx-signal-danger));
     font-weight: 700;
+}
+
+/* A voided row stays in the ledger as history but must not read as live
+   stock: the identifying cells are struck through, everything dims, and the
+   kind badge loses its colour so the eye skips it when scanning. */
+.inv-voided td {
+    color: rgb(var(--nx-ink-3));
+}
+
+.inv-voided .inv-mat-cell,
+.inv-voided .inv-when-date {
+    color: rgb(var(--nx-ink-3));
+    text-decoration: line-through;
+    text-decoration-color: rgb(var(--nx-signal-danger) / 0.6);
+}
+
+.inv-voided .inv-kbadge {
+    opacity: 0.55;
+}
+
+.inv-voided .inv-arrow {
+    color: rgb(var(--nx-ink-3));
+}
+
+/* Matrix cell states. `inv-zero` and `inv-low` were applied by the markup
+   but never styled, and a negative balance rendered like any other number —
+   a store that has dispatched more than it received was invisible. */
+.inv-matrix td.inv-zero {
+    color: rgb(var(--nx-ink-3) / 0.55);
+}
+
+.inv-matrix td.inv-low {
+    color: rgb(var(--nx-signal-warning));
+}
+
+.inv-matrix td.inv-neg,
+.inv-matrix tfoot td.inv-neg {
+    color: rgb(var(--nx-signal-danger));
+    font-weight: 600;
+}
+
+/* Section heads stay pinned under the topbar while a long matrix or ledger
+   scrolls, so the title, count and tools never leave the reader. */
+.inv-panel > .inv-sechead {
+    position: sticky;
+    top: var(--topbar-h);
+    z-index: 2;
+    background: rgb(var(--nx-bg));
+}
+
+/* Browser surfaces the design otherwise leaves to defaults. */
+::selection {
+    background: rgb(var(--nx-accent) / 0.35);
+    color: rgb(var(--nx-ink));
+}
+
+.inv-table-wrap {
+    scrollbar-width: thin;
+    scrollbar-color: rgb(var(--nx-rule-strong)) transparent;
+}
+
+.inv-table-wrap::-webkit-scrollbar {
+    height: 8px;
+}
+
+.inv-table-wrap::-webkit-scrollbar-thumb {
+    background: rgb(var(--nx-rule-strong));
+    border-radius: var(--r-full);
+}
+
+@media (max-width: 640px) {
+    /* Five stacked figures ran the whole first screen; two columns keep the
+       glance-strip to one thumb-scroll. */
+    .inv-figures {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: var(--sp-5) 0;
+    }
+
+    /* The older stacked-phone rules below give every figure a top rule and
+       exempt only :first-child, which in a two-column grid leaves the first
+       row's cells at different heights. Rule the rows, not the cells: the
+       first two cells sit on the masthead's rule, every later row gets its
+       own. Child selectors out-specify the older single-class rules. */
+    .inv-figures > .inv-figure {
+        padding: var(--sp-4) var(--sp-4) 0;
+        border-top: 1px solid rgb(var(--nx-rule-soft));
+    }
+
+    .inv-figures > .inv-figure:nth-child(-n + 2) {
+        padding-top: 0;
+        border-top: 0;
+    }
+
+    .inv-figures > .inv-figure:nth-child(odd) {
+        padding-left: 0;
+        border-left: 0;
+    }
+
+    .inv-figure-num {
+        font-size: var(--fs-2xl);
+    }
+
+    .inv-panel > .inv-sechead {
+        top: var(--topbar-h);
+    }
 }
 
 /* Small primary button variant */

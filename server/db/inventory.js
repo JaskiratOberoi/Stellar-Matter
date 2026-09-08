@@ -921,11 +921,12 @@ async function voidMovement(orgId, id, opts = {}) {
 // what ops reorders against; per-BU shortfalls surface in the Stock matrix.
 async function getSummary(orgId) {
     const pool = getPool();
-    const [materials, locations, vendors, movements, lowStock] = await Promise.all([
+    const [materials, locations, vendors, movements, voided, lowStock] = await Promise.all([
         pool.query(`SELECT COUNT(*)::int AS c FROM inventory_materials WHERE org_id = $1 AND active = true`, [orgId]),
         pool.query(`SELECT COUNT(*)::int AS c FROM inventory_locations WHERE org_id = $1 AND active = true`, [orgId]),
         pool.query(`SELECT COUNT(*)::int AS c FROM inventory_vendors WHERE org_id = $1 AND active = true`, [orgId]),
         pool.query(`SELECT COUNT(*)::int AS c FROM inventory_movements WHERE org_id = $1 AND voided_at IS NULL`, [orgId]),
+        pool.query(`SELECT COUNT(*)::int AS c FROM inventory_movements WHERE org_id = $1 AND voided_at IS NOT NULL`, [orgId]),
         pool.query(
             `SELECT m.id AS material_id, m.name, m.base_unit, m.reorder_level,
                     COALESCE(SUM(CASE WHEN l.kind = 'store' THEN b.on_hand ELSE 0 END), 0)::bigint AS store_on_hand
@@ -946,6 +947,10 @@ async function getSummary(orgId) {
         locations: locations.rows[0].c,
         vendors: vendors.rows[0].c,
         movements: movements.rows[0].c,
+        // Voided rows stay in the ledger but are excluded from every balance;
+        // the figures strip says so rather than leaving the reader to wonder
+        // why the ledger is longer than the entry count.
+        movements_voided: voided.rows[0].c,
         low_stock: lowStock.rows
     };
 }

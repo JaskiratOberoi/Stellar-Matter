@@ -5,6 +5,8 @@ import { AuthProvider } from './contexts/AuthContext.jsx';
 import { App } from './App.jsx';
 import { initPwa } from './pwa.js';
 import { initPwaInstallCapture } from './lib/pwaInstall.js';
+import '@fontsource-variable/inter';
+import '@fontsource-variable/jetbrains-mono';
 import './styles/tokens.css';
 
 initPwa();

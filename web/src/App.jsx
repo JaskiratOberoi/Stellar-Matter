@@ -139,10 +139,20 @@ function TracerRoute() {
         [submit]
     );
 
+    // The pill reflects the LAST FINISHED run, held in server memory until the
+    // next run starts — a red "error" could be hours old. Carry the run's start
+    // time in the text so it reads as a dated record, not a live alarm.
     const statusPill = useMemo(() => {
         if (running) return { kind: 'running', text: 'running' };
         if (status && typeof status.exitCode === 'number') {
-            return status.exitCode === 0 ? { kind: 'ok', text: 'success' } : { kind: 'err', text: 'error' };
+            const at = status.startedAt ? new Date(status.startedAt) : null;
+            const when =
+                at && !Number.isNaN(at.getTime())
+                    ? ` · ${at.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}`
+                    : '';
+            return status.exitCode === 0
+                ? { kind: 'ok', text: `last run ok${when}` }
+                : { kind: 'err', text: `last run failed${when}` };
         }
         return null;
     }, [running, status]);
