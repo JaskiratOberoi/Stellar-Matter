@@ -18,7 +18,8 @@
     "start": "node server/index.js",
     "migrate": "node server/db/migrate.js",
     "backfill:audit-geo": "node server/db/backfillAuditGeo.js",
-    "cli": "node cli/stellar-matter-cli.js"
+    "cli": "node cli/stellar-matter-cli.js",
+    "seed:dev": "node server/db/seedDev.js"
   },
   "bin": {
     "stellar-matter-cli": "cli/stellar-matter-cli.js"

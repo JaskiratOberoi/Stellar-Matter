@@ -25,6 +25,18 @@ docker-compose.yml         Postgres 16 + app, ports 4378 / 5434
 installs both. `npm run dev` boots the legacy Node UI server (port 4377) and the
 Vite dev server (port 5173) in parallel via `concurrently`.
 
+## App structure
+
+The SPA is inventory-first. Signing in lands on the Inventory Tracker; the
+Tracer is a secondary tool reached from the topbar.
+
+| Route | Screen |
+|-------|--------|
+| `/` | Inventory Tracker (home) |
+| `/tracer` | Tracer — Letter Heads / Envelopes / vials dashboard |
+| `/admin/users`, `/admin/orgs`, `/admin/audit-log` | Super-admin panels |
+| `/inventory`, `/dashboard` | Legacy paths — redirect to `/` and `/tracer` |
+
 ## Letter Heads vs Envelopes
 
 The dashboard now has two equivalent tile walls:
@@ -57,6 +69,17 @@ To exercise auth + admin locally, point `DATABASE_URL` at a Postgres (the
 docker-compose service or a local install), run `npm run migrate` once to
 create the `users` table and seed the super_admin from `SUPER_ADMIN_USERNAME` /
 `SUPER_ADMIN_PASSWORD`, then log in at `/login`.
+
+To fill the inventory with sample data for local testing:
+
+```bash
+npm run seed:dev             # ~230 receipts/dispatches over the last 60 days
+npm run seed:dev -- --reset  # wipe the previous dev rows and regenerate
+```
+
+The seeder adds three BU + two lab locations, three vendors (named `[dev]`),
+and a deterministic ledger tagged with `DEV-` references, so it never touches
+real rows and can be re-run safely. It refuses to run with `NODE_ENV=production`.
 
 ## Docker (production backend on a self-hosted box)
 
