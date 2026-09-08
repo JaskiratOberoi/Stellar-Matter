@@ -17,8 +17,78 @@ import { usePackagePagesMap } from './hooks/usePackagePagesMap.js';
 import { LS_HIDDEN, readHiddenSet } from './lib/storage.js';
 import './styles/app.css';
 
+/**
+ * Inventory is the home screen. Tracer is a secondary tool mounted at
+ * /tracer, so its run polling, tile loads and Listec-backed lookups only
+ * start once someone actually opens it — the inventory home never pays for
+ * them.
+ */
 export function App() {
     const { authRequired, user, loading: authLoading } = useAuth();
+
+    if (authRequired && authLoading) {
+        return <div className="role-gate-loading muted small">Checking access…</div>;
+    }
+    if (authRequired && !user) {
+        return (
+            <>
+                <Routes>
+                    <Route path="/login" element={<LoginPage />} />
+                    <Route path="*" element={<Navigate to="/login" replace />} />
+                </Routes>
+                <InstallPrompt />
+            </>
+        );
+    }
+
+    const inventoryView = (
+        <>
+            <Topbar onOrgSwitched={() => {}} />
+            <InventoryPage key={user?.active_org_id || 'inventory'} />
+        </>
+    );
+
+    return (
+        <>
+            <Routes>
+                <Route path="/login" element={<LoginPage />} />
+                <Route
+                    path="/admin/users"
+                    element={
+                        <RoleGate roles={['super_admin']}>
+                            <AdminUsersPage />
+                        </RoleGate>
+                    }
+                />
+                <Route
+                    path="/admin/audit-log"
+                    element={
+                        <RoleGate roles={['super_admin']}>
+                            <AdminAuditLogPage />
+                        </RoleGate>
+                    }
+                />
+                <Route
+                    path="/admin/orgs"
+                    element={
+                        <RoleGate roles={['super_admin']}>
+                            <AdminOrgsPage />
+                        </RoleGate>
+                    }
+                />
+                <Route path="/tracer" element={<TracerRoute />} />
+                <Route path="/" element={inventoryView} />
+                {/* Legacy entry points: the old tile dashboard and the pre-swap inventory path. */}
+                <Route path="/dashboard" element={<Navigate to="/tracer" replace />} />
+                <Route path="/inventory" element={<Navigate to="/" replace />} />
+                <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+            <InstallPrompt />
+        </>
+    );
+}
+
+function TracerRoute() {
     const [hiddenSet, setHiddenSet] = useState(() => readHiddenSet());
     const [submitError, setSubmitError] = useState(null);
 
@@ -79,22 +149,7 @@ export function App() {
 
     const fanOut = (status && (status.fanOut || status.lastFanOut)) || null;
 
-    if (authRequired && authLoading) {
-        return <div className="role-gate-loading muted small">Checking access…</div>;
-    }
-    if (authRequired && !user) {
-        return (
-            <>
-                <Routes>
-                    <Route path="/login" element={<LoginPage />} />
-                    <Route path="*" element={<Navigate to="/login" replace />} />
-                </Routes>
-                <InstallPrompt />
-            </>
-        );
-    }
-
-    const tracerView = (
+    return (
         <>
             <Topbar
                 statusPill={statusPill}
@@ -123,58 +178,6 @@ export function App() {
                     submitError={submitError}
                 />
             </main>
-        </>
-    );
-
-    const inventoryView = (
-        <>
-            <Topbar onOrgSwitched={() => {}} />
-            <InventoryPage key={user?.active_org_id || 'inventory'} />
-        </>
-    );
-
-    return (
-        <>
-            <Routes>
-                <Route path="/login" element={<LoginPage />} />
-                <Route
-                    path="/admin/users"
-                    element={
-                        <RoleGate roles={['super_admin']}>
-                            <AdminUsersPage />
-                        </RoleGate>
-                    }
-                />
-                <Route
-                    path="/admin/audit-log"
-                    element={
-                        <RoleGate roles={['super_admin']}>
-                            <AdminAuditLogPage />
-                        </RoleGate>
-                    }
-                />
-                <Route
-                    path="/admin/orgs"
-                    element={
-                        <RoleGate roles={['super_admin']}>
-                            <AdminOrgsPage />
-                        </RoleGate>
-                    }
-                />
-                <Route
-                    path="/inventory"
-                    element={
-                        <RoleGate roles={['super_admin', 'admin', 'operator', 'viewer']}>
-                            {inventoryView}
-                        </RoleGate>
-                    }
-                />
-                <Route path="/" element={tracerView} />
-                <Route path="/dashboard" element={<Navigate to="/" replace />} />
-                <Route path="/tracer" element={<Navigate to="/" replace />} />
-                <Route path="*" element={<Navigate to="/" replace />} />
-            </Routes>
-            <InstallPrompt />
         </>
     );
 }

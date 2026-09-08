@@ -8,7 +8,7 @@ import { usePwaInstall } from '../hooks/usePwaInstall.js';
 export function Topbar({ statusPill, lastUpdated, onOrgSwitched }) {
     const { user, orgs, authRequired, logout, switchOrg } = useAuth();
     const location = useLocation();
-    const isInventory = location.pathname.startsWith('/inventory');
+    const isTracer = location.pathname.startsWith('/tracer');
     const [menuOpen, setMenuOpen] = useState(false);
     const [installHintOpen, setInstallHintOpen] = useState(false);
     const drawerRef = useRef(null);
@@ -39,13 +39,14 @@ export function Topbar({ statusPill, lastUpdated, onOrgSwitched }) {
         else if (!r.ok) window.alert(r.error || 'Org switch failed');
     };
 
-    const navLink = !isInventory ? (
-        <Link to="/inventory" className="chip chip-tool tracer-ui-link" title="Open the inventory tracker">
-            Inventory
+    // Inventory is home; Tracer is the secondary tool reached from it.
+    const navLink = isTracer ? (
+        <Link to="/" className="chip chip-tool tracer-ui-link" title="Return to Inventory">
+            ← Inventory
         </Link>
     ) : (
-        <Link to="/" className="chip chip-tool tracer-ui-link" title="Return to Tracer">
-            ← Tracer
+        <Link to="/tracer" className="chip chip-tool tracer-ui-link" title="Open the Tracer">
+            Tracer
         </Link>
     );
 

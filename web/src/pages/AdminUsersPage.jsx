@@ -49,7 +49,7 @@ export function AdminUsersPage() {
                 </div>
                 <div className="admin-actions">
                     <Link to="/" className="chip chip-tool">
-                        ← Back to Tracer
+                        ← Back to Inventory
                     </Link>
                     <Link to="/admin/orgs" className="chip chip-tool">
                         Orgs
