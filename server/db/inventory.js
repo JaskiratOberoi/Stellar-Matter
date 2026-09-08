@@ -476,7 +476,27 @@ async function getOnHand(orgId, materialId, locationId) {
 
 // -- Movements -------------------------------------------------------------
 
-async function listMovements(orgId, { limit = 50, beforeId = null, materialId = null, locationId = null, kind = null } = {}) {
+// Escape LIKE metacharacters so a user typing "50%" or "_" searches for the
+// literal characters instead of turning into a wildcard.
+function likePattern(q) {
+    return `%${String(q).replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+}
+
+async function listMovements(
+    orgId,
+    {
+        limit = 50,
+        beforeId = null,
+        materialId = null,
+        locationId = null,
+        vendorId = null,
+        kind = null,
+        q = null,
+        from = null,
+        to = null,
+        includeVoided = true
+    } = {}
+) {
     const pool = getPool();
     const params = [orgId];
     const where = ['mv.org_id = $1'];
@@ -488,15 +508,46 @@ async function listMovements(orgId, { limit = 50, beforeId = null, materialId = 
         params.push(locationId);
         where.push(`(mv.from_location_id = $${params.length} OR mv.to_location_id = $${params.length})`);
     }
+    if (vendorId) {
+        params.push(vendorId);
+        where.push(`mv.vendor_id = $${params.length}`);
+    }
     if (kind) {
         params.push(kind);
         where.push(`mv.kind = $${params.length}`);
+    }
+    // Free-text search across everything a person might remember about a
+    // movement: what moved, where, who supplied it, the invoice number, the
+    // note, or who recorded it.
+    if (q) {
+        params.push(likePattern(q));
+        const n = params.length;
+        where.push(
+            `(m.name ILIKE $${n} OR mv.reference ILIKE $${n} OR mv.note ILIKE $${n}
+              OR mv.vendor ILIKE $${n} OR v.name ILIKE $${n}
+              OR fl.name ILIKE $${n} OR tl.name ILIKE $${n} OR mv.created_by ILIKE $${n})`
+        );
+    }
+    // Half-open window: callers pass `to` as the start of the day *after* the
+    // last day they want, so a range is inclusive of whole local days.
+    if (from) {
+        params.push(from);
+        where.push(`mv.occurred_at >= $${params.length}`);
+    }
+    if (to) {
+        params.push(to);
+        where.push(`mv.occurred_at < $${params.length}`);
+    }
+    if (!includeVoided) {
+        where.push('mv.voided_at IS NULL');
     }
     if (beforeId != null) {
         params.push(beforeId);
         where.push(`mv.id < $${params.length}`);
     }
     params.push(limit);
+    // COUNT(*) OVER() gives the size of the whole filtered set alongside this
+    // page, so the UI can say "50 of 312" without a second round trip.
     const r = await pool.query(
         `SELECT mv.id, mv.kind, mv.material_id, mv.qty_base, mv.pack_size, mv.pack_qty,
                 mv.vendor, mv.vendor_id, mv.reference, mv.note, mv.photo_path,
@@ -505,7 +556,8 @@ async function listMovements(orgId, { limit = 50, beforeId = null, materialId = 
                 mv.from_location_id, mv.to_location_id,
                 m.name AS material_name, m.base_unit,
                 fl.name AS from_location_name, tl.name AS to_location_name,
-                v.name AS vendor_name
+                v.name AS vendor_name,
+                COUNT(*) OVER()::int AS total_count
          FROM inventory_movements mv
          JOIN inventory_materials m ON m.id = mv.material_id
          LEFT JOIN inventory_locations fl ON fl.id = mv.from_location_id
@@ -516,9 +568,10 @@ async function listMovements(orgId, { limit = 50, beforeId = null, materialId = 
          LIMIT $${params.length}`,
         params
     );
-    const rows = r.rows;
+    const total = r.rows.length ? r.rows[0].total_count : 0;
+    const rows = r.rows.map(({ total_count, ...row }) => row);
     const nextCursor = rows.length === limit ? rows[rows.length - 1].id : null;
-    return { movements: rows, nextCursor };
+    return { movements: rows, nextCursor, total };
 }
 
 async function getMovement(orgId, id) {

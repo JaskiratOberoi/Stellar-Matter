@@ -57,6 +57,15 @@ function trimStr(v) {
     return v != null ? String(v).trim() : '';
 }
 
+// Parse an optional ISO timestamp. Returns null when absent, false when
+// present but unparseable, otherwise the normalised ISO string.
+function parseIsoDate(v) {
+    const s = trimStr(v);
+    if (!s) return null;
+    const t = Date.parse(s);
+    return Number.isFinite(t) ? new Date(t).toISOString() : false;
+}
+
 // Parse an optional non-negative integer. Returns undefined when absent,
 // throws a 400-tagged error when present but invalid.
 function optInt(v, label, { min = 0, allowNull = false } = {}) {
@@ -430,14 +439,26 @@ router.get('/movements', async (req, res) => {
         const limitRaw = Number(req.query.limit);
         const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(1, Math.floor(limitRaw)), 200) : 50;
         const beforeId = req.query.before_id != null && req.query.before_id !== '' ? Number(req.query.before_id) : null;
+        // Date bounds arrive as ISO timestamps built client-side from local
+        // midnight, so the server never has to guess the caller's timezone.
+        const from = parseIsoDate(req.query.from);
+        const to = parseIsoDate(req.query.to);
+        if (from === false || to === false) {
+            return res.status(400).json({ error: 'from / to must be ISO-8601 timestamps' });
+        }
         const result = await inv.listMovements(orgOf(req), {
             limit,
             beforeId: Number.isFinite(beforeId) ? beforeId : null,
             materialId: trimStr(req.query.material_id) || null,
             locationId: trimStr(req.query.location_id) || null,
-            kind: MOVEMENT_KINDS.has(trimStr(req.query.kind)) ? trimStr(req.query.kind) : null
+            vendorId: trimStr(req.query.vendor_id) || null,
+            kind: MOVEMENT_KINDS.has(trimStr(req.query.kind)) ? trimStr(req.query.kind) : null,
+            q: trimStr(req.query.q).slice(0, 200) || null,
+            from,
+            to,
+            includeVoided: trimStr(req.query.voided) !== 'exclude'
         });
-        res.json({ movements: result.movements, next_cursor: result.nextCursor });
+        res.json({ movements: result.movements, next_cursor: result.nextCursor, total: result.total });
     } catch (err) {
         sendError(res, err);
     }

@@ -2942,6 +2942,63 @@ table.packages td.envelope-cell {
     font-size: var(--fs-sm);
 }
 
+/* Ledger filter bar — search sits in the section head; the structured
+   filters live in two rows below it: selects, then date range + toggles. */
+.inv-ledger-search {
+    min-width: 280px;
+    flex: 1 1 280px;
+}
+
+.inv-ledger-filters {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-3);
+    margin: calc(-1 * var(--sp-1)) 0 var(--sp-4);
+}
+
+.inv-ledger-filter-row {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+    flex-wrap: wrap;
+}
+
+.inv-ledger-select {
+    min-width: 0;
+    flex: 1 1 160px;
+    max-width: 260px;
+}
+
+.inv-ledger-date {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--sp-2);
+    font: 600 var(--fs-3xs) / 1 var(--font-mono);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: rgb(var(--nx-ink-3));
+}
+
+.inv-ledger-date .inv-search {
+    min-width: 0;
+    width: 150px;
+    padding-top: var(--sp-1);
+    padding-bottom: var(--sp-1);
+    color-scheme: dark;
+}
+
+@media (max-width: 720px) {
+    .inv-ledger-search {
+        min-width: 0;
+        width: 100%;
+    }
+
+    .inv-ledger-select {
+        max-width: none;
+        flex-basis: calc(50% - var(--sp-3));
+    }
+}
+
 /* Modern toggle switch */
 .inv-toggle {
     display: inline-flex;

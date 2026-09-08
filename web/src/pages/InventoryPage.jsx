@@ -1495,42 +1495,126 @@ function DispatchView({ inventory, canMove, onDone, onGoto }) {
 
 // -- Ledger ----------------------------------------------------------------
 
+function shiftDateInput(days) {
+    const d = new Date();
+    d.setDate(d.getDate() + days);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function monthStartDateInput() {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
+}
+
+/** Local calendar date (YYYY-MM-DD) → ISO at local midnight, shifted by `dayOffset` days. */
+function dateInputToIsoDayStart(dateStr, dayOffset = 0) {
+    const [y, m, d] = String(dateStr).split('-').map(Number);
+    if (!y || !m || !d) return null;
+    return new Date(y, m - 1, d + dayOffset).toISOString();
+}
+
+// Quick date picks for the ledger. Each yields the from/to input values it
+// represents so a custom pair that happens to match still lights the chip.
+const LEDGER_RANGES = [
+    { id: 'all', label: 'All time', build: () => ({ from: '', to: '' }) },
+    { id: 'today', label: 'Today', build: () => ({ from: todayDateInput(), to: todayDateInput() }) },
+    { id: '7d', label: '−7d', build: () => ({ from: shiftDateInput(-6), to: todayDateInput() }) },
+    { id: '30d', label: '−30d', build: () => ({ from: shiftDateInput(-29), to: todayDateInput() }) },
+    { id: 'month', label: 'This month', build: () => ({ from: monthStartDateInput(), to: todayDateInput() }) }
+];
+
+const LEDGER_EMPTY_FILTERS = {
+    q: '',
+    kind: '',
+    materialId: '',
+    locationId: '',
+    vendorId: '',
+    from: '',
+    to: '',
+    hideVoided: false
+};
+
+const LEDGER_PAGE = 50;
+
 function LedgerView({ inventory, canMove, onDone }) {
-    const { materials, fetchMovements, voidMovement, reload } = inventory;
+    const { materials, locations, vendors, fetchMovements, voidMovement, reload } = inventory;
     const [rows, setRows] = useState([]);
     const [cursor, setCursor] = useState(null);
+    const [total, setTotal] = useState(0);
     const [loading, setLoading] = useState(false);
     const [err, setErr] = useState(null);
-    const [filterMaterial, setFilterMaterial] = useState('');
-    const [filterKind, setFilterKind] = useState('');
+    const [filters, setFilters] = useState(LEDGER_EMPTY_FILTERS);
+    // The search box updates on every keystroke; the query we actually send
+    // trails it so a fast typist doesn't fire a request per character.
+    const [search, setSearch] = useState('');
+
+    useEffect(() => {
+        const t = setTimeout(() => {
+            setFilters((f) => (f.q === search.trim() ? f : { ...f, q: search.trim() }));
+        }, 250);
+        return () => clearTimeout(t);
+    }, [search]);
+
+    const setFilter = useCallback((patch) => setFilters((f) => ({ ...f, ...patch })), []);
+
+    const apiParams = useMemo(() => {
+        const p = { limit: LEDGER_PAGE };
+        if (filters.q) p.q = filters.q;
+        if (filters.kind) p.kind = filters.kind;
+        if (filters.materialId) p.material_id = filters.materialId;
+        if (filters.locationId) p.location_id = filters.locationId;
+        if (filters.vendorId) p.vendor_id = filters.vendorId;
+        if (filters.from) p.from = dateInputToIsoDayStart(filters.from);
+        // `to` is inclusive of the whole day, so send the next day's midnight.
+        if (filters.to) p.to = dateInputToIsoDayStart(filters.to, 1);
+        if (filters.hideVoided) p.voided = 'exclude';
+        return p;
+    }, [filters]);
 
     const load = useCallback(
-        async (reset) => {
+        async (reset, beforeId) => {
             setLoading(true);
             setErr(null);
             try {
-                const params = { limit: 50 };
-                if (filterMaterial) params.material_id = filterMaterial;
-                if (filterKind) params.kind = filterKind;
-                if (!reset && cursor) params.before_id = cursor;
+                const params = { ...apiParams };
+                if (!reset && beforeId) params.before_id = beforeId;
                 const j = await fetchMovements(params);
                 const next = j.movements || [];
                 setRows((prev) => (reset ? next : [...prev, ...next]));
                 setCursor(j.next_cursor || null);
+                setTotal(Number(j.total) || 0);
             } catch (e) {
                 setErr(String(e.message || e));
             } finally {
                 setLoading(false);
             }
         },
-        [fetchMovements, filterMaterial, filterKind, cursor]
+        [fetchMovements, apiParams]
     );
 
     useEffect(() => {
         setCursor(null);
         load(true);
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [filterMaterial, filterKind]);
+    }, [load]);
+
+    const activeCount = Object.keys(LEDGER_EMPTY_FILTERS).filter((k) => filters[k] !== LEDGER_EMPTY_FILTERS[k]).length;
+
+    const clearFilters = () => {
+        setSearch('');
+        setFilters(LEDGER_EMPTY_FILTERS);
+    };
+
+    const activeRange = LEDGER_RANGES.find((r) => {
+        const t = r.build();
+        return t.from === filters.from && t.to === filters.to;
+    });
+
+    // Every location that has ever appeared on a movement is a useful filter,
+    // so inactive ones stay in the list; they just sit below the active set.
+    const locationOptions = useMemo(
+        () => [...locations].sort((a, b) => Number(b.active) - Number(a.active) || a.name.localeCompare(b.name)),
+        [locations]
+    );
 
     async function onVoid(row) {
         if (!window.confirm(`Void this ${row.kind}? It stays in history but stops affecting balances.`)) return;
@@ -1559,32 +1643,129 @@ function LedgerView({ inventory, canMove, onDone }) {
         }
     }
 
+    const caption = loading && !rows.length
+        ? 'Loading…'
+        : total
+          ? `${fmt(rows.length)} of ${fmt(total)} movement${total === 1 ? '' : 's'}${activeCount ? ' match' : ''}`
+          : activeCount
+            ? 'No movements match these filters.'
+            : 'Append-only. Voided rows stay in history but stop counting.';
+
     return (
         <section className="inv-panel">
-            <SectionHead title="Movement ledger" caption="Append-only. Voided rows stay in history but stop counting.">
-                <select
-                    className="inv-search"
-                    value={filterMaterial}
-                    onChange={(e) => setFilterMaterial(e.target.value)}
-                    aria-label="Filter by material"
-                >
-                    <option value="">All materials</option>
-                    {materials.map((m) => (
-                        <option key={m.id} value={m.id}>{m.name}</option>
-                    ))}
-                </select>
-                <select
-                    className="inv-search"
-                    value={filterKind}
-                    onChange={(e) => setFilterKind(e.target.value)}
-                    aria-label="Filter by type"
-                >
-                    <option value="">All types</option>
-                    <option value="receipt">Receipt</option>
-                    <option value="dispatch">Dispatch</option>
-                    <option value="adjustment">Adjustment</option>
-                </select>
+            <SectionHead title="Movement ledger" caption={caption}>
+                <input
+                    className="inv-search inv-ledger-search"
+                    type="search"
+                    placeholder="Search material, reference, note, vendor, location…"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    aria-label="Search movements"
+                />
+                {activeCount > 0 && (
+                    <button type="button" className="chip chip-tool" onClick={clearFilters}>
+                        Clear {activeCount > 1 ? `(${activeCount})` : ''}
+                    </button>
+                )}
             </SectionHead>
+
+            <div className="inv-ledger-filters" role="group" aria-label="Ledger filters">
+                <div className="inv-ledger-filter-row">
+                    <select
+                        className="inv-search inv-ledger-select"
+                        value={filters.kind}
+                        onChange={(e) => setFilter({ kind: e.target.value })}
+                        aria-label="Filter by type"
+                    >
+                        <option value="">All types</option>
+                        <option value="receipt">Receipt</option>
+                        <option value="dispatch">Dispatch</option>
+                        <option value="adjustment">Adjustment</option>
+                    </select>
+                    <select
+                        className="inv-search inv-ledger-select"
+                        value={filters.materialId}
+                        onChange={(e) => setFilter({ materialId: e.target.value })}
+                        aria-label="Filter by material"
+                    >
+                        <option value="">All materials</option>
+                        {materials.map((m) => (
+                            <option key={m.id} value={m.id}>{m.name}{m.active ? '' : ' (inactive)'}</option>
+                        ))}
+                    </select>
+                    <select
+                        className="inv-search inv-ledger-select"
+                        value={filters.locationId}
+                        onChange={(e) => setFilter({ locationId: e.target.value })}
+                        aria-label="Filter by location"
+                    >
+                        <option value="">All locations</option>
+                        {locationOptions.map((l) => (
+                            <option key={l.id} value={l.id}>
+                                {l.name} · {kindLabel(l.kind)}{l.active ? '' : ' (inactive)'}
+                            </option>
+                        ))}
+                    </select>
+                    <select
+                        className="inv-search inv-ledger-select"
+                        value={filters.vendorId}
+                        onChange={(e) => setFilter({ vendorId: e.target.value })}
+                        aria-label="Filter by vendor"
+                    >
+                        <option value="">All vendors</option>
+                        {vendors.map((v) => (
+                            <option key={v.id} value={v.id}>{v.name}{v.active ? '' : ' (inactive)'}</option>
+                        ))}
+                    </select>
+                </div>
+                <div className="inv-ledger-filter-row">
+                    <div className="chip-row" role="group" aria-label="Date quick picks">
+                        {LEDGER_RANGES.map((r) => (
+                            <button
+                                key={r.id}
+                                type="button"
+                                className="chip chip-tool"
+                                aria-pressed={activeRange && activeRange.id === r.id ? 'true' : 'false'}
+                                onClick={() => setFilter(r.build())}
+                            >
+                                {r.label}
+                            </button>
+                        ))}
+                    </div>
+                    <label className="inv-ledger-date">
+                        <span>From</span>
+                        <input
+                            className="inv-search"
+                            type="date"
+                            value={filters.from}
+                            max={filters.to || undefined}
+                            onChange={(e) => setFilter({ from: e.target.value })}
+                        />
+                    </label>
+                    <label className="inv-ledger-date">
+                        <span>To</span>
+                        <input
+                            className="inv-search"
+                            type="date"
+                            value={filters.to}
+                            min={filters.from || undefined}
+                            onChange={(e) => setFilter({ to: e.target.value })}
+                        />
+                    </label>
+                    <label className="inv-toggle">
+                        <input
+                            type="checkbox"
+                            className="inv-toggle-input"
+                            checked={filters.hideVoided}
+                            onChange={(e) => setFilter({ hideVoided: e.target.checked })}
+                        />
+                        <span className="inv-toggle-track" aria-hidden="true">
+                            <span className="inv-toggle-thumb" />
+                        </span>
+                        <span className="inv-toggle-label">Hide voided</span>
+                    </label>
+                </div>
+            </div>
 
             {err && <div className="results-error nexus-card">{err}</div>}
 
@@ -1657,9 +1838,23 @@ function LedgerView({ inventory, canMove, onDone }) {
                         {!rows.length && !loading && (
                             <tr>
                                 <td colSpan={canMove ? 7 : 6}>
-                                    <EmptyState icon="list" title="No movements yet">
-                                        Recorded receipts and dispatches will appear here.
-                                    </EmptyState>
+                                    {activeCount ? (
+                                        <EmptyState
+                                            icon="list"
+                                            title="No matching movements"
+                                            action={
+                                                <button type="button" className="chip chip-tool" onClick={clearFilters}>
+                                                    Clear filters
+                                                </button>
+                                            }
+                                        >
+                                            Try a wider date range or fewer filters.
+                                        </EmptyState>
+                                    ) : (
+                                        <EmptyState icon="list" title="No movements yet">
+                                            Recorded receipts and dispatches will appear here.
+                                        </EmptyState>
+                                    )}
                                 </td>
                             </tr>
                         )}
@@ -1669,8 +1864,8 @@ function LedgerView({ inventory, canMove, onDone }) {
 
             {cursor && (
                 <div className="inv-loadmore">
-                    <button type="button" className="chip chip-tool" disabled={loading} onClick={() => load(false)}>
-                        {loading ? 'Loading…' : 'Load more'}
+                    <button type="button" className="chip chip-tool" disabled={loading} onClick={() => load(false, cursor)}>
+                        {loading ? 'Loading…' : `Load more (${fmt(total - rows.length)} left)`}
                     </button>
                 </div>
             )}
