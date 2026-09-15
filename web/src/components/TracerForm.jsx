@@ -107,41 +107,45 @@ export function TracerForm({
                     }}
                 />
             </div>
-            <div className="grid2 sidebar-grid tracer-date-grid">
-                <label>
-                    From date{' '}
+            <div className="tracer-date-grid">
+                <label className="inv-field">
+                    <span>From date</span>
                     <input
                         type="text"
+                        inputMode="numeric"
                         placeholder="DD/MM/YYYY"
                         value={fromDate}
                         onChange={(e) => setFromDate(e.target.value)}
                     />
                 </label>
-                <label>
-                    To date{' '}
+                <label className="inv-field">
+                    <span>To date</span>
                     <input
                         type="text"
+                        inputMode="numeric"
                         placeholder="DD/MM/YYYY"
                         value={toDate}
                         onChange={(e) => setToDate(e.target.value)}
                     />
                 </label>
-                <label>
-                    From hour{' '}
+                <label className="inv-field">
+                    <span>From hour</span>
                     <input
                         type="number"
                         min="0"
                         max="23"
+                        placeholder="00"
                         value={fromHour}
                         onChange={(e) => setFromHour(e.target.value)}
                     />
                 </label>
-                <label>
-                    To hour{' '}
+                <label className="inv-field">
+                    <span>To hour</span>
                     <input
                         type="number"
                         min="0"
                         max="23"
+                        placeholder="24"
                         value={toHour}
                         onChange={(e) => setToHour(e.target.value)}
                     />
@@ -180,20 +184,26 @@ export function TracerForm({
                 <button type="submit" className="btn-primary" disabled={!canRun || busy}>
                     {busy ? 'Running…' : 'Run tracer'}
                 </button>
-                <button
-                    type="button"
-                    className={`btn-secondary tracer-collate-toggle${collate ? ' is-on' : ''}`}
-                    aria-pressed={collate}
-                    onClick={() => setCollate((v) => !v)}
-                    disabled={busy}
+                <label
+                    className="inv-toggle"
                     title={
                         collate
-                            ? 'Collate ON — all selected BUs and sales scopes merge into one SID-deduped tile-row.'
-                            : 'Collate OFF — each BU and each salesperson gets its own tile-row.'
+                            ? 'Collate on — all selected BUs and sales scopes merge into one SID-deduped block.'
+                            : 'Collate off — each BU and each salesperson gets its own block.'
                     }
                 >
-                    {collate ? 'Collate: On' : 'Collate: Off'}
-                </button>
+                    <input
+                        type="checkbox"
+                        className="inv-toggle-input"
+                        checked={collate}
+                        disabled={busy}
+                        onChange={(e) => setCollate(e.target.checked)}
+                    />
+                    <span className="inv-toggle-track" aria-hidden="true">
+                        <span className="inv-toggle-thumb" />
+                    </span>
+                    <span className="inv-toggle-label">Collate into one block</span>
+                </label>
                 {viewerDisabled && <p className="muted small">Viewer role cannot start runs.</p>}
             </div>
         </form>

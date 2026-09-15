@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch } from '../apiClient.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { useSalesMarketingUsers } from '../hooks/useSalesMarketingUsers.js';
+import { fmtDateRange } from '../lib/format.js';
 import {
     mapCollatedTileToBanner,
     mapRegionTilesToBanners,
@@ -290,8 +291,13 @@ export function TracerPage({
     ).length;
     const printSummaryParts = [];
     if (collatedBannerRow) printSummaryParts.push('collated');
-    if (buCount) printSummaryParts.push(`${buCount} BU${buCount === 1 ? '' : 's'}`);
+    if (buCount) printSummaryParts.push(`${buCount} business unit${buCount === 1 ? '' : 's'}`);
     if (regCount) printSummaryParts.push(`${regCount} sales scope${regCount === 1 ? '' : 's'}`);
+    const firstRow = collatedBannerRow || bannerRows[0] || regionBannerRows[0] || null;
+    const windowLabel = firstRow ? fmtDateRange(firstRow.fromDate, firstRow.toDate) : '';
+    if (windowLabel) printSummaryParts.push(windowLabel);
+    const hasResults = Boolean(collatedBannerRow) || buCount > 0 || regCount > 0;
+    const resultsCaption = printSummaryParts.join(' · ');
 
     return (
         <div className={`tracer-page${printFocusKey ? ' tracer-print-single' : ''}`}>
@@ -301,6 +307,15 @@ export function TracerPage({
                     {printSummaryParts.length > 0 ? (
                         <p className="tracer-print-sub muted small">{printSummaryParts.join(' · ')}</p>
                     ) : null}
+                </div>
+
+                <div className="inv-sechead tracer-page-head tracer-hide-print">
+                    <div className="inv-sechead-text">
+                        <h2 className="inv-sechead-title">Tracer</h2>
+                        <p className="inv-sechead-cap">
+                            Material counts per business unit or sales scope for a date window, straight from Listec.
+                        </p>
+                    </div>
                 </div>
 
                 <div className="tracer-hide-print">
@@ -345,6 +360,20 @@ export function TracerPage({
                             `Tile load: ${errors.map((e) => `${e.file}: ${e.error}`).join(' \u00b7 ')}`}
                     </div>
                 )}
+
+                {hasResults ? (
+                    <div className="inv-sechead tracer-results-head tracer-hide-print">
+                        <div className="inv-sechead-text">
+                            <h2 className="inv-sechead-title">Results</h2>
+                            <p className="inv-sechead-cap">{resultsCaption}</p>
+                        </div>
+                        <div className="inv-sechead-tools">
+                            <button type="button" className="chip chip-tool" onClick={() => window.print()}>
+                                Print all
+                            </button>
+                        </div>
+                    </div>
+                ) : null}
 
                 {collatedBannerRow ? (
                     <>
@@ -469,12 +498,16 @@ export function TracerPage({
                     ))}
                 </div>
 
-                <div className="tracer-pdf-row tracer-hide-print">
-                    <button type="button" className="btn-secondary" onClick={() => window.print()}>
-                        Print all
-                    </button>
-                    <span className="muted small">Opens the browser print dialog (Save as PDF).</span>
-                </div>
+                {hasResults ? (
+                    <div className="tracer-pdf-row tracer-hide-print">
+                        <button type="button" className="btn-secondary" onClick={() => window.print()}>
+                            Print all
+                        </button>
+                        <span className="muted small">
+                            Each business unit prints as one block — a block that does not fit moves to the next page.
+                        </span>
+                    </div>
+                ) : null}
             </div>
 
             {openTile && (

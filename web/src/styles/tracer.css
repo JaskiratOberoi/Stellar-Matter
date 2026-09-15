@@ -197,22 +197,99 @@
     border-top: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
 }
 
+/* Lab Bench: page head and results head reuse the inventory section-head
+   vocabulary so the two tools read as one product. */
+.tracer-page-head {
+    margin-bottom: var(--sp-5);
+}
+
+.tracer-results-head {
+    margin-top: var(--sp-8);
+}
+
+.tracer-date-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: var(--sp-4) var(--sp-5);
+    margin: 0 0 var(--sp-5);
+}
+
+@media (max-width: 720px) {
+    .tracer-date-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+.tracer-form-actions .inv-toggle {
+    margin-left: var(--sp-2);
+}
+
 /* Screen: hide print-only masthead */
 .tracer-print-header {
     display: none;
 }
 
+/* ---------------------------------------------------------------------------
+   Print / Save as PDF.
+
+   The unit of pagination is a business unit's whole block. Chromium
+   fragments CSS grid containers unpredictably at page boundaries and often
+   ignores break-inside on grid items, which is how stat cards ended up cut
+   in half at the bottom of a page. So the banner itself is unbreakable: if
+   it does not fit in what is left of the page it moves to the next one
+   intact, and what happens inside the grid no longer matters.
+
+   Paper gets paper colours. The screen theme is near-black with light ink;
+   printed with backgrounds off that becomes pale-grey text on white.
+   --------------------------------------------------------------------------- */
 @media print {
     @page {
-        margin: 12mm;
+        size: A4;
+        margin: 12mm 12mm 14mm;
     }
 
-    header.topbar {
+    html,
+    body,
+    .tracer-page,
+    .tracer-print-root,
+    .tracer-main.main-pane {
+        background: #fff !important;
+        color: #111 !important;
+        color-scheme: light;
+    }
+
+    header.topbar,
+    .tracer-hide-print,
+    .inv-flash {
         display: none !important;
     }
 
-    .tracer-hide-print {
-        display: none !important;
+    .tracer-main.main-pane {
+        max-width: none;
+        padding: 0;
+    }
+
+    .tracer-print-header {
+        display: block !important;
+        margin: 0 0 6mm;
+        padding-bottom: 3mm;
+        border-bottom: 1px solid #111;
+        break-after: avoid;
+        page-break-after: avoid;
+    }
+
+    .tracer-print-title {
+        margin: 0;
+        font-size: 14pt;
+        font-weight: 700;
+        letter-spacing: -0.01em;
+        color: #111 !important;
+    }
+
+    .tracer-print-sub {
+        margin: 1mm 0 0;
+        font-size: 9pt;
+        color: #555 !important;
     }
 
     .tracer-print-single .tracer-print-header {
@@ -223,59 +300,66 @@
         display: none !important;
     }
 
-    .tracer-print-header {
-        display: block !important;
-        margin-bottom: 0.75rem;
-        padding-bottom: 0.5rem;
-        border-bottom: 1px solid #ccc;
-    }
-
-    .tracer-print-title {
-        margin: 0;
-        font-size: 14pt;
-    }
-
-    .tracer-print-sub {
-        margin: 0.2rem 0 0;
-    }
-
-    .tracer-main.main-pane {
-        max-width: none;
-        padding: 0;
-    }
-
-    .tracer-stat-row {
-        grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
-        gap: 6mm !important;
+    .tracer-banner-stack {
+        display: block;
     }
 
     .tracer-banner {
-        break-inside: auto;
-        page-break-inside: auto;
-        border: 1px solid #ddd;
-        margin-bottom: 0.75rem;
+        break-inside: avoid;
+        page-break-inside: avoid;
+        display: block;
+        margin: 0 0 6mm;
+        padding: 4mm 5mm;
+        border: 1px solid #bbb;
+        border-radius: 0;
+        background: #fff !important;
+        box-shadow: none;
+    }
+
+    .tracer-banner-head {
+        margin-bottom: 3mm;
+    }
+
+    .tracer-banner-bu {
+        font-size: 12pt;
+        color: #111 !important;
+    }
+
+    .tracer-banner-range,
+    .tracer-stat-title,
+    .tracer-stat-sub,
+    .tracer-stat-est,
+    .muted {
+        color: #555 !important;
+    }
+
+    .tracer-stat-row {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+        gap: 3mm !important;
     }
 
     .tracer-stat-card {
         break-inside: avoid;
         page-break-inside: avoid;
-        border: 1px solid #ddd;
+        padding: 2.5mm 3mm;
+        border: 1px solid #ccc;
+        border-radius: 0;
+        background: #fff !important;
+        box-shadow: none;
     }
 
-    .tracer-banner-head {
-        break-inside: avoid;
-        break-after: avoid;
-        page-break-after: avoid;
-    }
-
-    .tracer-stat-card,
-    .tracer-stat-sub,
     .tracer-stat-headline {
-        orphans: 3;
-        widows: 3;
+        font-size: 12pt;
+        color: #111 !important;
     }
 
     .tracer-stat-link {
-        display: none;
+        display: none !important;
+    }
+
+    a {
+        color: inherit;
+        text-decoration: none;
     }
 }
