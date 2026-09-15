@@ -4075,6 +4075,133 @@ td.inv-low {
     width: 100%;
 }
 
+/* Docket: the number stays quiet until there is something to record —
+   a lime "+0" is an alarm about nothing. */
+.inv-docket-big.is-empty {
+    color: rgb(var(--nx-ink-3));
+}
+
+.inv-docket-empty {
+    margin: var(--sp-3) 0 0;
+    font-size: var(--fs-xs);
+    line-height: 1.5;
+    color: rgb(var(--nx-ink-3));
+}
+
+/* The lines about to be written, so the operator confirms materials and
+   quantities, not just a count of them. */
+.inv-docket-lines {
+    list-style: none;
+    margin: var(--sp-3) 0 0;
+    padding: var(--sp-3) 0 0;
+    border-top: 1px solid rgb(var(--nx-rule-strong));
+}
+
+.inv-docket-lines li {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--sp-3);
+    padding: var(--sp-2) 0;
+    font-size: var(--fs-sm);
+    color: rgb(var(--nx-ink));
+    border-bottom: 1px solid rgb(var(--nx-rule-soft));
+}
+
+.inv-docket-lines li:last-child {
+    border-bottom: 0;
+}
+
+.inv-docket-line-name {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.inv-docket-line-qty {
+    flex: none;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+
+.inv-docket-line-qty .inv-unit {
+    display: inline;
+    margin-left: var(--sp-2);
+}
+
+.inv-docket-lines li.is-warn .inv-docket-line-qty {
+    color: rgb(var(--nx-signal-warning));
+}
+
+.inv-docket-more {
+    justify-content: flex-start;
+    font-size: var(--fs-xs);
+    color: rgb(var(--nx-ink-3));
+}
+
+/* Phone action bar — the docket sits under the form on narrow screens, so
+   the submit would otherwise be a long scroll away from the last line. */
+.inv-docket-bar {
+    display: none;
+}
+
+/* Working views drop the standfirst and shrink the title: the masthead is
+   orientation, not the task. */
+.inv-masthead--compact {
+    grid-template-columns: 1fr;
+    padding-bottom: var(--sp-4);
+    margin-bottom: var(--sp-5);
+}
+
+.inv-masthead--compact .inv-title {
+    font-size: var(--fs-2xl);
+    line-height: 1.05;
+}
+
+.inv-masthead--compact .inv-masthead-deck {
+    display: none;
+}
+
+@media (max-width: 640px) {
+    .inv-docket-actions {
+        display: none;
+    }
+
+    .inv-docket-bar {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 50;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--sp-3);
+        padding: var(--sp-3) var(--sp-4) calc(var(--sp-3) + env(safe-area-inset-bottom, 0px));
+        background: color-mix(in srgb, rgb(var(--nx-surface)) 92%, transparent);
+        backdrop-filter: blur(14px) saturate(140%);
+        -webkit-backdrop-filter: blur(14px) saturate(140%);
+        border-top: 1px solid rgb(var(--nx-rule-soft));
+    }
+
+    .inv-docket-bar-total {
+        font-size: var(--fs-lg);
+        font-weight: 700;
+        letter-spacing: -0.02em;
+        font-variant-numeric: tabular-nums;
+        color: rgb(var(--nx-ink));
+    }
+
+    .inv-docket-bar .btn-primary {
+        min-height: 44px;
+        flex: 0 0 auto;
+    }
+
+    /* Leave room under the form so the bar never covers the last line. */
+    .inv-form-layout {
+        padding-bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+    }
+}
+
 /* Catalog */
 .inv-catalog {
     display: grid;

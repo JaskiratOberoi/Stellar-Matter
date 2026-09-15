@@ -387,7 +387,7 @@ export function InventoryPage() {
 
     return (
         <main className="inv-shell">
-            <header className="inv-masthead">
+            <header className={`inv-masthead${view === 'stock' ? '' : ' inv-masthead--compact'}`}>
                 <div className="inv-masthead-lede">
                     <p className="inv-kicker">Materials · Stellar Matter</p>
                     <h1 className="inv-title">Inventory Tracker</h1>
@@ -417,11 +417,16 @@ export function InventoryPage() {
                 />
             ) : (
                 <>
-                    <FiguresStrip
-                        summary={inventory.summary}
-                        locations={inventory.locations}
-                        onLowStock={() => goto('stock')}
-                    />
+                    {/* The glance strip belongs to the overview. On a working
+                        view (receive, dispatch, ledger…) it only pushes the
+                        first field below the fold — a whole screen on a phone. */}
+                    {view === 'stock' && (
+                        <FiguresStrip
+                            summary={inventory.summary}
+                            locations={inventory.locations}
+                            onLowStock={() => goto('stock')}
+                        />
+                    )}
 
                     <nav className="inv-index" role="tablist" aria-label="Inventory views">
                         {visibleViews.map((v, i) => (
@@ -919,13 +924,136 @@ function StepInput({ value, onChange, min = 1, ariaLabel }) {
 
 // -- Receive ---------------------------------------------------------------
 
+// -- Docket + location defaults (shared by Receive and Dispatch) --------------
+
+const LS_RECEIVE_DEST = 'inv.receive.destination';
+const LS_DISPATCH_FROM = 'inv.dispatch.source';
+
+function recallLocation(key) {
+    try {
+        return localStorage.getItem(key) || '';
+    } catch {
+        return '';
+    }
+}
+
+function rememberLocation(key, id) {
+    try {
+        if (id) localStorage.setItem(key, id);
+    } catch {
+        /* storage unavailable — nothing to remember */
+    }
+}
+
+/**
+ * The store to pre-select: the one used last time, else the one holding the
+ * most stock. Alphabetical-first put a satellite office ahead of the central
+ * warehouse on every form.
+ */
+function pickDefaultStore(stores, balMap, materials, key) {
+    if (!stores.length) return '';
+    const remembered = recallLocation(key);
+    if (remembered && stores.some((s) => s.id === remembered)) return remembered;
+    let best = stores[0];
+    let bestTotal = -Infinity;
+    for (const s of stores) {
+        // Positive on-hand only: a store that has been overdrawn into large
+        // negatives is not "holding the most stock", whatever its magnitude.
+        const total = materials.reduce((sum, m) => sum + Math.max(0, balMap.get(balanceKey(m.id, s.id)) || 0), 0);
+        if (total > bestTotal) {
+            bestTotal = total;
+            best = s;
+        }
+    }
+    return best.id;
+}
+
+/** `YYYY-MM-DD` from a date input → the viewer's own date format. */
+function fmtDateInput(dateStr) {
+    if (!dateStr) return '—';
+    const d = new Date(`${dateStr}T12:00:00`);
+    if (Number.isNaN(d.getTime())) return dateStr;
+    return d.toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
+const DOCKET_LINE_CAP = 8;
+
+/**
+ * The receipt / dispatch docket: what is about to be written to the ledger.
+ * Lists the actual lines rather than just counting them, keeps the big
+ * number quiet until there is something to record, and on phones repeats
+ * the action in a bar that stays reachable while the form scrolls.
+ */
+function MovementDocket({ formId, heading, sign, total, ready, facts, lines, warn, note, err, disabled, label }) {
+    const ref = useRef(null);
+    useEffect(() => {
+        if (err && ref.current) ref.current.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }, [err]);
+
+    const shown = lines.slice(0, DOCKET_LINE_CAP);
+    const hidden = lines.length - shown.length;
+    const bigClass = `inv-docket-big${ready ? '' : ' is-empty'}`;
+
+    return (
+        <aside className={`inv-docket${warn ? ' is-warn' : ''}`} ref={ref}>
+            <p className="inv-docket-head">{heading}</p>
+            <div className={bigClass}>
+                {sign}
+                {fmt(total)}
+                <span className="inv-docket-unit">units</span>
+            </div>
+            <dl className="inv-docket-dl">
+                {facts.map(([dt, dd, cls]) => (
+                    <div key={dt}>
+                        <dt>{dt}</dt>
+                        <dd className={cls || undefined}>{dd}</dd>
+                    </div>
+                ))}
+            </dl>
+            {lines.length > 0 ? (
+                <ul className="inv-docket-lines">
+                    {shown.map((l) => (
+                        <li key={l.key} className={l.warn ? 'is-warn' : ''}>
+                            <span className="inv-docket-line-name">{l.name}</span>
+                            <span className="inv-docket-line-qty">
+                                {fmt(l.qty)}
+                                {l.unit && <span className="inv-unit">{l.unit}</span>}
+                            </span>
+                        </li>
+                    ))}
+                    {hidden > 0 && <li className="inv-docket-more">+ {fmt(hidden)} more</li>}
+                </ul>
+            ) : (
+                <p className="inv-docket-empty">Nothing added yet — pick a material and a pack count below.</p>
+            )}
+            {note && <p className="inv-docket-note">{note}</p>}
+            {err && <p className="login-err inv-docket-err">{err}</p>}
+            <div className="inv-docket-actions">
+                <button type="submit" form={formId} className="btn-primary" disabled={disabled}>
+                    {label}
+                </button>
+            </div>
+            <div className="inv-docket-bar" aria-hidden={ready ? undefined : 'true'}>
+                <span className="inv-docket-bar-total">
+                    {sign}
+                    {fmt(total)} <span className="inv-unit">units</span>
+                </span>
+                <button type="submit" form={formId} className="btn-primary" disabled={disabled}>
+                    {label}
+                </button>
+            </div>
+        </aside>
+    );
+}
+
 function ReceiveView({ inventory, canMove, onDone, onGoto }) {
-    const { materials, vendors, locations, createMovementsBatch, createLocation, uploadPhoto, reload } = inventory;
+    const { materials, vendors, locations, balances, createMovementsBatch, createLocation, uploadPhoto, reload } = inventory;
     const activeMaterials = materials.filter((m) => m.active);
     const activeVendors = (vendors || []).filter((v) => v.active);
     const activeLocations = locations.filter((l) => l.active);
     const stores = activeLocations.filter((l) => l.kind === 'store');
     const matById = useMemo(() => new Map(activeMaterials.map((m) => [m.id, m])), [activeMaterials]);
+    const balMap = useBalanceMap(balances);
 
     const [vendorId, setVendorId] = useState('');
     const [toLocationId, setToLocationId] = useState('');
@@ -939,8 +1067,10 @@ function ReceiveView({ inventory, canMove, onDone, onGoto }) {
     const vendor = activeVendors.find((v) => v.id === vendorId) || null;
 
     useEffect(() => {
-        if (!toLocationId && stores.length) setToLocationId(stores[0].id);
-    }, [stores, toLocationId]);
+        if (!toLocationId && stores.length) {
+            setToLocationId(pickDefaultStore(stores, balMap, activeMaterials, LS_RECEIVE_DEST));
+        }
+    }, [stores, toLocationId, balMap, activeMaterials]);
 
     // Default a line's pack size from its material the moment one is chosen.
     function onPickMaterial(key, materialId) {
@@ -989,6 +1119,7 @@ function ReceiveView({ inventory, canMove, onDone, onGoto }) {
             });
             await reload();
             const n = (result.movements && result.movements.length) || validLines.length;
+            rememberLocation(LS_RECEIVE_DEST, toLocationId);
             onDone(`Received ${fmt(totalUnits)} units across ${fmt(n)} material${n === 1 ? '' : 's'}.`);
             resetLines();
             setReference('');
@@ -1150,31 +1281,31 @@ function ReceiveView({ inventory, canMove, onDone, onGoto }) {
                 </form>
             </section>
 
-            <aside className="inv-docket">
-                <p className="inv-docket-head">Receipt preview</p>
-                <div className="inv-docket-big">
-                    +{fmt(totalUnits)}
-                    <span className="inv-docket-unit">units</span>
-                </div>
-                <dl className="inv-docket-dl">
-                    <div><dt>Vendor</dt><dd>{vendor ? vendor.name : '—'}</dd></div>
-                    <div><dt>Destination</dt><dd>{destination ? destination.name : '—'}</dd></div>
-                    <div><dt>Date</dt><dd>{occurredOn || '—'}</dd></div>
-                    <div><dt>Materials</dt><dd>{fmt(validLines.length)}</dd></div>
-                    <div><dt>With photo</dt><dd>{fmt(validLines.filter((l) => l.photoUrl).length)}</dd></div>
-                </dl>
-                {err && <p className="login-err inv-docket-err">{err}</p>}
-                <div className="inv-docket-actions">
-                    <button
-                        type="submit"
-                        form="inv-receive-form"
-                        className="btn-primary"
-                        disabled={busy || anyUploading || !validLines.length}
-                    >
-                        {busy ? 'Recording…' : anyUploading ? 'Uploading photo…' : 'Record receipt'}
-                    </button>
-                </div>
-            </aside>
+            <MovementDocket
+                formId="inv-receive-form"
+                heading="Receipt docket"
+                sign="+"
+                total={totalUnits}
+                ready={validLines.length > 0}
+                facts={[
+                    ['Vendor', vendor ? vendor.name : '—'],
+                    ['Into', destination ? destination.name : '—', 'inv-docket-strong'],
+                    ['Date', fmtDateInput(occurredOn)],
+                    ['With photo', `${fmt(validLines.filter((l) => l.photoUrl).length)} of ${fmt(validLines.length)}`]
+                ]}
+                lines={validLines.map((l) => {
+                    const m = matById.get(l.materialId);
+                    return {
+                        key: l.key,
+                        name: m ? m.name : '—',
+                        qty: (Number(l.packSize) || 0) * (Number(l.packQty) || 0),
+                        unit: m ? m.base_unit : ''
+                    };
+                })}
+                err={err}
+                disabled={busy || anyUploading || !validLines.length}
+                label={busy ? 'Recording…' : anyUploading ? 'Uploading photo…' : 'Record receipt'}
+            />
         </div>
     );
 }
@@ -1210,10 +1341,10 @@ function DispatchView({ inventory, canMove, onDone, onGoto }) {
 
     useEffect(() => {
         if (fromLocationId) return;
-        if (stores.length) setFromLocationId(stores[0].id);
+        if (stores.length) setFromLocationId(pickDefaultStore(stores, balMap, activeMaterials, LS_DISPATCH_FROM));
         else if (buLabLocations.length) setFromLocationId(buLabLocations[0].id);
         else if (activeLocations.length) setFromLocationId(activeLocations[0].id);
-    }, [stores, buLabLocations, activeLocations, fromLocationId]);
+    }, [stores, buLabLocations, activeLocations, fromLocationId, balMap, activeMaterials]);
 
     useEffect(() => {
         if (toLocationId && toLocationId !== ALL_BUS_DEST && toLocationId === fromLocationId) {
@@ -1320,6 +1451,7 @@ function DispatchView({ inventory, canMove, onDone, onGoto }) {
             });
             await reload();
             const moved = (result.movements && result.movements.length) || validLines.length;
+            rememberLocation(LS_DISPATCH_FROM, fromLocationId);
             if (isAllBus) {
                 const nDest = (result.destination_names && result.destination_names.length) || destCount;
                 onDone(`Dispatched ${fmt(validLines.length)} material${validLines.length === 1 ? '' : 's'} to ${fmt(nDest)} BUs/labs (${fmt(moved)} movements).`);
@@ -1518,45 +1650,43 @@ function DispatchView({ inventory, canMove, onDone, onGoto }) {
                 </form>
             </section>
 
-            <aside className={`inv-docket${anyOverdraw ? ' is-warn' : ''}`}>
-                <p className="inv-docket-head">Dispatch preview</p>
-                <div className="inv-docket-big">
-                    −{fmt(totalOut)}
-                    <span className="inv-docket-unit">units</span>
-                </div>
-                <dl className="inv-docket-dl">
-                    <div><dt>From</dt><dd>{source ? source.name : '—'}</dd></div>
-                    <div>
-                        <dt>To</dt>
-                        <dd>{isAllBus ? `All BUs & labs (${fmt(destCount)})` : dest ? dest.name : '—'}</dd>
-                    </div>
-                    <div><dt>Date</dt><dd>{occurredOn || '—'}</dd></div>
-                    <div><dt>Materials</dt><dd>{fmt(validLines.length)}</dd></div>
-                    {isAllBus && destCount > 1 && (
-                        <div><dt>Per destination</dt><dd>{fmt(validLines.reduce((s, l) => s + l.qty, 0))} units</dd></div>
-                    )}
-                    <div><dt>With photo</dt><dd>{fmt(validLines.filter((l) => l.photoUrl).length)}</dd></div>
-                </dl>
-                {anyOverdraw && (
-                    <p className="inv-docket-note">
-                        One or more lines exceed recorded stock at the source
-                        {isAllBus && destCount > 1 ? ` across ${fmt(destCount)} destinations` : ''}.
-                        Dispatching will take the source negative — fine for stock that was never
-                        recorded on receipt.
-                    </p>
-                )}
-                {err && <p className="login-err inv-docket-err">{err}</p>}
-                <div className="inv-docket-actions">
-                    <button
-                        type="submit"
-                        form="inv-dispatch-form"
-                        className="btn-primary"
-                        disabled={busy || anyUploading || !validLines.length || (isAllBus && allBuEstimate === 0)}
-                    >
-                        {busy ? 'Dispatching…' : anyUploading ? 'Uploading photo…' : isAllBus ? 'Dispatch to all BUs/labs' : 'Record dispatch'}
-                    </button>
-                </div>
-            </aside>
+            <MovementDocket
+                formId="inv-dispatch-form"
+                heading="Dispatch docket"
+                sign="−"
+                total={totalOut}
+                ready={validLines.length > 0}
+                warn={anyOverdraw}
+                facts={[
+                    ['From', source ? source.name : '—'],
+                    ['To', isAllBus ? `All BUs & labs (${fmt(destCount)})` : dest ? dest.name : '—', 'inv-docket-strong'],
+                    ['Date', fmtDateInput(occurredOn)],
+                    ...(isAllBus && destCount > 1
+                        ? [['Per destination', `${fmt(validLines.reduce((s, l) => s + l.qty, 0))} units`]]
+                        : []),
+                    ['With photo', `${fmt(validLines.filter((l) => l.photoUrl).length)} of ${fmt(validLines.length)}`]
+                ]}
+                lines={validLines.map((l) => {
+                    const m = matById.get(l.materialId);
+                    return {
+                        key: l.key,
+                        name: m ? m.name : '—',
+                        qty: l.required,
+                        unit: m ? m.base_unit : '',
+                        warn: l.overdraw
+                    };
+                })}
+                note={
+                    anyOverdraw
+                        ? `Lines marked in amber exceed recorded stock at ${source ? source.name : 'the source'}${
+                              isAllBus && destCount > 1 ? ` across ${fmt(destCount)} destinations` : ''
+                          }. Dispatching takes it negative — right for stock that was never recorded on receipt.`
+                        : null
+                }
+                err={err}
+                disabled={busy || anyUploading || !validLines.length || (isAllBus && allBuEstimate === 0)}
+                label={busy ? 'Dispatching…' : anyUploading ? 'Uploading photo…' : isAllBus ? 'Dispatch to all BUs/labs' : 'Record dispatch'}
+            />
         </div>
     );
 }
