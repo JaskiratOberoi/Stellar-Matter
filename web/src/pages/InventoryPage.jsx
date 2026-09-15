@@ -1693,6 +1693,17 @@ function DispatchView({ inventory, canMove, onDone, onGoto }) {
 
 // -- Ledger ----------------------------------------------------------------
 
+/**
+ * Time of day for a ledger row. Movements entered through the forms carry a
+ * calendar date only — the client stamps them at local noon so the day never
+ * shifts across timezones — and printing "12:00" on every one of those rows
+ * was noise dressed as data. Only a real clock time is shown.
+ */
+function fmtWhenTime(d) {
+    if (d.getHours() === 12 && d.getMinutes() === 0 && d.getSeconds() === 0) return '';
+    return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+}
+
 function shiftDateInput(days) {
     const d = new Date();
     d.setDate(d.getDate() + days);
@@ -1968,7 +1979,7 @@ function LedgerView({ inventory, canMove, onDone }) {
             {err && <div className="results-error nexus-card">{err}</div>}
 
             <div className="inv-table-wrap">
-                <table className="inv-table">
+                <table className="inv-table inv-ledger-table">
                     <thead>
                         <tr>
                             <th>When</th>
@@ -1987,9 +1998,7 @@ function LedgerView({ inventory, canMove, onDone }) {
                                 <tr key={r.id} className={r.voided_at ? 'inv-voided' : ''}>
                                     <td className="inv-when">
                                         <span className="inv-when-date">{when.toLocaleDateString()}</span>
-                                        <span className="inv-when-time">
-                                            {when.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
-                                        </span>
+                                        {fmtWhenTime(when) && <span className="inv-when-time">{fmtWhenTime(when)}</span>}
                                     </td>
                                     <td><span className={`inv-kbadge inv-k-${r.kind}`}>{r.kind}</span></td>
                                     <td className="inv-mat-cell">{r.material_name}</td>
@@ -2268,7 +2277,6 @@ function VendorsView({ inventory, canManageCatalog, onDone }) {
                             <tr>
                                 <th>Vendor</th>
                                 <th>Contact</th>
-                                <th>Phone</th>
                                 <th>GST</th>
                                 <th>Supplies</th>
                                 {canManageCatalog && <th />}
@@ -2312,7 +2320,10 @@ function VendorsView({ inventory, canManageCatalog, onDone }) {
 function VendorRow({ vendor, materials, materialName, canManageCatalog, isEditing, onEdit, onCancel, onToggle, onSubmit, busy, err }) {
     const v = vendor;
     const supplies = (v.material_ids || []).map((id) => materialName.get(id)).filter(Boolean);
-    const colSpan = canManageCatalog ? 6 : 5;
+    const colSpan = canManageCatalog ? 5 : 4;
+    const SUPPLY_PREVIEW = 3;
+    const supplyPreview = supplies.slice(0, SUPPLY_PREVIEW).join(', ');
+    const supplyMore = supplies.length - SUPPLY_PREVIEW;
 
     if (isEditing) {
         return (
@@ -2332,21 +2343,32 @@ function VendorRow({ vendor, materials, materialName, canManageCatalog, isEditin
     }
 
     return (
-        <tr className={v.active ? '' : 'inv-voided'}>
-            <td className="inv-mat-cell">
+        <tr className={v.active ? '' : 'inv-inactive'}>
+            <td className="inv-mat-cell inv-vendor-name">
                 {v.name}
+                {!v.active && <span className="inv-inactive-tag">inactive</span>}
                 {v.address && <span className="inv-vendor-addr">{v.address}</span>}
             </td>
-            <td className="muted small">{v.contact_person || '·'}</td>
-            <td className="muted small nowrap">{v.phone || '·'}</td>
-            <td className="muted small nowrap">{v.gst_number || '·'}</td>
-            <td className="muted small inv-vendor-supplies">
-                {supplies.length ? (
-                    <span title={supplies.join(', ')}>
-                        {supplies.length} material{supplies.length === 1 ? '' : 's'}
-                    </span>
+            <td className="inv-vendor-contact">
+                {v.contact_person || v.phone || v.email ? (
+                    <>
+                        {v.contact_person && <span>{v.contact_person}</span>}
+                        {v.phone && <span className="inv-vendor-contact-line">{v.phone}</span>}
+                        {v.email && <span className="inv-vendor-contact-line">{v.email}</span>}
+                    </>
                 ) : (
-                    '·'
+                    <span className="inv-dash">·</span>
+                )}
+            </td>
+            <td className="inv-vendor-gst">{v.gst_number || <span className="inv-dash">·</span>}</td>
+            <td className="inv-vendor-supplies" title={supplies.length ? supplies.join(', ') : undefined}>
+                {supplies.length ? (
+                    <>
+                        {supplyPreview}
+                        {supplyMore > 0 && <span className="inv-vendor-supplies-more"> +{supplyMore}</span>}
+                    </>
+                ) : (
+                    <span className="inv-dash">·</span>
                 )}
             </td>
             {canManageCatalog && (
@@ -2396,6 +2418,13 @@ function MaterialsPanel({ inventory, onDone }) {
     const [reorder, setReorder] = useState('0');
     const [busy, setBusy] = useState(false);
     const [err, setErr] = useState(null);
+    const [query, setQuery] = useState('');
+    const [editingReorder, setEditingReorder] = useState(null); // material id being edited inline
+
+    const shown = useMemo(() => {
+        const q = query.trim().toLowerCase();
+        return q ? materials.filter((m) => m.name.toLowerCase().includes(q)) : materials;
+    }, [materials, query]);
 
     async function onSubmit(e) {
         e.preventDefault();
@@ -2432,23 +2461,42 @@ function MaterialsPanel({ inventory, onDone }) {
         }
     }
 
-    async function editReorder(m) {
-        const next = window.prompt(`Reorder level for ${m.name} (warn when store stock drops below this):`, String(m.reorder_level));
-        if (next == null) return;
-        const val = Number(next);
-        if (!Number.isFinite(val) || val < 0) return window.alert('Enter a number ≥ 0.');
+    // Reorder level edits inline in the row — a browser prompt interrupts a
+    // task that needs neither a dialog nor protected focus.
+    async function saveReorder(m, raw) {
+        const val = Number(raw);
+        if (!Number.isFinite(val) || val < 0) return 'Enter a number of 0 or more.';
+        if (val === Number(m.reorder_level)) {
+            setEditingReorder(null);
+            return null;
+        }
         try {
             await updateMaterial(m.id, { reorder_level: val });
             await reload();
-            onDone(`Updated reorder level for ${m.name}.`);
+            onDone(`Reorder level for ${m.name} set to ${fmt(val)}.`);
+            setEditingReorder(null);
+            return null;
         } catch (e) {
-            window.alert(String(e.message || e));
+            return String(e.message || e);
         }
     }
 
+    const caption =
+        query.trim() && shown.length !== materials.length
+            ? `${fmt(shown.length)} of ${fmt(materials.length)} materials match`
+            : `${fmt(materials.length)} in catalog · ${fmt(materials.filter((m) => !m.active).length)} inactive`;
+
     return (
         <section className="inv-panel">
-            <SectionHead title="Materials" caption={`${fmt(materials.length)} in catalog`}>
+            <SectionHead title="Materials" caption={caption}>
+                <input
+                    className="inv-search"
+                    type="search"
+                    placeholder="Filter materials…"
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    aria-label="Filter materials"
+                />
                 <button type="button" className="btn-primary btn-sm" onClick={() => setOpen((v) => !v)}>
                     {open ? 'Cancel' : '+ New material'}
                 </button>
@@ -2471,22 +2519,48 @@ function MaterialsPanel({ inventory, onDone }) {
                 <div className="inv-table-wrap">
                     <table className="inv-table">
                         <thead>
-                            <tr><th>Name</th><th>Unit</th><th className="num">Reorder</th><th /></tr>
+                            <tr><th>Material</th><th className="num">Reorder</th><th /></tr>
                         </thead>
                         <tbody>
-                            {materials.map((m) => (
-                                <tr key={m.id} className={m.active ? '' : 'inv-voided'}>
-                                    <td className="inv-mat-cell">{m.name}</td>
-                                    <td className="muted small">{m.base_unit}</td>
-                                    <td className="num">{m.reorder_level ? fmt(m.reorder_level) : '·'}</td>
+                            {shown.map((m) => (
+                                <tr key={m.id} className={m.active ? '' : 'inv-inactive'}>
+                                    <td>
+                                        <span className="inv-mat-name">
+                                            {m.name}
+                                            {!m.active && <span className="inv-inactive-tag">inactive</span>}
+                                        </span>
+                                        <span className="inv-unit">{m.base_unit}</span>
+                                    </td>
+                                    <td className="num inv-reorder-cell">
+                                        {editingReorder === m.id ? (
+                                            <ReorderEditor
+                                                initial={m.reorder_level}
+                                                onSave={(raw) => saveReorder(m, raw)}
+                                                onCancel={() => setEditingReorder(null)}
+                                            />
+                                        ) : m.reorder_level ? (
+                                            fmt(m.reorder_level)
+                                        ) : (
+                                            <span className="inv-dash">·</span>
+                                        )}
+                                    </td>
                                     <td className="inv-row-actions">
-                                        <button type="button" className="chip chip-tool" onClick={() => editReorder(m)}>Reorder</button>
+                                        {editingReorder !== m.id && (
+                                            <button type="button" className="chip chip-tool" onClick={() => setEditingReorder(m.id)}>
+                                                Set reorder
+                                            </button>
+                                        )}
                                         <button type="button" className="chip chip-tool" onClick={() => toggleActive(m)}>
                                             {m.active ? 'Disable' : 'Enable'}
                                         </button>
                                     </td>
                                 </tr>
                             ))}
+                            {!shown.length && (
+                                <tr>
+                                    <td colSpan={3} className="muted inv-nomatch">No materials match “{query}”.</td>
+                                </tr>
+                            )}
                         </tbody>
                     </table>
                 </div>
@@ -2494,6 +2568,47 @@ function MaterialsPanel({ inventory, onDone }) {
                 <p className="muted small inv-panel-empty">No materials yet.</p>
             )}
         </section>
+    );
+}
+
+/** Inline number editor for a reorder level: Enter saves, Escape cancels. */
+function ReorderEditor({ initial, onSave, onCancel }) {
+    const [val, setVal] = useState(String(initial ?? 0));
+    const [busy, setBusy] = useState(false);
+    const [err, setErr] = useState(null);
+    async function save() {
+        setBusy(true);
+        const e = await onSave(val);
+        setBusy(false);
+        if (e) setErr(e);
+    }
+    return (
+        <span className="inv-reorder-editor">
+            <input
+                type="number"
+                min="0"
+                value={val}
+                autoFocus
+                aria-label="Reorder level"
+                disabled={busy}
+                onChange={(e) => setVal(e.target.value)}
+                onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                        e.preventDefault();
+                        save();
+                    } else if (e.key === 'Escape') {
+                        onCancel();
+                    }
+                }}
+            />
+            <button type="button" className="chip chip-tool" onClick={save} disabled={busy}>
+                {busy ? 'Saving…' : 'Save'}
+            </button>
+            <button type="button" className="chip chip-tool" onClick={onCancel} disabled={busy}>
+                Cancel
+            </button>
+            {err && <span className="inv-reorder-err">{err}</span>}
+        </span>
     );
 }
 
@@ -2509,6 +2624,27 @@ function LocationsPanel({ inventory, onDone }) {
     const [labsLoaded, setLabsLoaded] = useState(false);
     const [busy, setBusy] = useState(false);
     const [err, setErr] = useState(null);
+    const [query, setQuery] = useState('');
+
+    const shown = useMemo(() => {
+        const q = query.trim().toLowerCase();
+        return q
+            ? locations.filter(
+                  (l) =>
+                      l.name.toLowerCase().includes(q) ||
+                      String(l.bu_code || '').toLowerCase().includes(q) ||
+                      String(l.client_code || '').toLowerCase().includes(q)
+              )
+            : locations;
+    }, [locations, query]);
+
+    const storeCount = locations.filter((l) => l.kind === 'store').length;
+    const caption =
+        query.trim() && shown.length !== locations.length
+            ? `${fmt(shown.length)} of ${fmt(locations.length)} locations match`
+            : `${fmt(storeCount)} ${storeCount === 1 ? 'store' : 'stores'}, ${fmt(locations.length - storeCount)} BUs and labs · ${fmt(
+                  locations.filter((l) => !l.active).length
+              )} inactive`;
 
     useEffect(() => {
         if (kind !== 'lab' || labsLoaded) return;
@@ -2555,7 +2691,15 @@ function LocationsPanel({ inventory, onDone }) {
 
     return (
         <section className="inv-panel">
-            <SectionHead title="Locations" caption={`${fmt(locations.length)} stores, BUs and labs`}>
+            <SectionHead title="Locations" caption={caption}>
+                <input
+                    className="inv-search"
+                    type="search"
+                    placeholder="Filter by name or code…"
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    aria-label="Filter locations"
+                />
                 <button type="button" className="btn-primary btn-sm" onClick={() => setOpen((v) => !v)}>
                     {open ? 'Cancel' : '+ New location'}
                 </button>
@@ -2622,9 +2766,12 @@ function LocationsPanel({ inventory, onDone }) {
                             <tr><th>Name</th><th>Kind</th><th>Link</th><th /></tr>
                         </thead>
                         <tbody>
-                            {locations.map((l) => (
-                                <tr key={l.id} className={l.active ? '' : 'inv-voided'}>
-                                    <td className="inv-mat-cell">{l.name}</td>
+                            {shown.map((l) => (
+                                <tr key={l.id} className={l.active ? '' : 'inv-inactive'}>
+                                    <td className="inv-mat-cell">
+                                        {l.name}
+                                        {!l.active && <span className="inv-inactive-tag">inactive</span>}
+                                    </td>
                                     <td>
                                         <span className={`inv-badge inv-badge-${kindDot(l.kind)}`}>
                                             {kindLabel(l.kind)}

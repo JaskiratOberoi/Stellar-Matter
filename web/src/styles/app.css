@@ -3905,7 +3905,8 @@ td.inv-low {
     padding: var(--sp-5);
     margin-bottom: var(--sp-5);
     background: rgb(var(--nx-surface));
-    border-left: 2px solid rgb(var(--nx-accent));
+    border-top: 1px solid rgb(var(--nx-rule-strong));
+    border-bottom: 1px solid rgb(var(--nx-rule-soft));
 }
 
 /* Vendors — inline onboarding form + supplies chip picker. */
@@ -3954,13 +3955,238 @@ td.inv-low {
 /* Let the Vendor name column soak up the slack so Contact / Phone / GST /
    Supplies stay a tidy group and the actions sit flush right — instead of all
    six columns floating apart on a wide screen. */
-.inv-vendors-table td:first-child,
-.inv-vendors-table th:first-child {
-    width: 100%;
+/* Vendors: name carries the address; contact stacks person / phone / email;
+   supplies previews the first few materials. Nothing is nowrap any more, so
+   the action buttons can't be pushed off the right edge. */
+.inv-vendors-table th,
+.inv-vendors-table td {
+    white-space: normal;
+    vertical-align: top;
+}
+
+.inv-vendors-table .inv-vendor-name {
+    min-width: 16ch;
+}
+
+.inv-vendor-contact {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 12ch;
+    font-size: var(--fs-xs);
+    color: rgb(var(--nx-ink-2));
+}
+
+.inv-vendor-contact-line {
+    font-variant-numeric: tabular-nums;
+    color: rgb(var(--nx-ink-3));
+    overflow-wrap: anywhere;
+}
+
+.inv-vendor-gst {
+    font: 500 var(--fs-2xs) / 1.4 var(--font-mono);
+    letter-spacing: 0.04em;
+    color: rgb(var(--nx-ink-2));
 }
 
 .inv-vendors-table .inv-row-actions {
-    padding-left: var(--sp-6);
+    padding-left: var(--sp-5);
+    vertical-align: middle;
+}
+
+.inv-vendor-supplies-more {
+    color: rgb(var(--nx-ink-3));
+}
+
+/* Disabled catalog rows: dimmed, labelled, never struck through — a disabled
+   supplier is not a cancelled transaction. */
+.inv-inactive td {
+    color: rgb(var(--nx-ink-3));
+}
+
+.inv-inactive .inv-mat-cell,
+.inv-inactive .inv-mat-name {
+    color: rgb(var(--nx-ink-3));
+}
+
+.inv-inactive .inv-badge {
+    opacity: 0.55;
+}
+
+.inv-inactive-tag {
+    display: inline-block;
+    margin-left: var(--sp-2);
+    font: 600 var(--fs-3xs) / 1 var(--font-mono);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: rgb(var(--nx-ink-3));
+    vertical-align: middle;
+}
+
+/* Row actions stay a real table cell (a flex td breaks table layout); in the
+   half-width catalog panels the chips may wrap onto a second line rather than
+   push the table sideways. */
+.inv-row-actions {
+    width: 1%;
+}
+
+/* Half-width catalog panels: names may wrap, numbers and chips may not. */
+.inv-catalog .inv-table th,
+.inv-catalog .inv-table td {
+    white-space: normal;
+}
+
+.inv-catalog .inv-table th.num,
+.inv-catalog .inv-table td.num,
+.inv-catalog .inv-row-actions {
+    white-space: nowrap;
+}
+
+.inv-vendors-table .inv-row-actions {
+    white-space: nowrap;
+}
+
+/* Supplies preview wraps; the full list is in the cell's tooltip. */
+.inv-vendor-supplies {
+    white-space: normal;
+    max-width: 30ch;
+}
+
+/* Inline reorder editor */
+.inv-reorder-cell {
+    white-space: nowrap;
+}
+
+.inv-reorder-editor {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--sp-2);
+}
+
+.inv-reorder-editor input {
+    width: 7ch;
+    padding: var(--sp-1) var(--sp-2);
+    background: rgb(var(--nx-surface));
+    border: 1px solid rgb(var(--nx-accent));
+    border-radius: var(--r-sm);
+    color: rgb(var(--nx-ink));
+    font: inherit;
+    font-size: var(--fs-sm);
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+.inv-reorder-editor input:focus {
+    outline: none;
+    box-shadow: var(--focus-ring);
+}
+
+.inv-reorder-err {
+    font-size: var(--fs-2xs);
+    color: rgb(var(--nx-signal-danger));
+    white-space: normal;
+}
+
+/* Six index tabs fit one row down to a laptop; the old 170px basis wrapped
+   the sixth ("Catalog") onto a row of its own below 1200px. */
+@media (max-width: 1200px) {
+    .inv-index-item {
+        flex-basis: 150px;
+        padding: var(--sp-4) var(--sp-3);
+    }
+}
+
+/* Phone: ledger and vendor rows become stacked cards instead of a sideways
+   scroll. Cells keep their order of importance via flex order. */
+@media (max-width: 640px) {
+    .inv-ledger-table thead,
+    .inv-vendors-table thead {
+        display: none;
+    }
+
+    .inv-ledger-table,
+    .inv-ledger-table tbody,
+    .inv-vendors-table,
+    .inv-vendors-table tbody {
+        display: block;
+        width: 100%;
+    }
+
+    /* The generic phone rule gives every table a 520px floor so wide ones
+       scroll sideways. Stacked cards and the catalog panels fit the screen
+       instead. */
+    .inv-table.inv-ledger-table,
+    .inv-table.inv-vendors-table,
+    .inv-catalog .inv-table {
+        min-width: 0;
+    }
+
+    .inv-catalog .inv-row-actions {
+        white-space: normal;
+    }
+
+    .inv-catalog .inv-row-actions .chip {
+        margin: 2px 0 2px var(--sp-2);
+    }
+
+    .inv-ledger-table tbody tr,
+    .inv-vendors-table tbody tr {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: var(--sp-1) var(--sp-3);
+        padding: var(--sp-3) 0;
+        border-bottom: 1px solid rgb(var(--nx-rule-soft));
+    }
+
+    .inv-ledger-table tbody tr td,
+    .inv-vendors-table tbody tr td {
+        display: block;
+        min-width: 0;
+        max-width: none;
+        padding: 0;
+        border: 0;
+        white-space: normal;
+        overflow-wrap: anywhere;
+    }
+
+    /* A stacked card has no column to explain an empty cell — drop the
+       placeholder dots instead of printing a line of them. */
+    .inv-ledger-table tbody tr td:has(> .inv-dash:only-child),
+    .inv-vendors-table tbody tr td:has(> .inv-dash:only-child) {
+        display: none;
+    }
+
+    .inv-ledger-table tbody tr td.inv-row-actions,
+    .inv-vendors-table tbody tr td.inv-row-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--sp-2);
+        width: auto;
+    }
+
+    .inv-ledger-table tbody tr td.inv-row-actions > * + *,
+    .inv-vendors-table tbody tr td.inv-row-actions > * + * {
+        margin-left: 0;
+    }
+
+    /* Ledger: material + qty first, then route, then the meta. */
+    .inv-ledger-table td.inv-mat-cell { order: 1; flex: 1 1 60%; font-size: var(--fs-base); }
+    .inv-ledger-table td.inv-qty { order: 2; flex: 0 0 auto; margin-left: auto; font-weight: 600; }
+    .inv-ledger-table td.inv-route { order: 3; flex: 1 1 100%; }
+    .inv-ledger-table td.inv-when { order: 4; flex: 0 0 auto; display: flex; gap: var(--sp-2); align-items: baseline; }
+    .inv-ledger-table td.inv-when .inv-when-time { margin-top: 0; }
+    .inv-ledger-table td:nth-child(2) { order: 5; flex: 0 0 auto; }
+    .inv-ledger-table td.inv-details { order: 6; flex: 1 1 100%; max-width: none; }
+    .inv-ledger-table td.inv-row-actions { order: 7; flex: 1 1 100%; justify-content: flex-end; margin-top: var(--sp-1); }
+
+    /* Vendors: name, then contact, then GST + supplies, then actions. */
+    .inv-vendors-table td.inv-vendor-name { order: 1; flex: 1 1 100%; }
+    .inv-vendors-table td.inv-vendor-contact { order: 2; flex: 1 1 100%; }
+    .inv-vendors-table td.inv-vendor-gst { order: 3; flex: 0 0 auto; }
+    .inv-vendors-table td.inv-vendor-supplies { order: 4; flex: 1 1 auto; font-size: var(--fs-xs); color: rgb(var(--nx-ink-2)); }
+    .inv-vendors-table td.inv-row-actions { order: 5; flex: 1 1 100%; justify-content: flex-end; margin-top: var(--sp-1); padding-left: 0; }
+    .inv-vendors-table td.inv-vendor-edit-cell { flex: 1 1 100%; }
 }
 
 /* Docket — the sticky receipt beside a form: figure, breakdown, action. */
