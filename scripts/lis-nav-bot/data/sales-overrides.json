@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "_comment": "Matter-side salesperson → client-code mapping. Overrides the LIS User Client Mapping for the Tracer's Sales chips only; the LIS itself is untouched. `id` matching a LIS Sales & Marketing user id replaces that user's code list; any other id adds a salesperson the LIS does not have (keep the `mx-` prefix so it can never collide with a LIS id). Codes are bare MCC client codes; at run time each is widened to every LIS master spelling that starts with it, like the Regions file. Edit and save — re-read on every request, bind-mounted read-only into the app container.",
+  "people": [
+    {
+      "id": "7165",
+      "label": "AMAN PAL",
+      "note": "Shahjahanpur — handwritten list 2026-09-15",
+      "codes": ["BLY003", "BLY005", "BLY009", "BLY010", "BLY011", "BLY012", "BLY016", "BLY020", "BLY024"]
+    },
+    {
+      "id": "7167",
+      "label": "VISHAL RATHORE",
+      "note": "Shahjahanpur — handwritten list 2026-09-15",
+      "codes": ["BLY002", "BLY006", "BLY013", "BLY015", "BLY017", "BLY018", "BLY019", "BLY021", "BLY022", "BLY025"]
+    },
+    {
+      "id": "7166",
+      "label": "NIRALE",
+      "note": "Shahjahanpur — handwritten list 2026-09-15",
+      "codes": ["BLY004", "BLY008", "BLY007", "BLY014", "BLY023"]
+    },
+    {
+      "id": "mx-ali-khan",
+      "label": "ALI KHAN",
+      "note": "Shahjahanpur — not a Sales & Marketing user in the LIS; handwritten list 2026-09-15",
+      "codes": ["BLY001", "HLD0619", "HLD0634", "HLD0637", "HLD0641", "HLD0646", "HLD0655"]
+    }
+  ]
+}

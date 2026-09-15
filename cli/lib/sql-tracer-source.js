@@ -966,6 +966,34 @@ async function fetchSalesCodesByListec(apiBase, salesTargets, signal) {
 }
 
 /**
+ * Salesperson → client codes, honouring Matter-side overrides first.
+ * `overrides` (from data/sales-overrides.json, resolved by the server) wins
+ * for any id it names — including ids the LIS has never heard of — and only
+ * the remaining ids are looked up in the LIS User Client Mapping.
+ *
+ * @param {string} apiBase
+ * @param {{ kind: string; key: string; label: string }[]} salesTargets
+ * @param {Record<string, string[]> | Map<string, string[]> | null | undefined} overrides
+ * @returns {Promise<Map<string, string[]>>}
+ */
+async function resolveSalesCodes(apiBase, salesTargets, overrides, signal) {
+    /** @type {Map<string, string[]>} */
+    const map = new Map();
+    const ov = overrides instanceof Map ? overrides : new Map(Object.entries(overrides || {}));
+    const remaining = [];
+    for (const t of salesTargets) {
+        const k = String(t.key).trim();
+        if (ov.has(k)) map.set(k, [...new Set((ov.get(k) || []).map((c) => String(c).trim().toUpperCase()).filter(Boolean))]);
+        else remaining.push(t);
+    }
+    if (remaining.length) {
+        const lis = await fetchSalesCodesByListec(apiBase, remaining, signal);
+        for (const [k, v] of lis) map.set(k, v);
+    }
+    return map;
+}
+
+/**
  * Ask Listec for the numeric master id behind each business-unit string.
  *
  * @param {string} apiBase
@@ -1507,7 +1535,7 @@ async function runTracerBatch(opts) {
         }
     }
     if (hasSales) {
-        const salesMap = await fetchSalesCodesByListec(apiBase, salesTargets, signal);
+        const salesMap = await resolveSalesCodes(apiBase, salesTargets, opts.salesCodeOverrides, signal);
         for (const t of salesTargets) {
             codesByTarget.set(`sales:${t.key}`, salesMap.get(String(t.key).trim()) || []);
         }
@@ -1566,7 +1594,7 @@ async function runTracerBatch(opts) {
                 }
             }
             if (hasSales) {
-                const salesMap = await fetchSalesCodesByListec(apiBase, salesTargets, signal);
+                const salesMap = await resolveSalesCodes(apiBase, salesTargets, opts.salesCodeOverrides, signal);
                 for (const t of salesTargets) {
                     codesByTarget.set(`sales:${t.key}`, salesMap.get(String(t.key).trim()) || []);
                 }

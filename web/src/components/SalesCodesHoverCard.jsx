@@ -247,6 +247,11 @@ export function SalesCodesHoverCard({ user, selected, onToggle }) {
             >
                 {user.label}
                 {user.codeCount != null ? <span className="region-chip-count">{user.codeCount}</span> : null}
+                {user.matterMapped ? (
+                    <span className="region-group-tag" title="Client codes mapped in Matter, not from the LIS">
+                        matter
+                    </span>
+                ) : null}
             </button>
             {open &&
                 pos &&

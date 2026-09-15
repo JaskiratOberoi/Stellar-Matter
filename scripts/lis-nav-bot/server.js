@@ -194,6 +194,54 @@ async function resolveTracerBuGroups(raw) {
     return out;
 }
 
+const SALES_OVERRIDES_PATH = path.join(__dirname, 'data', 'sales-overrides.json');
+
+/**
+ * Matter-side salesperson → client-code overrides (data/sales-overrides.json).
+ * An entry whose id is a LIS Sales & Marketing user id replaces that user's
+ * mapping; any other id is a salesperson the LIS does not list. Hot-read like
+ * the other data files.
+ *
+ * @returns {{ id: string, label: string, note: string|null, codes: string[] }[]}
+ */
+function readSalesOverridesFile() {
+    try {
+        if (!fs.existsSync(SALES_OVERRIDES_PATH)) return [];
+        const j = JSON.parse(fs.readFileSync(SALES_OVERRIDES_PATH, 'utf8'));
+        const arr = j && Array.isArray(j.people) ? j.people : [];
+        const out = [];
+        const seen = new Set();
+        for (const p of arr) {
+            if (!p || typeof p !== 'object') continue;
+            const id = String(p.id || '').trim();
+            if (!id || seen.has(id)) continue;
+            seen.add(id);
+            const codes = [
+                ...new Set((Array.isArray(p.codes) ? p.codes : []).map((c) => String(c || '').trim().toUpperCase()).filter(Boolean))
+            ];
+            out.push({ id, label: String(p.label || id).trim().toUpperCase(), note: p.note != null ? String(p.note).trim() || null : null, codes });
+        }
+        return out;
+    } catch (e) {
+        console.warn(`[stellar-matter] sales-overrides.json unreadable: ${e && e.message ? e.message : e}`);
+        return [];
+    }
+}
+
+/**
+ * Widened code lists for every override, keyed by salesperson id — handed to
+ * runTracerBatch so the LIS mapping is consulted only for everyone else.
+ * @returns {Promise<Record<string, string[]>>}
+ */
+async function salesCodeOverridesForRun() {
+    /** @type {Record<string, string[]>} */
+    const out = {};
+    for (const p of readSalesOverridesFile()) {
+        out[p.id] = await expandClientCodes(p.codes);
+    }
+    return out;
+}
+
 /** Progress-row label for a group scope; the tracer lib uses the same scopeLabel. */
 function buGroupProgressLabel(g) {
     return g.scopeLabel || `${g.label} · region`;
@@ -939,7 +987,26 @@ app.get('/api/tracer/sales-marketing-users', async (_req, res) => {
                 users: []
             });
         }
-        res.json(await r.json());
+        const payload = await r.json();
+        // Matter-side overrides: replace the code count on a LIS user, or add
+        // a salesperson the LIS does not list. Flagged so the chip can say so.
+        const overrides = readSalesOverridesFile();
+        if (overrides.length) {
+            const users = Array.isArray(payload.users) ? payload.users.map((u) => ({ ...u })) : [];
+            const byId = new Map(users.map((u) => [String(u.userId), u]));
+            for (const o of overrides) {
+                const u = byId.get(o.id);
+                if (u) {
+                    u.codeCount = o.codes.length;
+                    u.matterMapped = true;
+                } else {
+                    users.push({ userId: o.id, label: o.label, codeCount: o.codes.length, matterMapped: true });
+                }
+            }
+            users.sort((a, b) => String(a.label).localeCompare(String(b.label)));
+            payload.users = users;
+        }
+        res.json(payload);
     } catch (e) {
         res.status(502).json({ error: String(e && e.message ? e.message : e), users: [] });
     }
@@ -951,12 +1018,26 @@ app.get('/api/tracer/sales-marketing-users/codes', async (req, res) => {
         if (typeof ids !== 'string' || !ids.trim()) {
             return res.status(400).json({ error: 'ids query parameter is required' });
         }
-        const base = listecApiBase();
-        const url = `${base}/api/tracer/sales-marketing-users/codes?ids=${encodeURIComponent(ids)}`;
-        const r = await fetch(url);
-        const text = await r.text();
-        if (!r.ok) {
-            return res.status(502).json({ error: `Listec ${r.status}: ${text.slice(0, 300)}` });
+        // Matter-side overrides answer for their own ids; only the rest go to
+        // the LIS User Client Mapping.
+        const overrides = new Map(readSalesOverridesFile().map((o) => [o.id, o.codes]));
+        const wanted = [...new Set(ids.split(',').map((s) => s.trim()).filter(Boolean))];
+        const lisIds = wanted.filter((id) => !overrides.has(id));
+        /** @type {{ codesByUser: Record<string, string[]> }} */
+        let payload = { codesByUser: {} };
+        if (lisIds.length) {
+            const base = listecApiBase();
+            const url = `${base}/api/tracer/sales-marketing-users/codes?ids=${encodeURIComponent(lisIds.join(','))}`;
+            const r = await fetch(url);
+            const text = await r.text();
+            if (!r.ok) {
+                return res.status(502).json({ error: `Listec ${r.status}: ${text.slice(0, 300)}` });
+            }
+            payload = JSON.parse(text);
+            if (!payload || typeof payload.codesByUser !== 'object') payload = { ...(payload || {}), codesByUser: {} };
+        }
+        for (const id of wanted) {
+            if (overrides.has(id)) payload.codesByUser[id] = overrides.get(id).slice();
         }
         // `detail=1` asks us to name the codes. Listec only knows the raw MCC
         // codes; the client name / city lives in the Postgres client_locations
@@ -964,9 +1045,8 @@ app.get('/api/tracer/sales-marketing-users/codes', async (req, res) => {
         // round trip. Unknown codes are simply omitted — the caller still has
         // the code itself and a stale mirror shouldn't blank the list.
         if (String(req.query.detail || '') !== '1' || !useDatabase()) {
-            return res.type('application/json').send(text);
+            return res.json(payload);
         }
-        const payload = JSON.parse(text);
         const codesByUser =
             payload && payload.codesByUser && typeof payload.codesByUser === 'object'
                 ? payload.codesByUser
@@ -985,10 +1065,19 @@ app.get('/api/tracer/sales-marketing-users/codes', async (req, res) => {
             const q = await getPool().query(
                 `SELECT code, name, city_label, state_label, business_unit_name, active
                    FROM client_locations
-                  WHERE code = ANY($1::text[])`,
+                  WHERE code = ANY($1::text[]) OR upper(split_part(code, ' ', 1)) = ANY($1::text[])
+                  ORDER BY code`,
                 [allCodes]
             );
             for (const row of q.rows) {
+                const bare = String(row.code).toUpperCase().split(' ')[0];
+                if (!clientsByCode[bare]) clientsByCode[bare] = {
+                    name: row.name || null,
+                    city: row.city_label || null,
+                    state: row.state_label || null,
+                    businessUnit: row.business_unit_name || null,
+                    active: row.active !== false
+                };
                 clientsByCode[String(row.code).toUpperCase()] = {
                     name: row.name || null,
                     city: row.city_label || null,
@@ -1677,11 +1766,13 @@ app.post('/api/tracer-run', requireRunStarter, async (req, res) => {
                 }
             };
 
+            const salesCodeOverrides = await salesCodeOverridesForRun();
             const result = await runTracerBatch({
                 businessUnits,
                 regions: body.regions,
                 salesPeople: body.salesPeople,
                 buGroups,
+                salesCodeOverrides,
                 fromDate,
                 toDate,
                 fromHour,

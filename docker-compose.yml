@@ -35,6 +35,8 @@ services:
       - ./scripts/lis-nav-bot/data/package-pages.json:/app/scripts/lis-nav-bot/data/package-pages.json:ro
       # Temporary BU groups (e.g. Bareilly under HLD): same hot-edit, read-only arrangement.
       - ./scripts/lis-nav-bot/data/business-unit-groups.json:/app/scripts/lis-nav-bot/data/business-unit-groups.json:ro
+      # Matter-side salesperson → client-code overrides for the Sales chips.
+      - ./scripts/lis-nav-bot/data/sales-overrides.json:/app/scripts/lis-nav-bot/data/sales-overrides.json:ro
     environment:
       NODE_ENV: production
       MATTER_APP_PORT: "4378"
