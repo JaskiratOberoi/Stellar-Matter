@@ -229,13 +229,13 @@ export function TracerPage({
                 key: String(p.id),
                 label: String(p.label || p.id)
             }));
-            // Group chips land on the wall as their own banner row, labelled
-            // the way the server's progress row is.
+            // Region chips land on the wall as their own banner row, labelled
+            // with the server-computed scope label (same text as the progress row).
             for (const g of snap.buGroups || []) {
                 scopeTargets.push({
                     kind: 'group',
                     key: String(g.id).toLowerCase(),
-                    label: g.parent ? `${g.label} · under ${g.parent}` : `${g.label} · group`
+                    label: g.scopeLabel || `${g.label} · region`
                 });
             }
 

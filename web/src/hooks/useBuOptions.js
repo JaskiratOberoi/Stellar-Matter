@@ -58,16 +58,26 @@ export function useBuOptions() {
         });
     }, [options, persist]);
 
+    // BU "Clear" only touches BU chips; the Regions section has its own pair.
     const clear = useCallback(() => {
         setSelected(() => {
             persist(new Set());
             return new Set();
         });
+    }, [persist]);
+    const selectAllGroups = useCallback(() => {
+        setGroupSelected(() => {
+            const next = new Set(groups.map((g) => g.id));
+            persistGroups(next);
+            return next;
+        });
+    }, [groups, persistGroups]);
+    const clearGroups = useCallback(() => {
         setGroupSelected(() => {
             persistGroups(new Set());
             return new Set();
         });
-    }, [persist, persistGroups]);
+    }, [persistGroups]);
 
     useEffect(() => {
         if (authLoading) return;
@@ -126,7 +136,10 @@ export function useBuOptions() {
                             label,
                             name: g.name ? String(g.name) : null,
                             parent: g.parent ? String(g.parent).trim() : null,
-                            codeCount: Number(g.codeCount) || 0
+                            codeCount: Number(g.codeCount) || 0,
+                            residual: g.residual === true,
+                            subtract: Array.isArray(g.subtract) ? g.subtract.map(String) : [],
+                            scopeLabel: g.scopeLabel ? String(g.scopeLabel) : `${label} · region`
                         };
                     })
                     .filter(Boolean);
@@ -161,5 +174,5 @@ export function useBuOptions() {
         };
     }, [persist, persistGroups, authLoading, authRequired, user]);
 
-    return { options, groups, error, selected, groupSelected, toggle, toggleGroup, selectAll, clear };
+    return { options, groups, error, selected, groupSelected, toggle, toggleGroup, selectAll, clear, selectAllGroups, clearGroups };
 }

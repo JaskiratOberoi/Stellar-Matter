@@ -103,7 +103,9 @@ function TracerRoute() {
         toggle,
         toggleGroup,
         selectAll,
-        clear: clearBu
+        clear: clearBu,
+        selectAllGroups,
+        clearGroups
     } = useBuOptions();
 
     const {
@@ -193,7 +195,7 @@ function TracerRoute() {
                     buOptions={{ options, groups: buGroups, error: buError }}
                     buSelected={buSelected}
                     buGroupSelected={buGroupSelected}
-                    buActions={{ toggle, toggleGroup, selectAll, clear: clearBu }}
+                    buActions={{ toggle, toggleGroup, selectAll, clear: clearBu, selectAllGroups, clearGroups }}
                     loadError={loadError}
                     errors={errors}
                     submitError={submitError}

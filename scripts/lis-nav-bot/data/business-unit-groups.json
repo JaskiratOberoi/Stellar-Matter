@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "_comment": "Temporary business-unit groups: a chip that runs an explicit list of client codes, shown nested under its parent BU in the Tracer. Edit and save — the server re-reads this file on every request (bind-mounted read-only into the app container). `id` is the stable key used in saved selections; `parent` is the BU chip label the group nests under (e.g. HALDWANI); `codes` are bare MCC client codes. At run time each code is widened to every LIS master code that starts with it (the LIS often stores 'HLD0519 MADHAV PATHOLOGY LAB' or 'UK0204 A PPL & DC'), using the client_locations mirror.",
+  "_comment": "Regions: chips that run an explicit list of client codes (a temporary sub-unit of `parent`), shown in the Tracer's Regions section. Edit and save — the server re-reads this file on every request (bind-mounted read-only into the app container). `id` is the stable key used in saved selections; `parent` is the BU chip label the group belongs to (e.g. HALDWANI); `codes` are bare MCC client codes, widened at run time to every LIS master spelling that starts with them ('HLD0519 MADHAV PATHOLOGY LAB', 'UK0204 A PPL & DC') via the client_locations mirror. A group with `subtract` instead of `codes` is a residual: the parent unit's samples minus the SIDs belonging to those sibling groups.",
   "groups": [
     {
       "id": "bareilly",
@@ -213,6 +213,18 @@
         "BLY007",
         "BLY008",
         "BLY014"
+      ]
+    },
+    {
+      "id": "haldwani",
+      "label": "HALDWANI",
+      "name": "Haldwani region — what is left of the HALDWANI unit after Bareilly, Rudrapur, Pilibhit and Shahjahanpur",
+      "parent": "HALDWANI",
+      "subtract": [
+        "bareilly",
+        "rudrapur",
+        "pilibhit",
+        "shahjahanpur"
       ]
     }
   ]

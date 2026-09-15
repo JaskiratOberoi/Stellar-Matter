@@ -842,16 +842,90 @@ function parseBuGroups(raw) {
         seen.add(id);
         const label = o.label != null ? String(o.label).trim() : id;
         const parent = o.parent != null && String(o.parent).trim() ? String(o.parent).trim() : null;
-        const codes = [
+        const norm = (arr) => [
             ...new Set(
-                (Array.isArray(o.codes) ? o.codes : [])
+                (Array.isArray(arr) ? arr : [])
                     .map((c) => String(c || '').trim().toUpperCase())
                     .filter(Boolean)
             )
         ];
-        targets.push({ kind: 'group', key: id, label: label || id, parent, codes });
+        const codes = norm(o.codes);
+        // A residual group is "the parent unit minus its sibling groups":
+        // drain the parent BU, then drop every SID that belongs to a
+        // subtracted client code. It has no codes of its own.
+        const residual = o.residual === true;
+        const subtractCodes = residual ? norm(o.subtractCodes) : [];
+        const scopeLabel = o.scopeLabel != null && String(o.scopeLabel).trim() ? String(o.scopeLabel).trim() : null;
+        targets.push({ kind: 'group', key: id, label: label || id, parent, codes, residual, subtractCodes, scopeLabel });
     }
     return { targets };
+}
+
+/**
+ * Parent payload minus every SID that appears in any subtrahend payload.
+ * Counts are rebuilt from the surviving rows, so letterheads, envelopes and
+ * the specialty tubes are exact; resultRowsByTestCode (raw LIS row counts)
+ * cannot be attributed per SID and is a plain difference floored at zero.
+ *
+ * @param {object} parent
+ * @param {object[]} subtrahends
+ */
+function subtractPayloads(parent, subtrahends) {
+    const drop = new Set();
+    for (const p of (Array.isArray(subtrahends) ? subtrahends : []).filter(Boolean)) {
+        for (const row of Array.isArray(p.rows) ? p.rows : []) {
+            const sid = String(row && row.sid != null ? row.sid : '').trim();
+            if (sid) drop.add(sid);
+        }
+        for (const sids of Object.values((p && p.sidsByTestCode) || {})) {
+            for (const s of Array.isArray(sids) ? sids : []) drop.add(String(s));
+        }
+    }
+    const rows = (Array.isArray(parent.rows) ? parent.rows : []).filter((row) => {
+        const sid = String(row && row.sid != null ? row.sid : '').trim();
+        return !sid || !drop.has(sid);
+    });
+    /** @type {Record<string,string[]>} */
+    const sidsByTestCode = {};
+    for (const [code, sids] of Object.entries((parent && parent.sidsByTestCode) || {})) {
+        sidsByTestCode[String(code).toLowerCase()] = (Array.isArray(sids) ? sids : [])
+            .map(String)
+            .filter((s) => !drop.has(s))
+            .sort();
+    }
+    /** @type {Record<string,number>} */
+    const resultRowsByTestCode = {};
+    for (const [code, n] of Object.entries((parent && parent.resultRowsByTestCode) || {})) {
+        const lc = String(code).toLowerCase();
+        let v = Number(n) || 0;
+        for (const p of subtrahends || []) {
+            v -= Number(((p && p.resultRowsByTestCode) || {})[lc] ?? ((p && p.resultRowsByTestCode) || {})[code]) || 0;
+        }
+        resultRowsByTestCode[lc] = Math.max(0, v);
+    }
+    const bracket = aggregateBracketsFromPackageRows(rows);
+    return {
+        ...bracket,
+        sidsByTestCode,
+        resultRowsByTestCode,
+        filters: parent.filters || null,
+        resolved: parent.resolved || null,
+        rows: bracket.rows
+    };
+}
+
+/**
+ * Fetch a residual group: the parent BU's month minus the SIDs owned by the
+ * sibling groups' client codes.
+ */
+async function fetchResidualGroupPayload(apiBase, targ, opts, signal) {
+    const dates = { fromDate: opts.fromDate, toDate: opts.toDate, fromHour: opts.fromHour, toHour: opts.toHour };
+    const [parentRes, subRes] = await Promise.all([
+        fetchTracerPayload(apiBase, { bu: targ.parent, ...dates, cityKeys: [], stateKeys: [], signal }),
+        fetchTracerPayloadByCodes(apiBase, { bu: undefined, ...dates, codes: targ.subtractCodes, signal })
+    ]);
+    assertTracerPayload(parentRes.payload, { needGeo: false, label: `BU=${targ.parent} (for ${targ.label})` });
+    return { url: parentRes.url, payload: subtractPayloads(parentRes.payload, [subRes.payload]) };
 }
 
 /**
@@ -995,7 +1069,7 @@ async function dedupeBusinessUnits(apiBase, names, signal) {
 function scopeProgressLabel(targ) {
     if (targ.kind === 'sales') return `Sales · ${targ.label}`;
     if (targ.kind === 'city') return `City · ${targ.label}`;
-    if (targ.kind === 'group') return targ.parent ? `${targ.label} · under ${targ.parent}` : `${targ.label} · group`;
+    if (targ.kind === 'group') return targ.scopeLabel || `${targ.label} · region`;
     return `State · ${targ.label}`;
 }
 
@@ -1538,6 +1612,16 @@ async function runTracerBatch(opts) {
 
             // Region / sales / group scopes: per-code-list by-codes call, no BU filter.
             const regionTasks = collateScopeTargets.map((targ) => async () => {
+                if (targ.kind === 'group' && targ.residual) {
+                    try {
+                        const r = await fetchResidualGroupPayload(apiBase, targ, opts, signal);
+                        return r.payload;
+                    } catch (e) {
+                        if (isCancellation(e) || cancelled()) return null;
+                        console.warn(`[tracer-sql] collate residual group ${targ.key} failed: ${e && e.message ? e.message : e}`);
+                        return null;
+                    }
+                }
                 const codes = codesByTarget.get(`${targ.kind}:${targ.key}`) || [];
                 if (codes.length === 0) {
                     const hint =
@@ -1843,7 +1927,11 @@ async function runTracerBatch(opts) {
                 const progressLabel = scopeProgressLabel(targ);
                 try {
                     const codes = codesByTarget.get(`${targ.kind}:${targ.key}`) || [];
-                    if (codes.length === 0) {
+                    const isResidual = targ.kind === 'group' && targ.residual === true;
+                    if (isResidual && (!targ.parent || !targ.subtractCodes.length)) {
+                        throw new Error(`Group ${targ.label} needs a parent unit and at least one sibling group to subtract.`);
+                    }
+                    if (codes.length === 0 && !isResidual) {
                         const msg =
                             targ.kind === 'sales'
                                 ? `No client codes mapped for salesperson ${targ.label} — check LIS User Client Mapping (Listec sales endpoint).`
@@ -1856,7 +1944,11 @@ async function runTracerBatch(opts) {
                     let lastUrl;
                     // A group is a sub-BU in its own right: its codes are the
                     // whole filter, never intersected with the other BU chips.
-                    if (hasBu && targ.kind !== 'group') {
+                    if (isResidual) {
+                        const r = await fetchResidualGroupPayload(apiBase, targ, opts, signal);
+                        payload = r.payload;
+                        lastUrl = r.url;
+                    } else if (hasBu && targ.kind !== 'group') {
                         const perBu = await Promise.all(
                             businessUnits.map((bu) =>
                                 fetchTracerPayloadByCodes(apiBase, {

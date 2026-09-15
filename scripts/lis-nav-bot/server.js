@@ -98,7 +98,10 @@ const BU_GROUPS_PATH = path.join(__dirname, 'data', 'business-unit-groups.json')
  * the code list can be edited on the host without a rebuild — the file is
  * bind-mounted read-only into the container.
  *
- * @returns {{ id: string, label: string, name: string|null, parent: string|null, codes: string[] }[]}
+ * A group with `subtract: [ids]` is a residual: the parent unit minus those
+ * sibling groups (what is left of HALDWANI once its regions are taken out).
+ *
+ * @returns {{ id: string, label: string, name: string|null, parent: string|null, codes: string[], subtract: string[], residual: boolean, scopeLabel: string }[]}
  */
 function readBusinessUnitGroupsFile() {
     try {
@@ -117,7 +120,20 @@ function readBusinessUnitGroupsFile() {
             const codes = [
                 ...new Set((Array.isArray(g.codes) ? g.codes : []).map((c) => String(c || '').trim().toUpperCase()).filter(Boolean))
             ];
-            out.push({ id, label, name: g.name != null ? String(g.name).trim() || null : null, parent, codes });
+            const subtract = [
+                ...new Set((Array.isArray(g.subtract) ? g.subtract : []).map((x) => String(x || '').trim().toLowerCase()).filter(Boolean))
+            ];
+            out.push({ id, label, name: g.name != null ? String(g.name).trim() || null : null, parent, codes, subtract, residual: subtract.length > 0, scopeLabel: '' });
+        }
+        // Residuals reference siblings by id; resolve names for the label now
+        // that every group is known.
+        const byId = new Map(out.map((g) => [g.id, g]));
+        for (const g of out) {
+            g.subtract = g.subtract.filter((id) => id !== g.id && byId.has(id));
+            g.residual = g.subtract.length > 0;
+            g.scopeLabel = g.residual
+                ? `${g.label} · region · excl. ${g.subtract.map((id) => byId.get(id).label).join(', ')}`
+                : `${g.label} · region`;
         }
         return out;
     } catch (e) {
@@ -166,15 +182,21 @@ async function resolveTracerBuGroups(raw) {
     for (const t of targets) {
         const g = byId.get(t.key);
         if (!g) continue;
+        if (g.residual) {
+            const union = [...new Set(g.subtract.flatMap((id) => byId.get(id).codes))];
+            const subtractCodes = await expandClientCodes(union);
+            out.push({ id: g.id, label: g.label, parent: g.parent, codes: [], residual: true, subtractCodes, scopeLabel: g.scopeLabel });
+            continue;
+        }
         const codes = await expandClientCodes(g.codes);
-        out.push({ id: g.id, label: g.label, parent: g.parent, codes });
+        out.push({ id: g.id, label: g.label, parent: g.parent, codes, residual: false, subtractCodes: [], scopeLabel: g.scopeLabel });
     }
     return out;
 }
 
-/** Progress-row label for a group scope; must match scopeProgressLabel in sql-tracer-source. */
+/** Progress-row label for a group scope; the tracer lib uses the same scopeLabel. */
 function buGroupProgressLabel(g) {
-    return g.parent ? `${g.label} · under ${g.parent}` : `${g.label} · group`;
+    return g.scopeLabel || `${g.label} · region`;
 }
 
 /**
@@ -789,12 +811,16 @@ function runChildIdFromOutMainPath(p) {
 app.get('/api/bu', async (_req, res) => {
     const data = await fetchListecLookups();
     // Temporary sub-BU chips, rendered nested under `parent` by the client.
-    data.businessUnitGroups = readBusinessUnitGroupsFile().map((g) => ({
+    const groups = readBusinessUnitGroupsFile();
+    data.businessUnitGroups = groups.map((g) => ({
         id: g.id,
         label: g.label,
         name: g.name,
         parent: g.parent,
-        codeCount: g.codes.length
+        residual: g.residual,
+        subtract: g.subtract.map((id) => (groups.find((x) => x.id === id) || {}).label || id),
+        codeCount: g.residual ? g.subtract.reduce((n, id) => n + ((groups.find((x) => x.id === id) || { codes: [] }).codes.length), 0) : g.codes.length,
+        scopeLabel: g.scopeLabel
     }));
     res.json(data);
 });
@@ -1621,7 +1647,7 @@ app.post('/api/tracer-run', requireRunStarter, async (req, res) => {
                 business_units: businessUnits,
                 regions: body.regions || null,
                 sales_people: body.salesPeople || null,
-                bu_groups: buGroups.length ? buGroups.map((g) => ({ id: g.id, parent: g.parent, codes: g.codes.length })) : null,
+                bu_groups: buGroups.length ? buGroups.map((g) => ({ id: g.id, parent: g.parent, codes: g.residual ? -g.subtractCodes.length : g.codes.length })) : null,
                 from_date: fromDate,
                 to_date: toDate,
                 bucket_test_codes: ALL_SPECIALTY_CODES,

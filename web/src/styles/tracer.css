@@ -61,29 +61,24 @@
     opacity: 0.85;
 }
 
-/* Temporary BU group chip: sits right after its parent, arrow + tag say
-   "this is a slice of that unit", not a unit of its own. */
-.bu-group-chip {
-    border-style: dashed;
-    padding-left: var(--sp-2);
+/* Regions: temporary sub-units. The residual chip carries a tag so it is
+   not mistaken for the parent BU chip of the same name. */
+.region-group-field-block {
+    margin-top: var(--sp-4);
 }
 
-.bu-group-arrow {
-    margin-right: var(--sp-1);
-    opacity: 0.7;
-}
-
-.bu-group-tag {
+.region-group-tag {
     margin-left: var(--sp-2);
     padding: 1px 5px;
     border-radius: var(--r-xs);
     background: rgb(var(--nx-ink) / 0.08);
     font-size: 0.72em;
-    letter-spacing: 0.1em;
+    letter-spacing: 0.08em;
     opacity: 0.85;
+    white-space: nowrap;
 }
 
-.bu-group-chip[aria-pressed='true'] .bu-group-tag {
+.region-group-chip[aria-pressed='true'] .region-group-tag {
     background: rgb(var(--nx-accent) / 0.18);
 }
 

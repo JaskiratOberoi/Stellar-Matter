@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { DateChips } from './DateChips.jsx';
 import { BuChips } from './BuChips.jsx';
+import { RegionGroupChips } from './RegionGroupChips.jsx';
 import { SalesChips } from './SalesChips.jsx';
 
 /** localStorage key for the Collate toggle. Survives reload. */
@@ -11,7 +12,7 @@ const LS_TRACER_COLLATE = 'lis-nav-bot.tracer.collate';
  *   buOptions: { options: { id: string, label: string }[], groups?: { id: string, label: string, parent: string|null, name: string|null, codeCount: number }[], error: string | null },
  *   buSelected: Set<string>,
  *   buGroupSelected?: Set<string>,
- *   buActions: { toggle: (label: string) => void, toggleGroup?: (id: string) => void, selectAll: () => void, clear: () => void },
+ *   buActions: { toggle: (label: string) => void, toggleGroup?: (id: string) => void, selectAll: () => void, clear: () => void, selectAllGroups?: () => void, clearGroups?: () => void },
  *   salesUsers: { userId: number, label: string, codeCount?: number }[],
  *   salesLoading: boolean,
  *   salesLookupError: string | null,
@@ -26,7 +27,7 @@ const LS_TRACER_COLLATE = 'lis-nav-bot.tracer.collate';
  *     toHour: string,
  *     bu: string,
  *     businessUnits: string[],
- *     buGroups: { id: string, label: string, parent: string|null }[],
+ *     buGroups: { id: string, label: string, parent: string|null, scopeLabel: string }[],
  *     salesPeople: { id: string | number, label: string }[],
  *     collate: boolean,
  *   }) => void | Promise<void>,
@@ -94,7 +95,7 @@ export function TracerForm({
             toHour,
             bu,
             businessUnits,
-            buGroups: buGroups.map((g) => ({ id: g.id, label: g.label, parent: g.parent })),
+            buGroups: buGroups.map((g) => ({ id: g.id, label: g.label, parent: g.parent, scopeLabel: g.scopeLabel })),
             salesPeople,
             collate
         });
@@ -159,9 +160,6 @@ export function TracerForm({
             </div>
 
             <BuChips
-                groups={buOptions.groups || []}
-                groupSelected={buGroupSelected}
-                onToggleGroup={buActions.toggleGroup}
                 source="sql"
                 options={buOptions.options}
                 selected={buSelected}
@@ -178,6 +176,14 @@ export function TracerForm({
                         onChange={(e) => setBu(e.target.value)}
                     />
                 }
+            />
+
+            <RegionGroupChips
+                groups={buOptions.groups || []}
+                selected={buGroupSelected}
+                onToggle={(id) => buActions.toggleGroup && buActions.toggleGroup(id)}
+                onSelectAll={() => buActions.selectAllGroups && buActions.selectAllGroups()}
+                onClear={() => buActions.clearGroups && buActions.clearGroups()}
             />
 
             <SalesChips
