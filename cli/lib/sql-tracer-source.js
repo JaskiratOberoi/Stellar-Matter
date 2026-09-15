@@ -462,6 +462,33 @@ async function runWithConcurrency(tasks, concurrency, signal) {
 }
 
 /**
+ * Hand out a block of consecutive millisecond stamps for one target's
+ * artefacts (one file per mode at base + modeIndex). Artefact filenames and
+ * run ids derive from these stamps, so two targets finishing at the same
+ * instant must never share one. The previous scheme spaced targets by
+ * `index × 60 s`, which kept files apart but stamped the 18th unit of a
+ * sweep 17 minutes into the future — tiles sorted "latest first" then showed
+ * the wrong unit on top and "Updated" read ahead of the clock. A monotonic
+ * cursor guarantees disjoint blocks while staying within a few ms of real
+ * time.
+ *
+ * @param {number} size number of stamps the caller will use (base .. base+size-1)
+ * @returns {number} epoch ms
+ */
+let lastStampBlockEnd = 0;
+function allocateStampBlock(size) {
+    const n = Math.max(1, Math.floor(size) || 1);
+    const base = Math.max(Date.now(), lastStampBlockEnd + 1);
+    lastStampBlockEnd = base + n - 1;
+    return base;
+}
+
+/** Stamps consumed by writeSixModesForPayload: general + specialties + barcode + serum. */
+function stampBlockSize() {
+    return SPECIALTY_MODES.length + 3;
+}
+
+/**
  * How many business units to drain at once.
  *
  * Each in-flight BU holds one Listec pool connection for the length of its
@@ -1538,7 +1565,7 @@ async function runTracerBatch(opts) {
                 url: `${apiBase}/api/worksheet-reports/packages?[collated]`,
                 orgId,
                 outDir,
-                baseMsOffset: Date.now()
+                baseMsOffset: allocateStampBlock(stampBlockSize())
             });
             collatedItem.runIds = w.runIds;
             collatedItem.lastOutMainPath = w.lastOutMainPath;
@@ -1656,15 +1683,10 @@ async function runTracerBatch(opts) {
                     url,
                     orgId,
                     outDir,
-                    // Artefact filenames are derived from this stamp
-                    // (`run-<iso>.json`, one per mode at baseMsOffset + modeIndex).
-                    // A bare Date.now() is only unique while units run one at a
-                    // time — with the fan-out running several at once, two units
-                    // finishing in the same millisecond would generate identical
-                    // run ids and silently overwrite each other's artefacts.
-                    // Spacing by index (as the region and sales paths already do)
-                    // keeps every unit's 10-file block disjoint.
-                    baseMsOffset: Date.now() + i * 60000
+                    // Artefact filenames derive from this stamp (one per mode at
+                    // baseMsOffset + modeIndex); concurrent units must not share
+                    // a block. See allocateStampBlock.
+                    baseMsOffset: allocateStampBlock(stampBlockSize())
                 });
                 item.runIds = w.runIds;
                 item.lastOutMainPath = w.lastOutMainPath;
@@ -1833,7 +1855,7 @@ async function runTracerBatch(opts) {
                         key: targ.key,
                         label: targ.label
                     };
-                    const baseMsOffset = Date.now() + i * 60000;
+                    const baseMsOffset = allocateStampBlock(stampBlockSize());
                     const w = writeSixModesForPayload(payload, {
                         tracerTarget,
                         fromDate: opts.fromDate,
@@ -1891,7 +1913,7 @@ async function runTracerBatch(opts) {
                     const progressLabel =
                         targ.kind === 'city' ? `City · ${targ.label}` : `State · ${targ.label}`;
                     const tracerTarget = { type: 'region', kind: targ.kind, key: targ.key, label: targ.label };
-                    const baseMsOffset = Date.now() + rIdx * 60000;
+                    const baseMsOffset = allocateStampBlock(stampBlockSize());
                     rIdx++;
 
                     assertTracerPayload(synthetic, {
