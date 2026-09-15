@@ -17,11 +17,24 @@ import {
     closeListecPool,
     fetchAllWorksheetReports,
     fetchAllWorksheetReportsByCodes,
+    fetchWorksheetSummary,
+    probeSummaryArtifacts,
     getListecPool,
     QueryAbortedError,
 } from './listec.client';
 import type { WorksheetReportFilters } from './listec.types';
 import { aggregatePackages } from './listec.aggregate';
+
+/**
+ * Set by the startup probe when dbo.usp_listec_worksheet_summary and its TVP
+ * are deployed. LISTEC_SUMMARY_SP=0 forces the paged JSON path regardless —
+ * the one-line rollback if the summary counts ever disagree with the legacy
+ * ones.
+ */
+let summarySpAvailable = false;
+function useSummaryPath(): boolean {
+  return summarySpAvailable && process.env.LISTEC_SUMMARY_SP !== '0';
+}
 import {
     resolveBusinessUnitId,
     resolveDepartmentId,
@@ -211,14 +224,23 @@ app.get('/api/worksheet-reports/packages', async (req, res) => {
       }
     }
 
-    const rows = await fetchAllWorksheetReports(filters, { signal });
-    const summary = aggregatePackages(rows, {
+    const aggOpts = {
       bucketCodes,
       bucketCities: bucketCities.length ? bucketCities : undefined,
       bucketStates: bucketStates.length ? bucketStates : undefined,
       mccGeoLookup,
-    });
-    res.json({ ...summary, resolved, unresolved, filters });
+    };
+
+    if (useSummaryPath()) {
+      // One SP call: slim sample rows + per-code buckets. No JSON, no paging.
+      const { rows, byCode } = await fetchWorksheetSummary(filters, bucketCodes, { signal });
+      const summary = aggregatePackages(rows, { ...aggOpts, byCode });
+      return res.json({ ...summary, resolved, unresolved, filters, engine: 'summary' });
+    }
+
+    const rows = await fetchAllWorksheetReports(filters, { signal });
+    const summary = aggregatePackages(rows, aggOpts);
+    res.json({ ...summary, resolved, unresolved, filters, engine: 'paged' });
   } catch (e) {
     if (isAborted(e)) {
       console.warn('[listec] /packages cancelled by caller — SP request aborted.');
@@ -277,6 +299,24 @@ app.get('/api/worksheet-reports/packages-by-codes', async (req, res) => {
             .filter(Boolean)
         : [];
 
+    if (useSummaryPath()) {
+      // by-codes semantics: exact client-code match, BU matched on the sample only.
+      const { rows, byCode } = await fetchWorksheetSummary(byCodesFilters, bucketCodes, {
+        clientCodes: codes,
+        buViaClient: false,
+        signal,
+      });
+      const summary = aggregatePackages(rows, { bucketCodes, byCode });
+      return res.json({
+        ...summary,
+        resolved,
+        unresolved,
+        filters: byCodesFilters,
+        clientCodesUsed: codes,
+        engine: 'summary',
+      });
+    }
+
     const rows = await fetchAllWorksheetReportsByCodes(byCodesFilters, codes, { signal });
     const summary = aggregatePackages(rows, { bucketCodes });
     res.json({
@@ -285,6 +325,7 @@ app.get('/api/worksheet-reports/packages-by-codes', async (req, res) => {
       unresolved,
       filters: byCodesFilters,
       clientCodesUsed: codes,
+      engine: 'paged',
     });
   } catch (e) {
     if (isAborted(e)) {
@@ -445,9 +486,30 @@ async function probeByCodesArtifacts(): Promise<void> {
   }
 }
 
+/**
+ * Startup probe for the summary procedure. When both artefacts are present
+ * the package routes switch to the single-pass path; otherwise they keep the
+ * paged JSON drain and say so in the boot log.
+ */
+async function probeSummary(): Promise<void> {
+  try {
+    const { sp, tvp } = await probeSummaryArtifacts();
+    summarySpAvailable = sp && tvp;
+    console.log(
+      `[listec] summary artefacts: SP=${sp ? 'present' : 'MISSING'}, TVP=${tvp ? 'present' : 'MISSING'} — ` +
+        (summarySpAvailable
+          ? `package counts use the single-pass summary path${process.env.LISTEC_SUMMARY_SP === '0' ? ' (DISABLED by LISTEC_SUMMARY_SP=0)' : ''}.`
+          : 'package counts use the paged JSON path; run `npm run deploy:sp` to install.'),
+    );
+  } catch (e) {
+    console.warn(`[listec] summary artefact probe failed: ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
 const server = app.listen(port, host, () => {
   console.log(`Worksheet API listening on http://${host}:${port}`);
   void probeByCodesArtifacts();
+  void probeSummary();
 });
 
 async function shutdown() {

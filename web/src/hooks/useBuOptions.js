@@ -5,7 +5,7 @@ import { LS_BU_SELECTION, readJSON, writeJSON } from '../lib/storage.js';
 
 export function useBuOptions() {
     const { loading: authLoading, authRequired, user } = useAuth();
-    const [options, setOptions] = useState(/** @type {{id:string,label:string}[]} */ ([]));
+    const [options, setOptions] = useState(/** @type {{id:string,label:string,title?:string}[]} */ ([]));
     const [error, setError] = useState(null);
     const [selected, setSelected] = useState(() => new Set(readJSON(LS_BU_SELECTION, []).map(String)));
 
@@ -77,9 +77,14 @@ export function useBuOptions() {
                 const opts = list
                     .map((row) => {
                         if (typeof row === 'string') return { id: row, label: row };
-                        const label = String(row.name || row.label || row.id || '').trim();
+                        // The server sends one row per unit: `label` is the chip
+                        // text (the short code), `name` the full spelling for the
+                        // tooltip. Older servers send only `name`.
+                        const label = String(row.label || row.name || row.id || '').trim();
                         const id = row.id != null ? String(row.id) : label;
-                        return label ? { id, label } : null;
+                        const name = String(row.name || '').trim();
+                        const title = name && name !== label ? name : undefined;
+                        return label ? { id, label, title } : null;
                     })
                     .filter(Boolean)
                     .sort((a, b) => a.label.localeCompare(b.label));

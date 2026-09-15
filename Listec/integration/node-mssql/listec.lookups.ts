@@ -40,7 +40,16 @@ export interface RegionStateNode {
 }
 
 let buCache: CodeMap | null = null;
+/** Raw business-unit master rows, one per id, kept beside the lookup map so
+ *  callers can present each unit once instead of once per spelling. */
+let buRowsCache: BusinessUnitRow[] | null = null;
 let statusCache: CodeMap | null = null;
+
+export interface BusinessUnitRow {
+  id: number;
+  code: string | null;
+  name: string | null;
+}
 let deptCache: CodeMap | null = null;
 let mccGeoCache: Map<string, MccGeoLookup> | null = null;
 let stateNamesCache: Map<number, string> | null = null;
@@ -64,9 +73,22 @@ async function loadBu(): Promise<CodeMap> {
       'SELECT id, BusinessUnitCode, BusinessUnitName FROM dbo.tbl_med_business_unit_master',
     );
   const map = emptyMap();
-  for (const row of r.recordset) add(map, row.BusinessUnitCode, row.BusinessUnitName, row.id);
+  const rows: BusinessUnitRow[] = [];
+  for (const row of r.recordset) {
+    add(map, row.BusinessUnitCode, row.BusinessUnitName, row.id);
+    const code = row.BusinessUnitCode ? row.BusinessUnitCode.trim() : '';
+    const name = row.BusinessUnitName ? row.BusinessUnitName.trim() : '';
+    if (code || name) rows.push({ id: row.id, code: code || null, name: name || null });
+  }
   buCache = map;
+  buRowsCache = rows;
   return map;
+}
+
+/** One entry per business unit (by master id), with both spellings. */
+export async function dumpBusinessUnits(): Promise<BusinessUnitRow[]> {
+  if (!buRowsCache) await loadBu();
+  return (buRowsCache ?? []).map((r) => ({ ...r }));
 }
 
 async function loadStatus(): Promise<CodeMap> {
@@ -277,11 +299,20 @@ export function clearLookupCaches(): void {
 }
 
 /** For the /api/lookups debug endpoint. */
-export async function dumpLookups(): Promise<{ businessUnits: string[]; statuses: string[]; departments: string[] }> {
-  const [bu, st, dp] = await Promise.all([loadBu(), loadStatus(), loadDept()]);
+export async function dumpLookups(): Promise<{
+  businessUnits: string[];
+  businessUnitRows: BusinessUnitRow[];
+  statuses: string[];
+  departments: string[];
+}> {
+  const [bu, st, dp, buRows] = await Promise.all([loadBu(), loadStatus(), loadDept(), dumpBusinessUnits()]);
   const keysOf = (m: CodeMap) => [...new Set([...m.byCodeUpper.keys(), ...m.byNameUpper.keys()])].sort();
   return {
+    // `businessUnits` stays the flat union of every accepted spelling (what
+    // the SP filter resolves); `businessUnitRows` is the same set grouped by
+    // master id, for UIs that should show each unit once.
     businessUnits: keysOf(bu),
+    businessUnitRows: buRows,
     statuses: keysOf(st),
     departments: keysOf(dp),
   };

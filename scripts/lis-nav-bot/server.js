@@ -437,13 +437,42 @@ function buildTileFromRunFiles(outDir, packagesFileName) {
     };
 }
 
+/**
+ * One chip per business unit. Listec's flat `businessUnits` list is the union
+ * of every accepted spelling — a unit whose master row has both a code and a
+ * name (QUGEN / QUGEN PATHLABS, SRI NAGAR / SRINAGAR, …) appears twice, and
+ * selecting both ran the same drain twice. Group by master id, show the short
+ * code as the chip and keep the full name for the tooltip. Either spelling
+ * resolves at the SP, so the code is what gets submitted.
+ *
+ * @param {{ id: number, code: string|null, name: string|null }[]} rows
+ * @returns {{ id: string, label: string, name: string|null }[]}
+ */
+function businessUnitOptionsFromRows(rows) {
+    /** @type {Map<string, { id: string, label: string, name: string|null }>} */
+    const byId = new Map();
+    for (const row of rows) {
+        if (!row || row.id == null) continue;
+        const code = row.code ? String(row.code).trim() : '';
+        const name = row.name ? String(row.name).trim() : '';
+        const label = code || name;
+        if (!label) continue;
+        const id = String(row.id);
+        if (byId.has(id)) continue;
+        byId.set(id, { id, label, name: name || null });
+    }
+    return [...byId.values()].sort((a, b) => a.label.localeCompare(b.label));
+}
+
 async function fetchListecLookups() {
     try {
         const r = await fetch(`${listecApiBase()}/api/lookups`);
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         const j = await r.json();
+        const rows = Array.isArray(j.businessUnitRows) ? j.businessUnitRows : [];
+        const deduped = rows.length ? businessUnitOptionsFromRows(rows) : null;
         return {
-            businessUnits: Array.isArray(j.businessUnits) ? j.businessUnits : [],
+            businessUnits: deduped && deduped.length ? deduped : Array.isArray(j.businessUnits) ? j.businessUnits : [],
             statuses: Array.isArray(j.statuses) ? j.statuses : [],
             departments: Array.isArray(j.departments) ? j.departments : [],
             error: null

@@ -5,7 +5,7 @@
  * a drop-in result for the existing UI.
  */
 
-import type { WorksheetReportRow } from './listec.types';
+import type { AggregateInputRow, SummaryCodeRow } from './listec.types';
 
 export interface PackagesAggregate {
     rowCount: number;
@@ -52,6 +52,13 @@ export interface AggregateOptions {
      * shape regardless of data presence.
      */
     bucketCodes?: string[];
+    /**
+     * Pre-bucketed (test_code, sid, result_rows) rows from
+     * dbo.usp_listec_worksheet_summary. When present, the per-code buckets
+     * come from here and each row's `results` array is never consulted — the
+     * summary path does not fetch it at all.
+     */
+    byCode?: SummaryCodeRow[];
     /** Normalised city keys (same as `/api/regions` city.key). Requires `mccGeoLookup`. */
     bucketCities?: string[];
     bucketStates?: string[];
@@ -92,7 +99,7 @@ function uniqueLabels(text: string): string[] {
 }
 
 export function aggregatePackages(
-    rawRows: WorksheetReportRow[],
+    rawRows: AggregateInputRow[],
     opts: AggregateOptions = {},
 ): PackagesAggregate {
     const rows = rawRows.map((r) => ({
@@ -155,15 +162,28 @@ export function aggregatePackages(
             rowsByCode[code] = 0;
         }
 
-        for (const r of rawRows) {
-            const sid = String(r.sid ?? '').trim();
-            if (!sid) continue;
-            const results = Array.isArray(r.results) ? r.results : [];
-            for (const tr of results) {
-                const code = String(tr?.test_code ?? '').trim().toLowerCase();
+        if (opts.byCode) {
+            // Summary SP already grouped result rows per (code, sid); fold
+            // case variants of a code together the same way the JSON walk did.
+            for (const b of opts.byCode) {
+                const code = String(b.test_code ?? '').trim().toLowerCase();
                 if (!code || !wanted.has(code)) continue;
+                const sid = String(b.sid ?? '').trim();
+                if (!sid) continue;
                 sidsByCode[code].add(sid);
-                rowsByCode[code] += 1;
+                rowsByCode[code] += Number(b.result_rows) || 0;
+            }
+        } else {
+            for (const r of rawRows) {
+                const sid = String(r.sid ?? '').trim();
+                if (!sid) continue;
+                const results = Array.isArray(r.results) ? r.results : [];
+                for (const tr of results) {
+                    const code = String(tr?.test_code ?? '').trim().toLowerCase();
+                    if (!code || !wanted.has(code)) continue;
+                    sidsByCode[code].add(sid);
+                    rowsByCode[code] += 1;
+                }
             }
         }
 

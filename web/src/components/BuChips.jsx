@@ -32,6 +32,7 @@ export function BuChips({ source, options, selected, onToggle, onSelectAll, onCl
                             type="button"
                             className="chip bu-chip"
                             aria-pressed={selected.has(opt.label) ? 'true' : 'false'}
+                            title={opt.title}
                             onClick={() => onToggle(opt.label)}
                         >
                             {opt.label}

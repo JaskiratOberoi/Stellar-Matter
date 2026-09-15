@@ -65,6 +65,19 @@ BEGIN
 END
 GO
 
+-- 3b) The single-pass summary SP and its test-code TVP (guarded likewise).
+IF OBJECT_ID(N'dbo.usp_listec_worksheet_summary', N'P') IS NOT NULL
+BEGIN
+    GRANT EXECUTE ON dbo.usp_listec_worksheet_summary TO listec_ro;
+END
+GO
+
+IF EXISTS (SELECT 1 FROM sys.types WHERE name = N'TestCodeList' AND is_table_type = 1)
+BEGIN
+    GRANT REFERENCES ON TYPE::dbo.TestCodeList TO listec_ro;
+END
+GO
+
 -- 4) Verification — echoed in the deploy log for proof.
 SELECT
     m.name AS member_name,

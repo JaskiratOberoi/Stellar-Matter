@@ -63,3 +63,22 @@ export interface WorksheetReportRow {
   tat: string | null;
   results: TestResult[];
 }
+
+/** Result set 1 of dbo.usp_listec_worksheet_summary: one row per sample. */
+export interface SummaryRow {
+  sid: string;
+  test_names_csv: string | null;
+  client_code: string | null;
+}
+
+/** Result set 2 of dbo.usp_listec_worksheet_summary: result rows per (code, sid). */
+export interface SummaryCodeRow {
+  test_code: string;
+  sid: string;
+  result_rows: number;
+}
+
+/** The subset of a worksheet row the package aggregator actually reads. */
+export type AggregateInputRow = Pick<WorksheetReportRow, 'sid' | 'test_names_csv' | 'client_code'> & {
+  results?: TestResult[];
+};

@@ -8,7 +8,13 @@
  */
 
 import sql from 'mssql';
-import type { WorksheetReportFilters, WorksheetReportRow, TestResult } from './listec.types';
+import type {
+  WorksheetReportFilters,
+  WorksheetReportRow,
+  TestResult,
+  SummaryRow,
+  SummaryCodeRow,
+} from './listec.types';
 
 let poolPromise: Promise<sql.ConnectionPool> | null = null;
 
@@ -360,4 +366,110 @@ export async function fetchAllWorksheetReportsByCodes(
       `${JSON.stringify({ fromDate: filters.fromDate, toDate: filters.toDate })}.`,
   );
   return out;
+}
+
+/** Build the dbo.TestCodeList TVP. Case-insensitive dedupe; the SP compares with UPPER(). */
+function buildTestCodeListTvp(codes: string[]): sql.Table {
+  const table = new sql.Table('dbo.TestCodeList');
+  table.create = false;
+  table.columns.add('code', sql.NVarChar(50), { nullable: false, primary: true });
+  const seen = new Set<string>();
+  for (const raw of codes) {
+    const c = String(raw ?? '').trim();
+    if (!c) continue;
+    const key = c.toUpperCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    table.rows.add(c);
+  }
+  return table;
+}
+
+export interface WorksheetSummary {
+  rows: SummaryRow[];
+  byCode: SummaryCodeRow[];
+}
+
+/**
+ * One call to dbo.usp_listec_worksheet_summary: every sample in the window
+ * (sid, test names, client code) plus result-row counts per (test code, sid)
+ * for `bucketCodes`. Replaces the paged JSON drain for the package counts —
+ * no per-row JSON, no OFFSET re-scans. `clientCodes` non-empty switches the
+ * client filter to exact TVP match (the by-codes semantics); `buViaClient`
+ * false restricts the BU match to the sample's own BU (also by-codes
+ * semantics).
+ */
+export async function fetchWorksheetSummary(
+  f: Omit<WorksheetReportFilters, 'page' | 'pageSize'>,
+  bucketCodes: string[],
+  opts: { clientCodes?: string[]; buViaClient?: boolean; signal?: AbortSignal } = {},
+): Promise<WorksheetSummary> {
+  const pool = await getListecPool();
+  const clientCodes = opts.clientCodes ?? [];
+
+  return withRetry(async () => {
+    throwIfAborted(opts.signal);
+    const req = pool.request();
+    req.input('from_date', sql.Date, f.fromDate);
+    req.input('to_date', sql.Date, f.toDate);
+    req.input('bucket_test_codes', buildTestCodeListTvp(bucketCodes));
+    req.input('client_codes', buildClientCodeListTvp(clientCodes));
+    req.input('from_hour', sql.TinyInt, f.fromHour ?? 0);
+    req.input('to_hour', sql.TinyInt, f.toHour ?? 24);
+    req.input('patient_name', sql.NVarChar(200), f.patientName ?? null);
+    req.input('status_id', sql.Int, f.statusId ?? null);
+    // With a code list the exact match replaces the LIKE filter, as in the by-codes SP.
+    req.input('client_code', sql.NVarChar(50), clientCodes.length ? null : (f.clientCode ?? null));
+    req.input('sid', sql.NVarChar(50), f.sid ?? null);
+    req.input('department_id', sql.Int, f.departmentId ?? null);
+    req.input('business_unit_id', sql.Int, f.businessUnitId ?? null);
+    req.input('bu_via_client', sql.Bit, opts.buViaClient === false ? 0 : 1);
+    req.input('test_code', sql.NVarChar(50), f.testCode ?? null);
+    req.input('pid', sql.Int, f.pid ?? null);
+    req.input('include_unauthorized', sql.Bit, f.includeUnauthorized === false ? 0 : 1);
+
+    const onAbort = () => {
+      try {
+        req.cancel();
+      } catch {
+        /* already settled */
+      }
+    };
+    opts.signal?.addEventListener('abort', onAbort, { once: true });
+    try {
+      const result = await req.execute<Record<string, unknown>>('dbo.usp_listec_worksheet_summary');
+      const rs1 = result.recordsets[0] ?? [];
+      const rs2 = result.recordsets[1] ?? [];
+      const rows: SummaryRow[] = [...rs1].map((r) => ({
+        sid: String(r.sid),
+        test_names_csv: (r.test_names_csv as string) ?? null,
+        client_code: (r.client_code as string) ?? null,
+      }));
+      const byCode: SummaryCodeRow[] = [...rs2].map((r) => ({
+        test_code: String(r.test_code ?? ''),
+        sid: String(r.sid),
+        result_rows: Number(r.result_rows) || 0,
+      }));
+      return { rows, byCode };
+    } catch (e) {
+      if (opts.signal?.aborted) throw new QueryAbortedError('Aborted during dbo.usp_listec_worksheet_summary');
+      throw e;
+    } finally {
+      opts.signal?.removeEventListener('abort', onAbort);
+    }
+  });
+}
+
+/** Startup probe: is the summary SP (and its TVP) deployed on this Noble instance? */
+export async function probeSummaryArtifacts(): Promise<{ sp: boolean; tvp: boolean }> {
+  const pool = await getListecPool();
+  const r = await pool.request().query<{ name: string; kind: string }>(`
+    SELECT name, 'PROC' AS kind FROM sys.objects
+    WHERE name = N'usp_listec_worksheet_summary' AND type IN ('P','PC')
+    UNION ALL
+    SELECT name, 'TYPE' AS kind FROM sys.types
+    WHERE name = N'TestCodeList' AND is_table_type = 1
+  `);
+  const have = new Set(r.recordset.map((x) => `${x.kind}:${x.name}`));
+  return { sp: have.has('PROC:usp_listec_worksheet_summary'), tvp: have.has('TYPE:TestCodeList') };
 }
