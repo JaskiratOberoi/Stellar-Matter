@@ -1,17 +1,40 @@
 import { useCallback, useEffect, useState } from 'react';
 import { apiFetch, getToken } from '../apiClient.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
-import { LS_BU_SELECTION, readJSON, writeJSON } from '../lib/storage.js';
+import { LS_BU_SELECTION, LS_BU_GROUP_SELECTION, readJSON, writeJSON } from '../lib/storage.js';
 
 export function useBuOptions() {
     const { loading: authLoading, authRequired, user } = useAuth();
     const [options, setOptions] = useState(/** @type {{id:string,label:string,title?:string}[]} */ ([]));
     const [error, setError] = useState(null);
     const [selected, setSelected] = useState(() => new Set(readJSON(LS_BU_SELECTION, []).map(String)));
+    // Temporary sub-BU groups (server data/business-unit-groups.json) — keyed
+    // by id, kept apart from the BU label set so "All" never double-counts a
+    // parent and its group.
+    const [groups, setGroups] = useState(
+        /** @type {{ id: string, label: string, name: string|null, parent: string|null, codeCount: number }[]} */ ([])
+    );
+    const [groupSelected, setGroupSelected] = useState(() => new Set(readJSON(LS_BU_GROUP_SELECTION, []).map(String)));
 
     const persist = useCallback((next) => {
         writeJSON(LS_BU_SELECTION, [...next]);
     }, []);
+    const persistGroups = useCallback((next) => {
+        writeJSON(LS_BU_GROUP_SELECTION, [...next]);
+    }, []);
+
+    const toggleGroup = useCallback(
+        (id) => {
+            setGroupSelected((prev) => {
+                const next = new Set(prev);
+                if (next.has(id)) next.delete(id);
+                else next.add(id);
+                persistGroups(next);
+                return next;
+            });
+        },
+        [persistGroups]
+    );
 
     const toggle = useCallback(
         (label) => {
@@ -40,7 +63,11 @@ export function useBuOptions() {
             persist(new Set());
             return new Set();
         });
-    }, [persist]);
+        setGroupSelected(() => {
+            persistGroups(new Set());
+            return new Set();
+        });
+    }, [persist, persistGroups]);
 
     useEffect(() => {
         if (authLoading) return;
@@ -89,6 +116,27 @@ export function useBuOptions() {
                     .filter(Boolean)
                     .sort((a, b) => a.label.localeCompare(b.label));
                 setOptions(opts);
+                const grp = (Array.isArray(j.businessUnitGroups) ? j.businessUnitGroups : [])
+                    .map((g) => {
+                        const id = String((g && g.id) || '').trim();
+                        const label = String((g && g.label) || id).trim();
+                        if (!id || !label) return null;
+                        return {
+                            id,
+                            label,
+                            name: g.name ? String(g.name) : null,
+                            parent: g.parent ? String(g.parent).trim() : null,
+                            codeCount: Number(g.codeCount) || 0
+                        };
+                    })
+                    .filter(Boolean);
+                setGroups(grp);
+                setGroupSelected((prev) => {
+                    const known = new Set(grp.map((g) => g.id));
+                    const next = new Set([...prev].filter((id) => known.has(id)));
+                    if (next.size !== prev.size) persistGroups(next);
+                    return next.size !== prev.size ? next : prev;
+                });
                 setError(j.error ? String(j.error) : null);
                 // Drop selections that no longer exist on the server.
                 setSelected((prev) => {
@@ -111,7 +159,7 @@ export function useBuOptions() {
         return () => {
             cancelled = true;
         };
-    }, [persist, authLoading, authRequired, user]);
+    }, [persist, persistGroups, authLoading, authRequired, user]);
 
-    return { options, error, selected, toggle, selectAll, clear };
+    return { options, groups, error, selected, groupSelected, toggle, toggleGroup, selectAll, clear };
 }

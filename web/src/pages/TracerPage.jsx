@@ -50,6 +50,7 @@ export function TracerPage({
     clientPagesByNorm,
     buOptions,
     buSelected,
+    buGroupSelected = new Set(),
     buActions,
     loadError,
     errors,
@@ -202,6 +203,8 @@ export function TracerPage({
         }
         const sp = Array.isArray(snap.salesPeople) ? snap.salesPeople : [];
         if (sp.length > 0) body.salesPeople = sp;
+        const bg = Array.isArray(snap.buGroups) ? snap.buGroups : [];
+        if (bg.length > 0) body.buGroups = bg.map((g) => ({ id: g.id }));
         if (snap.collate) body.collate = true;
         return body;
     }, []);
@@ -226,6 +229,15 @@ export function TracerPage({
                 key: String(p.id),
                 label: String(p.label || p.id)
             }));
+            // Group chips land on the wall as their own banner row, labelled
+            // the way the server's progress row is.
+            for (const g of snap.buGroups || []) {
+                scopeTargets.push({
+                    kind: 'group',
+                    key: String(g.id).toLowerCase(),
+                    label: g.parent ? `${g.label} · under ${g.parent}` : `${g.label} · group`
+                });
+            }
 
             setTracerBusy(true);
             try {
@@ -292,7 +304,7 @@ export function TracerPage({
     const printSummaryParts = [];
     if (collatedBannerRow) printSummaryParts.push('collated');
     if (buCount) printSummaryParts.push(`${buCount} business unit${buCount === 1 ? '' : 's'}`);
-    if (regCount) printSummaryParts.push(`${regCount} sales scope${regCount === 1 ? '' : 's'}`);
+    if (regCount) printSummaryParts.push(`${regCount} scope${regCount === 1 ? '' : 's'}`);
     const firstRow = collatedBannerRow || bannerRows[0] || regionBannerRows[0] || null;
     const windowLabel = firstRow ? fmtDateRange(firstRow.fromDate, firstRow.toDate) : '';
     if (windowLabel) printSummaryParts.push(windowLabel);
@@ -341,6 +353,7 @@ export function TracerPage({
                 <TracerForm
                     buOptions={buOptions}
                     buSelected={buSelected}
+                    buGroupSelected={buGroupSelected}
                     buActions={buActions}
                     salesUsers={salesUsers}
                     salesLoading={salesLoading}

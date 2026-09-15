@@ -8,9 +8,10 @@ const LS_TRACER_COLLATE = 'lis-nav-bot.tracer.collate';
 
 /**
  * @param {{
- *   buOptions: { options: { id: string, label: string }[], error: string | null },
+ *   buOptions: { options: { id: string, label: string }[], groups?: { id: string, label: string, parent: string|null, name: string|null, codeCount: number }[], error: string | null },
  *   buSelected: Set<string>,
- *   buActions: { toggle: (label: string) => void, selectAll: () => void, clear: () => void },
+ *   buGroupSelected?: Set<string>,
+ *   buActions: { toggle: (label: string) => void, toggleGroup?: (id: string) => void, selectAll: () => void, clear: () => void },
  *   salesUsers: { userId: number, label: string, codeCount?: number }[],
  *   salesLoading: boolean,
  *   salesLookupError: string | null,
@@ -25,6 +26,7 @@ const LS_TRACER_COLLATE = 'lis-nav-bot.tracer.collate';
  *     toHour: string,
  *     bu: string,
  *     businessUnits: string[],
+ *     buGroups: { id: string, label: string, parent: string|null }[],
  *     salesPeople: { id: string | number, label: string }[],
  *     collate: boolean,
  *   }) => void | Promise<void>,
@@ -33,6 +35,7 @@ const LS_TRACER_COLLATE = 'lis-nav-bot.tracer.collate';
 export function TracerForm({
     buOptions,
     buSelected,
+    buGroupSelected = new Set(),
     buActions,
     salesUsers,
     salesLoading,
@@ -69,9 +72,11 @@ export function TracerForm({
     const hasBuPick = buSelected.size > 0;
     const hasBuFallback = buOptions.options.length === 0 && String(bu || '').trim() !== '';
     const hasSalesPick = salesSelectedIds.size > 0;
+    const buGroups = (buOptions.groups || []).filter((g) => buGroupSelected.has(g.id));
+    const hasGroupPick = buGroups.length > 0;
 
-    /** At least one of BU chips / BU text fallback / salesperson — matches server validation */
-    const canRun = datesOk && (hasBuPick || hasBuFallback || hasSalesPick) && !viewerDisabled;
+    /** At least one of BU chips / BU group / BU text fallback / salesperson — matches server validation */
+    const canRun = datesOk && (hasBuPick || hasGroupPick || hasBuFallback || hasSalesPick) && !viewerDisabled;
 
     async function handleSubmit(e) {
         e.preventDefault();
@@ -89,6 +94,7 @@ export function TracerForm({
             toHour,
             bu,
             businessUnits,
+            buGroups: buGroups.map((g) => ({ id: g.id, label: g.label, parent: g.parent })),
             salesPeople,
             collate
         });
@@ -153,6 +159,9 @@ export function TracerForm({
             </div>
 
             <BuChips
+                groups={buOptions.groups || []}
+                groupSelected={buGroupSelected}
+                onToggleGroup={buActions.toggleGroup}
                 source="sql"
                 options={buOptions.options}
                 selected={buSelected}

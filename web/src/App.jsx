@@ -94,7 +94,17 @@ function TracerRoute() {
 
     const clientPagesByNorm = usePackagePagesMap();
     const { tiles, errors, loadError, loadedAt, reload: reloadTiles } = useTiles();
-    const { options, error: buError, selected: buSelected, toggle, selectAll, clear: clearBu } = useBuOptions();
+    const {
+        options,
+        groups: buGroups,
+        error: buError,
+        selected: buSelected,
+        groupSelected: buGroupSelected,
+        toggle,
+        toggleGroup,
+        selectAll,
+        clear: clearBu
+    } = useBuOptions();
 
     const {
         status,
@@ -180,9 +190,10 @@ function TracerRoute() {
                     cancelling={cancelling}
                     cancellable={!!(status && status.cancellable)}
                     clientPagesByNorm={clientPagesByNorm}
-                    buOptions={{ options, error: buError }}
+                    buOptions={{ options, groups: buGroups, error: buError }}
                     buSelected={buSelected}
-                    buActions={{ toggle, selectAll, clear: clearBu }}
+                    buGroupSelected={buGroupSelected}
+                    buActions={{ toggle, toggleGroup, selectAll, clear: clearBu }}
                     loadError={loadError}
                     errors={errors}
                     submitError={submitError}

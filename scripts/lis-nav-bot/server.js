@@ -12,7 +12,7 @@ const { loadLisNavBotEnv } = require('../../cli/lib/load-env');
 loadLisNavBotEnv(__dirname);
 
 const { runLisNavBot } = require('../../cli/lib/run');
-const { runTracerBatch, parseTracerRegions, parseTracerSalesPeople, ALL_SPECIALTY_CODES } = require('../../cli/lib/sql-tracer-source');
+const { runTracerBatch, parseTracerRegions, parseTracerSalesPeople, parseTracerBuGroups, ALL_SPECIALTY_CODES } = require('../../cli/lib/sql-tracer-source');
 
 // Phase 8 + Phase 12 share the same Postgres pool. We require it here once
 // so /api/regions, /api/runs/:id authz, and tracer can all query without
@@ -88,6 +88,93 @@ function readPackagePagesFile() {
     } catch {
         return empty;
     }
+}
+
+const BU_GROUPS_PATH = path.join(__dirname, 'data', 'business-unit-groups.json');
+
+/**
+ * Temporary business-unit groups (a chip = an explicit client-code list,
+ * nested under a parent BU). Read on every hit, like package-pages.json, so
+ * the code list can be edited on the host without a rebuild — the file is
+ * bind-mounted read-only into the container.
+ *
+ * @returns {{ id: string, label: string, name: string|null, parent: string|null, codes: string[] }[]}
+ */
+function readBusinessUnitGroupsFile() {
+    try {
+        if (!fs.existsSync(BU_GROUPS_PATH)) return [];
+        const j = JSON.parse(fs.readFileSync(BU_GROUPS_PATH, 'utf8'));
+        const arr = j && Array.isArray(j.groups) ? j.groups : [];
+        const out = [];
+        const seen = new Set();
+        for (const g of arr) {
+            if (!g || typeof g !== 'object') continue;
+            const id = String(g.id || '').trim().toLowerCase();
+            if (!id || seen.has(id)) continue;
+            seen.add(id);
+            const label = String(g.label || id).trim().toUpperCase();
+            const parent = g.parent != null && String(g.parent).trim() ? String(g.parent).trim().toUpperCase() : null;
+            const codes = [
+                ...new Set((Array.isArray(g.codes) ? g.codes : []).map((c) => String(c || '').trim().toUpperCase()).filter(Boolean))
+            ];
+            out.push({ id, label, name: g.name != null ? String(g.name).trim() || null : null, parent, codes });
+        }
+        return out;
+    } catch (e) {
+        console.warn(`[stellar-matter] business-unit-groups.json unreadable: ${e && e.message ? e.message : e}`);
+        return [];
+    }
+}
+
+/**
+ * The LIS stores many client codes with the lab name in the same field
+ * ("HLD0519 MADHAV PATHOLOGY LAB") and some with lettered sub-units
+ * ("UK0204 A  PPL & DC"). The by-codes SP matches MCCUnitCode exactly, so a
+ * bare sheet code has to be widened to every master code that begins with
+ * it. The Postgres client_locations mirror carries the master verbatim.
+ *
+ * @param {string[]} codes bare codes, upper-case
+ * @returns {Promise<string[]>} the input plus every matching master code
+ */
+async function expandClientCodes(codes) {
+    if (!codes.length || !useDatabase()) return codes;
+    try {
+        const r = await getPool().query(
+            `SELECT code FROM client_locations WHERE upper(split_part(code, ' ', 1)) = ANY($1::text[])`,
+            [codes]
+        );
+        const set = new Set(codes);
+        for (const row of r.rows) set.add(String(row.code).trim().toUpperCase());
+        return [...set];
+    } catch (e) {
+        console.warn(`[stellar-matter] client code expansion failed (running bare codes): ${e && e.message ? e.message : e}`);
+        return codes;
+    }
+}
+
+/**
+ * Resolve the client's `buGroups: [{ id }]` against the groups file. Unknown
+ * ids are dropped (a stale saved selection), so the run never carries a
+ * chip nobody can explain. Codes are widened to the LIS spellings.
+ * @param {unknown} raw
+ */
+async function resolveTracerBuGroups(raw) {
+    const groups = readBusinessUnitGroupsFile();
+    const byId = new Map(groups.map((g) => [g.id, g]));
+    const { targets } = parseTracerBuGroups(raw);
+    const out = [];
+    for (const t of targets) {
+        const g = byId.get(t.key);
+        if (!g) continue;
+        const codes = await expandClientCodes(g.codes);
+        out.push({ id: g.id, label: g.label, parent: g.parent, codes });
+    }
+    return out;
+}
+
+/** Progress-row label for a group scope; must match scopeProgressLabel in sql-tracer-source. */
+function buGroupProgressLabel(g) {
+    return g.parent ? `${g.label} · under ${g.parent}` : `${g.label} · group`;
 }
 
 /**
@@ -701,6 +788,14 @@ function runChildIdFromOutMainPath(p) {
 
 app.get('/api/bu', async (_req, res) => {
     const data = await fetchListecLookups();
+    // Temporary sub-BU chips, rendered nested under `parent` by the client.
+    data.businessUnitGroups = readBusinessUnitGroupsFile().map((g) => ({
+        id: g.id,
+        label: g.label,
+        name: g.name,
+        parent: g.parent,
+        codeCount: g.codes.length
+    }));
     res.json(data);
 });
 
@@ -1389,7 +1484,8 @@ app.post('/api/tracer-run', requireRunStarter, async (req, res) => {
     }
     const regInfo = parseTracerRegions(body.regions);
     const salesInfo = parseTracerSalesPeople(body.salesPeople);
-    if (businessUnits.length === 0 && regInfo.targets.length === 0 && salesInfo.targets.length === 0) {
+    const buGroups = await resolveTracerBuGroups(body.buGroups);
+    if (businessUnits.length === 0 && regInfo.targets.length === 0 && salesInfo.targets.length === 0 && buGroups.length === 0) {
         return res.status(400).json({
             error: 'Select at least one business unit, region (state/city), and/or salesperson.'
         });
@@ -1429,6 +1525,9 @@ app.post('/api/tracer-run', requireRunStarter, async (req, res) => {
         if (salesInfo.targets.length) {
             parts.push(`${salesInfo.targets.length} sales`);
         }
+        if (buGroups.length) {
+            parts.push(`${buGroups.length} group${buGroups.length === 1 ? '' : 's'}`);
+        }
         const tail = parts.length ? ` + ${parts.join(' + ')}` : '';
         return `Collated · ${businessUnits.length} BU${businessUnits.length === 1 ? '' : 's'}${tail}`;
     })();
@@ -1460,6 +1559,15 @@ app.post('/api/tracer-run', requireRunStarter, async (req, res) => {
               error: null
           }));
     /** @type {{ bu: string, state: string, childRunId: null, error: null }[]} */
+    const groupProgressRows = collate
+        ? []
+        : buGroups.map((g) => ({
+              bu: buGroupProgressLabel(g),
+              state: 'queued',
+              childRunId: null,
+              error: null
+          }));
+    /** @type {{ bu: string, state: string, childRunId: null, error: null }[]} */
     const collatedProgressRows = collate
         ? [{ bu: collatedLabel, state: 'queued', childRunId: null, error: null }]
         : [];
@@ -1467,7 +1575,12 @@ app.post('/api/tracer-run', requireRunStarter, async (req, res) => {
     /** @type {string[]} */
     const queuedFanOutLabels = collate
         ? [collatedLabel]
-        : [...businessUnits, ...regionProgressRows.map((r) => r.bu), ...salesProgressRows.map((r) => r.bu)];
+        : [
+              ...businessUnits,
+              ...regionProgressRows.map((r) => r.bu),
+              ...salesProgressRows.map((r) => r.bu),
+              ...groupProgressRows.map((r) => r.bu)
+          ];
 
     const abortController = new AbortController();
     activeRunAbort = { runId, controller: abortController, kind: 'tracer' };
@@ -1488,7 +1601,7 @@ app.post('/api/tracer-run', requireRunStarter, async (req, res) => {
             queued: queuedFanOutLabels,
             completed: [],
             failed: [],
-            items: [...buProgressRows, ...regionProgressRows, ...salesProgressRows, ...collatedProgressRows]
+            items: [...buProgressRows, ...regionProgressRows, ...salesProgressRows, ...groupProgressRows, ...collatedProgressRows]
         },
         lastFanOut: null,
         cancelled: false
@@ -1508,6 +1621,7 @@ app.post('/api/tracer-run', requireRunStarter, async (req, res) => {
                 business_units: businessUnits,
                 regions: body.regions || null,
                 sales_people: body.salesPeople || null,
+                bu_groups: buGroups.length ? buGroups.map((g) => ({ id: g.id, parent: g.parent, codes: g.codes.length })) : null,
                 from_date: fromDate,
                 to_date: toDate,
                 bucket_test_codes: ALL_SPECIALTY_CODES,
@@ -1541,6 +1655,7 @@ app.post('/api/tracer-run', requireRunStarter, async (req, res) => {
                 businessUnits,
                 regions: body.regions,
                 salesPeople: body.salesPeople,
+                buGroups,
                 fromDate,
                 toDate,
                 fromHour,

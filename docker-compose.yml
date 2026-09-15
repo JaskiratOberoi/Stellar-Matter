@@ -33,6 +33,8 @@ services:
       # Pages-per-package map is hot-edited; bind read-only so a typo here
       # can't trash it from inside the container.
       - ./scripts/lis-nav-bot/data/package-pages.json:/app/scripts/lis-nav-bot/data/package-pages.json:ro
+      # Temporary BU groups (e.g. Bareilly under HLD): same hot-edit, read-only arrangement.
+      - ./scripts/lis-nav-bot/data/business-unit-groups.json:/app/scripts/lis-nav-bot/data/business-unit-groups.json:ro
     environment:
       NODE_ENV: production
       MATTER_APP_PORT: "4378"

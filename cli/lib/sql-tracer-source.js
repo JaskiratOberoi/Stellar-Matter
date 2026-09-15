@@ -822,6 +822,39 @@ function parseSalesPeople(raw) {
 }
 
 /**
+ * Tracer business-unit group chips — body.buGroups: `[{ id, label, parent, codes }]`.
+ * A group is a temporary sub-BU: an explicit client-code list that runs
+ * through the by-codes SP exactly like a city chip, and shows nested under
+ * its parent unit. The server resolves `codes` from
+ * scripts/lis-nav-bot/data/business-unit-groups.json before calling us.
+ *
+ * @returns {{ targets: { kind: 'group'; key: string; label: string; parent: string|null; codes: string[] }[] }}
+ */
+function parseBuGroups(raw) {
+    const arr = Array.isArray(raw) ? raw : [];
+    /** @type {{ kind: 'group'; key: string; label: string; parent: string|null; codes: string[] }[]} */
+    const targets = [];
+    const seen = new Set();
+    for (const o of arr) {
+        if (!o || typeof o !== 'object') continue;
+        const id = o.id != null ? String(o.id).trim().toLowerCase() : '';
+        if (!id || seen.has(id)) continue;
+        seen.add(id);
+        const label = o.label != null ? String(o.label).trim() : id;
+        const parent = o.parent != null && String(o.parent).trim() ? String(o.parent).trim() : null;
+        const codes = [
+            ...new Set(
+                (Array.isArray(o.codes) ? o.codes : [])
+                    .map((c) => String(c || '').trim().toUpperCase())
+                    .filter(Boolean)
+            )
+        ];
+        targets.push({ kind: 'group', key: id, label: label || id, parent, codes });
+    }
+    return { targets };
+}
+
+/**
  * Bulk-fetch MCC client codes for selected sales user ids via Listec.
  * @param {string} apiBase
  * @param {{ kind: string; key: string; label: string }[]} salesTargets
@@ -962,6 +995,7 @@ async function dedupeBusinessUnits(apiBase, names, signal) {
 function scopeProgressLabel(targ) {
     if (targ.kind === 'sales') return `Sales · ${targ.label}`;
     if (targ.kind === 'city') return `City · ${targ.label}`;
+    if (targ.kind === 'group') return targ.parent ? `${targ.label} · under ${targ.parent}` : `${targ.label} · group`;
     return `State · ${targ.label}`;
 }
 
@@ -1346,12 +1380,14 @@ async function runTracerBatch(opts) {
     const businessUnits = Array.isArray(opts.businessUnits) ? opts.businessUnits.slice() : [];
     const { cityKeys, stateKeys, targets } = parseRegions(opts.regions);
     const { targets: salesTargets } = parseSalesPeople(opts.salesPeople);
+    const { targets: groupTargets } = parseBuGroups(opts.buGroups);
     const hasBu = businessUnits.length > 0;
     const hasReg = targets.length > 0;
     const hasSales = salesTargets.length > 0;
+    const hasGroups = groupTargets.length > 0;
 
-    if (!hasBu && !hasReg && !hasSales) {
-        const err = new Error('runTracerBatch: pass businessUnits, regions (cities/states), and/or salesPeople.');
+    if (!hasBu && !hasReg && !hasSales && !hasGroups) {
+        const err = new Error('runTracerBatch: pass businessUnits, regions (cities/states), salesPeople and/or buGroups.');
         err.code = 'TRACER_NO_SCOPE';
         throw err;
     }
@@ -1402,6 +1438,8 @@ async function runTracerBatch(opts) {
             codesByTarget.set(`sales:${t.key}`, salesMap.get(String(t.key).trim()) || []);
         }
     }
+    // Group chips carry their own code list — nothing to resolve.
+    for (const t of groupTargets) codesByTarget.set(`group:${t.key}`, t.codes);
 
     // Collate short-circuit: produce ONE artefact pair that represents the
     // SID-deduplicated union of every selected scope (BUs and regions). This
@@ -1411,6 +1449,7 @@ async function runTracerBatch(opts) {
         const scopeBits = [];
         if (targets.length) scopeBits.push(`${targets.length} region${targets.length === 1 ? '' : 's'}`);
         if (salesTargets.length) scopeBits.push(`${salesTargets.length} sales`);
+        if (groupTargets.length) scopeBits.push(`${groupTargets.length} group${groupTargets.length === 1 ? '' : 's'}`);
         const collateLabel =
             opts.collateLabel ||
             `Collated · ${businessUnits.length} BU${businessUnits.length === 1 ? '' : 's'}` +
@@ -1433,7 +1472,7 @@ async function runTracerBatch(opts) {
             // the legacy bucketCities path drains the whole DB, which is
             // exactly what collate is meant to avoid (and we already fail
             // multi-region runs without by-codes — see prior fix).
-            if (hasReg && codesByTarget.size === 0) {
+            if (hasReg && targets.some((t) => !codesByTarget.has(`${t.kind}:${t.key}`))) {
                 const resolverMod = await loadResolverModule();
                 if (!resolverMod) {
                     throw new Error(
@@ -1495,8 +1534,9 @@ async function runTracerBatch(opts) {
             const collateScopeTargets = [];
             for (const t of targets) collateScopeTargets.push(t);
             for (const t of salesTargets) collateScopeTargets.push(t);
+            for (const t of groupTargets) collateScopeTargets.push(t);
 
-            // Region / sales scopes: per-code-list by-codes call, no BU filter.
+            // Region / sales / group scopes: per-code-list by-codes call, no BU filter.
             const regionTasks = collateScopeTargets.map((targ) => async () => {
                 const codes = codesByTarget.get(`${targ.kind}:${targ.key}`) || [];
                 if (codes.length === 0) {
@@ -1752,9 +1792,9 @@ async function runTracerBatch(opts) {
     const regionFailed = [];
 
     /** @type {{ kind: string; key: string; label: string }[]} */
-    const allScopeTargets = [...targets, ...salesTargets];
+    const allScopeTargets = [...targets, ...salesTargets, ...groupTargets];
 
-    if (hasReg || hasSales) {
+    if (hasReg || hasSales || hasGroups) {
         for (const targ of allScopeTargets) {
             const progressLabel = scopeProgressLabel(targ);
             regionItems.push({
@@ -1775,14 +1815,17 @@ async function runTracerBatch(opts) {
                 rit.state = 'cancelled';
                 onProgress({ ...rit });
             }
-        } else if (useByCodesForRegions || hasSales) {
-            /** Region chips (PG-resolved) and/or salesperson scopes (Listec LIS mapping). */
+        } else if (useByCodesForRegions || hasSales || hasGroups) {
+            /** Region chips (PG-resolved), salesperson scopes (Listec LIS mapping) and/or BU group chips (explicit code lists). */
             const byCodeScopeTargets = [];
             if (useByCodesForRegions) {
                 for (const t of targets) byCodeScopeTargets.push(t);
             }
             if (hasSales) {
                 for (const t of salesTargets) byCodeScopeTargets.push(t);
+            }
+            if (hasGroups) {
+                for (const t of groupTargets) byCodeScopeTargets.push(t);
             }
 
             const regionConcurrency = Math.max(
@@ -1791,8 +1834,10 @@ async function runTracerBatch(opts) {
                     Number(process.env.TRACER_REGION_CONCURRENCY) ||
                     Math.min(4, Math.max(2, concurrency))
             );
-            const regionTasks = byCodeScopeTargets.map((targ, i) => async () => {
-                const rit = regionItems[i];
+            const regionTasks = byCodeScopeTargets.map((targ) => async () => {
+                // Match by scope rather than index: regionItems lists every
+                // scope, byCodeScopeTargets only the ones taking this path.
+                const rit = regionItems.find((r) => r.regionKind === targ.kind && r.regionKey === targ.key);
                 rit.state = 'running';
                 onProgress({ ...rit });
                 const progressLabel = scopeProgressLabel(targ);
@@ -1802,12 +1847,16 @@ async function runTracerBatch(opts) {
                         const msg =
                             targ.kind === 'sales'
                                 ? `No client codes mapped for salesperson ${targ.label} — check LIS User Client Mapping (Listec sales endpoint).`
-                                : `No client codes mapped to ${progressLabel} in client_locations — run sync (POST /api/admin/client-locations/sync) or check region_aliases.`;
+                                : targ.kind === 'group'
+                                  ? `Group ${targ.label} has no client codes — add them to scripts/lis-nav-bot/data/business-unit-groups.json.`
+                                  : `No client codes mapped to ${progressLabel} in client_locations — run sync (POST /api/admin/client-locations/sync) or check region_aliases.`;
                         throw new Error(msg);
                     }
                     let payload;
                     let lastUrl;
-                    if (hasBu) {
+                    // A group is a sub-BU in its own right: its codes are the
+                    // whole filter, never intersected with the other BU chips.
+                    if (hasBu && targ.kind !== 'group') {
                         const perBu = await Promise.all(
                             businessUnits.map((bu) =>
                                 fetchTracerPayloadByCodes(apiBase, {
@@ -1844,7 +1893,7 @@ async function runTracerBatch(opts) {
                     }
                     throwIfCancelled(signal, progressLabel);
                     const assertLabel =
-                        targ.kind === 'sales' ? `Sales · ${targ.label}` : `Region ${progressLabel}`;
+                        targ.kind === 'sales' || targ.kind === 'group' ? progressLabel : `Region ${progressLabel}`;
                     assertTracerPayload(payload, {
                         needGeo: false,
                         label: assertLabel
@@ -1968,6 +2017,7 @@ module.exports = {
     buildCodeWiseStats,
     parseTracerRegions: parseRegions,
     parseTracerSalesPeople: parseSalesPeople,
+    parseTracerBuGroups: parseBuGroups,
     ALL_SPECIALTY_CODES,
     SPECIALTY_MODES,
     URINE_CONTAINER_TEST_CODES,
