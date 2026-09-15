@@ -148,6 +148,30 @@ export function useInventory() {
         const j = await request('/api/inventory/photos', { method: 'POST', body: form });
         return j.url;
     }, []);
+    // Purchase orders: listed on demand by the Orders view rather than on
+    // every reload, since only that view reads them.
+    const fetchOrders = useCallback((params = {}) => {
+        const q = new URLSearchParams();
+        for (const [k, v] of Object.entries(params)) {
+            if (v != null && v !== '') q.set(k, String(v));
+        }
+        const qs = q.toString();
+        return request(`/api/inventory/orders${qs ? `?${qs}` : ''}`);
+    }, []);
+    const createOrder = useCallback(
+        (body) => request('/api/inventory/orders', { method: 'POST', body: JSON.stringify(body) }),
+        []
+    );
+    const updateOrder = useCallback(
+        (id, body) => request(`/api/inventory/orders/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+        []
+    );
+    // Uploads one PDF (a proforma invoice) and returns { url, name }.
+    const uploadDocument = useCallback(async (file) => {
+        const form = new FormData();
+        form.append('document', file);
+        return request('/api/inventory/documents', { method: 'POST', body: form });
+    }, []);
     const voidMovement = useCallback(
         (id, body = {}) => request(`/api/inventory/movements/${id}/void`, { method: 'POST', body: JSON.stringify(body) }),
         []
@@ -198,6 +222,10 @@ export function useInventory() {
         createMovement,
         createMovementsBatch,
         uploadPhoto,
+        fetchOrders,
+        createOrder,
+        updateOrder,
+        uploadDocument,
         voidMovement,
         seedDefaults,
         syncBusLocations,

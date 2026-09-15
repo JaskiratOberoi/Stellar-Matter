@@ -15,6 +15,7 @@ const MAX_BU_COLUMNS = 6;
 
 const VIEWS = [
     { id: 'stock', label: 'Stock', icon: 'grid', caption: 'On-hand matrix' },
+    { id: 'orders', label: 'Orders', icon: 'clip', caption: 'Placed with vendors' },
     { id: 'receive', label: 'Receive', icon: 'in', caption: 'Vendor intake' },
     { id: 'dispatch', label: 'Dispatch', icon: 'out', caption: 'Ship & transfer' },
     { id: 'ledger', label: 'Ledger', icon: 'list', caption: 'Movement history' },
@@ -78,6 +79,10 @@ function Icon({ name, className }) {
             return (<svg {...p}><path d="M3 6h11v9H3z" /><path d="M14 9h4l3 3v3h-7z" /><circle cx="7" cy="18" r="1.6" /><circle cx="17.5" cy="18" r="1.6" /></svg>);
         case 'box':
             return (<svg {...p}><path d="M21 8 12 3 3 8l9 5 9-5z" /><path d="M3 8v8l9 5 9-5V8" /><path d="M12 13v8" /></svg>);
+        case 'clip':
+            return (<svg {...p}><path d="M9 4h6a1 1 0 0 1 1 1v1h2a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h2V5a1 1 0 0 1 1-1z" /><path d="M9 4v3h6V4" /><path d="M9 12h6" /><path d="M9 16h4" /></svg>);
+        case 'file':
+            return (<svg {...p}><path d="M14 3H7a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V8z" /><path d="M14 3v5h5" /></svg>);
         case 'warn':
             return (<svg {...p}><path d="M12 9v4" /><path d="M12 17h.01" /><path d="M10.3 3.9 2 18a2 2 0 0 0 1.7 3h16.6a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" /></svg>);
         default:
@@ -383,7 +388,13 @@ export function InventoryPage() {
 
     const visibleViews = VIEWS.filter((v) => !v.adminOnly || canManageCatalog);
 
-    const goto = useCallback((v) => setView(v), []);
+    // A purchase order handed to the Receive view pre-fills it; cleared once
+    // the receipt is recorded or the operator abandons it.
+    const [receiveOrder, setReceiveOrder] = useState(null);
+    const goto = useCallback((v, opts) => {
+        if (v === 'receive' && opts && opts.order) setReceiveOrder(opts.order);
+        setView(v);
+    }, []);
 
     return (
         <main className="inv-shell">
@@ -469,8 +480,18 @@ export function InventoryPage() {
 
                     <div className="inv-view">
                         {view === 'stock' && <StockView inventory={inventory} onGoto={goto} />}
+                        {view === 'orders' && (
+                            <OrdersView inventory={inventory} canMove={canMove} onDone={showFlash} onGoto={goto} />
+                        )}
                         {view === 'receive' && (
-                            <ReceiveView inventory={inventory} canMove={canMove} onDone={showFlash} onGoto={goto} />
+                            <ReceiveView
+                                inventory={inventory}
+                                canMove={canMove}
+                                onDone={showFlash}
+                                onGoto={goto}
+                                order={receiveOrder}
+                                onOrderConsumed={() => setReceiveOrder(null)}
+                            />
                         )}
                         {view === 'dispatch' && (
                             <DispatchView inventory={inventory} canMove={canMove} onDone={showFlash} onGoto={goto} />
@@ -810,6 +831,10 @@ function makeLine(extra = {}) {
 // A running list of material lines for an order, with add/remove/patch helpers.
 function useOrderLines() {
     const [lines, setLines] = useState(() => [makeLine()]);
+    // Replace every line at once — used to pre-fill Receive from a purchase order.
+    const replaceLines = useCallback((next) => {
+        setLines(next.length ? next.map((l) => makeLine(l)) : [makeLine()]);
+    }, []);
     const addLine = useCallback(() => setLines((ls) => [...ls, makeLine()]), []);
     const removeLine = useCallback(
         (key) => setLines((ls) => (ls.length > 1 ? ls.filter((l) => l.key !== key) : ls)),
@@ -820,7 +845,7 @@ function useOrderLines() {
         []
     );
     const resetLines = useCallback(() => setLines([makeLine()]), []);
-    return { lines, addLine, removeLine, updateLine, resetLines };
+    return { lines, addLine, removeLine, updateLine, resetLines, replaceLines };
 }
 
 // Per-line proof photo: tap to pick or capture, shows a thumbnail once uploaded.
@@ -1046,7 +1071,555 @@ function MovementDocket({ formId, heading, sign, total, ready, facts, lines, war
     );
 }
 
-function ReceiveView({ inventory, canMove, onDone, onGoto }) {
+// -- Purchase orders -------------------------------------------------------
+
+const ORDER_FILTERS = [
+    { id: 'open', label: 'Open', status: 'placed' },
+    { id: 'received', label: 'Received', status: 'received' },
+    { id: 'cancelled', label: 'Cancelled', status: 'cancelled' },
+    { id: 'all', label: 'All', status: null }
+];
+
+/** Whole days from today to a YYYY-MM-DD date, in the viewer's calendar. */
+function daysUntil(dateStr) {
+    if (!dateStr) return null;
+    const [y, m, d] = String(dateStr).slice(0, 10).split('-').map(Number);
+    if (!y || !m || !d) return null;
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    return Math.round((new Date(y, m - 1, d) - today) / 86400000);
+}
+
+function dueLabel(order) {
+    if (order.status !== 'placed') return null;
+    const n = daysUntil(order.expected_on);
+    if (n == null) return null;
+    if (n < 0) return { text: `${fmt(-n)} day${n === -1 ? '' : 's'} overdue`, tone: 'danger' };
+    if (n === 0) return { text: 'due today', tone: 'warning' };
+    if (n <= 3) return { text: `due in ${n} day${n === 1 ? '' : 's'}`, tone: 'warning' };
+    return { text: `due in ${fmt(n)} days`, tone: null };
+}
+
+function orderUnits(order) {
+    return (order.lines || []).reduce((s, l) => s + (Number(l.qty_base) || 0), 0);
+}
+
+/** PDF picker as a chip; hidden native input. */
+function PiPicker({ name, uploading, onPick, onClear, compact }) {
+    const inputRef = useRef(null);
+    return (
+        <span className="inv-pi">
+            <input
+                ref={inputRef}
+                type="file"
+                accept="application/pdf,.pdf"
+                hidden
+                onChange={(e) => {
+                    const f = e.target.files && e.target.files[0];
+                    if (f) onPick(f);
+                    e.target.value = '';
+                }}
+            />
+            <button
+                type="button"
+                className="chip chip-tool"
+                onClick={() => inputRef.current && inputRef.current.click()}
+                disabled={uploading}
+            >
+                <Icon name="file" />
+                {uploading ? 'Uploading…' : name ? (compact ? 'Replace PI' : 'Replace') : 'Attach PI (PDF)'}
+            </button>
+            {name && !compact && (
+                <span className="inv-pi-name" title={name}>
+                    {name}
+                    {onClear && (
+                        <button type="button" className="inv-line-remove" onClick={onClear} aria-label="Remove PI">
+                            ×
+                        </button>
+                    )}
+                </span>
+            )}
+        </span>
+    );
+}
+
+function OrderForm({ inventory, onDone, onCancel }) {
+    const { materials, vendors, locations, createOrder, createLocation, uploadDocument, reload } = inventory;
+    const activeMaterials = materials.filter((m) => m.active);
+    const activeVendors = (vendors || []).filter((v) => v.active);
+    const activeLocations = locations.filter((l) => l.active);
+    const stores = activeLocations.filter((l) => l.kind === 'store');
+    const matById = useMemo(() => new Map(activeMaterials.map((m) => [m.id, m])), [activeMaterials]);
+
+    const [vendorId, setVendorId] = useState('');
+    const [reference, setReference] = useState('');
+    const [orderedOn, setOrderedOn] = useState(todayDateInput);
+    const [expectedOn, setExpectedOn] = useState('');
+    const [direct, setDirect] = useState(false);
+    const [destinationId, setDestinationId] = useState('');
+    const [note, setNote] = useState('');
+    const [pi, setPi] = useState(/** @type {{ url: string, name: string } | null} */ (null));
+    const [piUploading, setPiUploading] = useState(false);
+    const [busy, setBusy] = useState(false);
+    const [err, setErr] = useState(null);
+    const { lines, addLine, removeLine, updateLine } = useOrderLines();
+
+    const vendor = activeVendors.find((v) => v.id === vendorId) || null;
+    const destination = activeLocations.find((l) => l.id === destinationId) || null;
+
+    // Direct dispatch means a business unit or lab; otherwise a store. Switching
+    // the toggle clears a destination of the wrong kind rather than keeping it.
+    const destGroups = useMemo(() => {
+        const bus = activeLocations.filter((l) => l.kind === 'business_unit' || l.kind === 'lab');
+        return direct
+            ? [{ label: 'Business units & labs', items: bus }]
+            : [
+                  { label: 'Stores & warehouses', items: stores },
+                  { label: 'Business units & labs', items: bus }
+              ];
+    }, [activeLocations, stores, direct]);
+    useEffect(() => {
+        if (direct && destination && destination.kind === 'store') setDestinationId('');
+    }, [direct, destination]);
+
+    function onPickMaterial(key, materialId) {
+        const m = matById.get(materialId);
+        updateLine(key, { materialId, packSize: m ? String(m.default_pack_size || 1) : '' });
+    }
+
+    async function onPickPi(file) {
+        setPiUploading(true);
+        setErr(null);
+        try {
+            const doc = await uploadDocument(file);
+            setPi({ url: doc.url, name: doc.name || file.name });
+        } catch (e) {
+            setErr(`PI upload failed: ${e.message || e}`);
+        } finally {
+            setPiUploading(false);
+        }
+    }
+
+    const validLines = lines.filter((l) => l.materialId && Number(l.packQty) > 0);
+    const totalUnits = validLines.reduce((s, l) => s + (Number(l.packSize) || 0) * (Number(l.packQty) || 0), 0);
+
+    async function onSubmit(e) {
+        e.preventDefault();
+        setErr(null);
+        if (!vendorId) return setErr('Pick the vendor the order was placed with.');
+        if (!validLines.length) return setErr('Add at least one material with a pack count.');
+        setBusy(true);
+        try {
+            const r = await createOrder({
+                vendor_id: vendorId,
+                reference: reference || undefined,
+                ordered_on: orderedOn || undefined,
+                expected_on: expectedOn || undefined,
+                direct_dispatch: direct,
+                destination_location_id: destinationId || undefined,
+                note: note || undefined,
+                pi_path: pi ? pi.url : undefined,
+                pi_name: pi ? pi.name : undefined,
+                lines: validLines.map((l) => ({
+                    material_id: l.materialId,
+                    pack_size: Number(l.packSize) || 1,
+                    pack_qty: Number(l.packQty)
+                }))
+            });
+            const o = r.order;
+            onDone(
+                `Logged order${o.reference ? ` ${o.reference}` : ''} with ${o.vendor_name} — ${fmt(orderUnits(o))} units across ${fmt(o.lines.length)} material${o.lines.length === 1 ? '' : 's'}.`
+            );
+        } catch (e2) {
+            setErr(String(e2.message || e2));
+        } finally {
+            setBusy(false);
+        }
+    }
+
+    return (
+        <div className="inv-form-layout inv-order-form-layout">
+            <section className="inv-panel">
+                <form id="inv-order-form" className="inv-order-form" onSubmit={onSubmit}>
+                    <FormStep n="01" title="Vendor & delivery" hint="Applies to every line below">
+                        <label className="inv-field">
+                            <span>Vendor</span>
+                            <select value={vendorId} onChange={(e) => setVendorId(e.target.value)} required autoFocus>
+                                <option value="">— select —</option>
+                                {activeVendors.map((v) => (
+                                    <option key={v.id} value={v.id}>{v.name}</option>
+                                ))}
+                            </select>
+                        </label>
+                        <label className="inv-field">
+                            <span>PO / reference</span>
+                            <input value={reference} onChange={(e) => setReference(e.target.value)} placeholder="Optional" />
+                        </label>
+                        <label className="inv-field">
+                            <span>Ordered on</span>
+                            <input type="date" value={orderedOn} onChange={(e) => setOrderedOn(e.target.value)} required />
+                        </label>
+                        <label className="inv-field">
+                            <span>Expected delivery</span>
+                            <input
+                                type="date"
+                                value={expectedOn}
+                                min={orderedOn || undefined}
+                                onChange={(e) => setExpectedOn(e.target.value)}
+                            />
+                        </label>
+                        <div className="inv-field">
+                            <span>Delivery</span>
+                            <label className="inv-toggle inv-toggle-field">
+                                <input
+                                    type="checkbox"
+                                    className="inv-toggle-input"
+                                    checked={direct}
+                                    onChange={(e) => setDirect(e.target.checked)}
+                                />
+                                <span className="inv-toggle-track" aria-hidden="true">
+                                    <span className="inv-toggle-thumb" />
+                                </span>
+                                <span className="inv-toggle-label">Vendor ships direct to a business unit</span>
+                            </label>
+                        </div>
+                        <label className="inv-field">
+                            <span>{direct ? 'Deliver to (business unit)' : 'Deliver to'}</span>
+                            <LocationCombobox
+                                value={destinationId}
+                                onChange={setDestinationId}
+                                locations={activeLocations.filter((l) => (direct ? l.kind !== 'store' : true))}
+                                groups={destGroups}
+                                placeholder="— not decided yet —"
+                                defaultKind={direct ? 'business_unit' : 'store'}
+                                createLocation={createLocation}
+                                reload={reload}
+                            />
+                        </label>
+                        <label className="inv-field inv-field-wide">
+                            <span>Note</span>
+                            <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Optional" />
+                        </label>
+                        <div className="inv-field inv-field-wide">
+                            <span>Proforma invoice</span>
+                            <PiPicker name={pi ? pi.name : ''} uploading={piUploading} onPick={onPickPi} onClear={() => setPi(null)} />
+                        </div>
+                    </FormStep>
+
+                    <div className="inv-order-lines">
+                        <div className="inv-order-lines-head">
+                            <span className="inv-fs-n">02</span>
+                            <div className="inv-fs-titles">
+                                <span className="inv-fs-title">Materials ordered</span>
+                                <span className="inv-fs-hint">Pack size defaults from the catalog — override to match the quotation</span>
+                            </div>
+                        </div>
+                        <div className="inv-line-table-wrap">
+                            <table className="inv-line-table">
+                                <thead>
+                                    <tr>
+                                        <th className="inv-lt-mat">Material</th>
+                                        <th className="inv-lt-num">Pack size</th>
+                                        <th className="inv-lt-num">Packs</th>
+                                        <th className="inv-lt-num">= Units</th>
+                                        <th aria-label="Remove" />
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {lines.map((l) => {
+                                        const lineTotal = (Number(l.packSize) || 0) * (Number(l.packQty) || 0);
+                                        const m = matById.get(l.materialId);
+                                        const unit = m ? m.base_unit : '';
+                                        return (
+                                            <tr key={l.key}>
+                                                <td className="inv-lt-mat" data-label="Material">
+                                                    <MaterialSelect
+                                                        value={l.materialId}
+                                                        onChange={(v) => onPickMaterial(l.key, v)}
+                                                        materials={activeMaterials}
+                                                        vendor={vendor}
+                                                    />
+                                                </td>
+                                                <td className="inv-lt-num" data-label="Pack size">
+                                                    <StepInput value={l.packSize} onChange={(v) => updateLine(l.key, { packSize: v })} ariaLabel="Pack size" />
+                                                </td>
+                                                <td className="inv-lt-num" data-label="Packs">
+                                                    <StepInput value={l.packQty} onChange={(v) => updateLine(l.key, { packQty: v })} ariaLabel="Number of packs" />
+                                                </td>
+                                                <td className="inv-lt-num inv-lt-total" data-label="= Units">
+                                                    {lineTotal > 0 ? `${fmt(lineTotal)}${unit ? ` ${unit}` : ''}` : '—'}
+                                                </td>
+                                                <td className="inv-lt-x" data-label="">
+                                                    <button
+                                                        type="button"
+                                                        className="inv-line-remove"
+                                                        onClick={() => removeLine(l.key)}
+                                                        disabled={lines.length === 1}
+                                                        aria-label="Remove line"
+                                                    >
+                                                        ×
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
+                        <button type="button" className="inv-line-add" onClick={addLine}>
+                            + Add material
+                        </button>
+                    </div>
+                    <div className="form-actions">
+                        <button type="button" className="chip chip-tool" onClick={onCancel} disabled={busy}>
+                            Cancel
+                        </button>
+                    </div>
+                </form>
+            </section>
+
+            <MovementDocket
+                formId="inv-order-form"
+                heading="Order docket"
+                sign=""
+                total={totalUnits}
+                ready={validLines.length > 0}
+                facts={[
+                    ['Vendor', vendor ? vendor.name : '—', vendor ? 'inv-docket-strong' : undefined],
+                    ['Ordered', fmtDateInput(orderedOn)],
+                    ['Expected', expectedOn ? fmtDateInput(expectedOn) : 'not set'],
+                    ['Deliver to', destination ? `${destination.name}${direct ? ' · direct' : ''}` : direct ? 'direct · not decided' : 'not decided'],
+                    ['PI', pi ? 'attached' : 'none']
+                ]}
+                lines={validLines.map((l) => {
+                    const m = matById.get(l.materialId);
+                    return {
+                        key: l.key,
+                        name: m ? m.name : '—',
+                        qty: (Number(l.packSize) || 0) * (Number(l.packQty) || 0),
+                        unit: m ? m.base_unit : ''
+                    };
+                })}
+                err={err}
+                disabled={busy || piUploading || !validLines.length || !vendorId}
+                label={busy ? 'Logging…' : piUploading ? 'Uploading PI…' : 'Log order'}
+            />
+        </div>
+    );
+}
+
+function OrdersView({ inventory, canMove, onDone, onGoto }) {
+    const { fetchOrders, updateOrder, uploadDocument } = inventory;
+    const [orders, setOrders] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [err, setErr] = useState(null);
+    const [filter, setFilter] = useState('open');
+    const [mode, setMode] = useState(null); // null | 'new'
+    const [piBusyId, setPiBusyId] = useState(null);
+
+    const load = useCallback(async () => {
+        setLoading(true);
+        setErr(null);
+        try {
+            const f = ORDER_FILTERS.find((x) => x.id === filter) || ORDER_FILTERS[0];
+            const j = await fetchOrders(f.status ? { status: f.status } : {});
+            setOrders(j.orders || []);
+        } catch (e) {
+            setErr(String(e.message || e));
+        } finally {
+            setLoading(false);
+        }
+    }, [fetchOrders, filter]);
+
+    useEffect(() => {
+        load();
+    }, [load]);
+
+    async function setStatus(o, status) {
+        const verb = status === 'cancelled' ? 'Cancel' : status === 'placed' ? 'Reopen' : 'Close';
+        if (status === 'cancelled' && !window.confirm(`Cancel this order${o.reference ? ` (${o.reference})` : ''} with ${o.vendor_name}?`)) return;
+        try {
+            await updateOrder(o.id, { status });
+            onDone(`${verb === 'Cancel' ? 'Cancelled' : verb === 'Reopen' ? 'Reopened' : 'Closed'} order${o.reference ? ` ${o.reference}` : ''}.`);
+            load();
+        } catch (e) {
+            window.alert(String(e.message || e));
+        }
+    }
+
+    async function attachPi(o, file) {
+        setPiBusyId(o.id);
+        try {
+            const doc = await uploadDocument(file);
+            await updateOrder(o.id, { pi_path: doc.url, pi_name: doc.name || file.name });
+            onDone(`Attached PI to order${o.reference ? ` ${o.reference}` : ''}.`);
+            load();
+        } catch (e) {
+            window.alert(String(e.message || e));
+        } finally {
+            setPiBusyId(null);
+        }
+    }
+
+    const openCount = orders.filter((o) => o.status === 'placed').length;
+    const overdue = orders.filter((o) => {
+        const d = dueLabel(o);
+        return d && d.tone === 'danger';
+    }).length;
+    const caption = loading
+        ? 'Loading…'
+        : filter === 'open'
+          ? `${fmt(orders.length)} open${overdue ? ` · ${fmt(overdue)} overdue` : ''}`
+          : `${fmt(orders.length)} ${filter === 'all' ? 'orders' : filter}${filter === 'all' && openCount ? ` · ${fmt(openCount)} open` : ''}`;
+
+    return (
+        <section className="inv-panel">
+            <SectionHead title="Purchase orders" caption={caption}>
+                <div className="chip-tool-group" role="group" aria-label="Filter orders">
+                    {ORDER_FILTERS.map((f) => (
+                        <button
+                            key={f.id}
+                            type="button"
+                            className="chip chip-tool"
+                            aria-pressed={filter === f.id ? 'true' : 'false'}
+                            onClick={() => setFilter(f.id)}
+                        >
+                            {f.label}
+                        </button>
+                    ))}
+                </div>
+                {canMove && mode == null && (
+                    <button type="button" className="btn-primary btn-sm" onClick={() => setMode('new')}>
+                        <Icon name="clip" />
+                        Log order
+                    </button>
+                )}
+            </SectionHead>
+
+            {canMove && mode === 'new' && (
+                <OrderForm
+                    inventory={inventory}
+                    onDone={(msg) => {
+                        onDone(msg);
+                        setMode(null);
+                        load();
+                    }}
+                    onCancel={() => setMode(null)}
+                />
+            )}
+
+            {err && <div className="results-error nexus-card">{err}</div>}
+
+            {orders.length ? (
+                <div className="inv-table-wrap">
+                    <table className="inv-table inv-orders-table">
+                        <thead>
+                            <tr>
+                                <th>Ordered</th>
+                                <th>Vendor</th>
+                                <th>Expected</th>
+                                <th>Deliver to</th>
+                                <th>Materials</th>
+                                <th className="num">Units</th>
+                                <th>PI</th>
+                                <th>Status</th>
+                                {canMove && <th />}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {orders.map((o) => {
+                                const due = dueLabel(o);
+                                const lines = o.lines || [];
+                                const preview = lines.slice(0, 2).map((l) => `${l.material_name} ${fmt(l.qty_base)}`).join(' · ');
+                                const more = lines.length - 2;
+                                return (
+                                    <tr key={o.id} className={`inv-order-row is-${o.status}`}>
+                                        <td className="inv-when inv-order-when">
+                                            <span className="inv-when-date">{fmtDateInput(o.ordered_on)}</span>
+                                            {o.reference && <span className="inv-when-time">{o.reference}</span>}
+                                        </td>
+                                        <td className="inv-mat-cell inv-order-vendor">{o.vendor_name || '—'}</td>
+                                        <td className="inv-order-expected">
+                                            <span className="inv-when-date">{o.expected_on ? fmtDateInput(o.expected_on) : <span className="inv-dash">·</span>}</span>
+                                            {due && <span className={`inv-due${due.tone ? ` is-${due.tone}` : ''}`}>{due.text}</span>}
+                                        </td>
+                                        <td className="inv-route inv-order-dest">
+                                            {o.destination_name || (o.direct_dispatch ? 'Direct' : <span className="inv-dash">·</span>)}
+                                            {o.direct_dispatch && (
+                                                <span className="inv-inactive-tag">{o.destination_name ? 'direct' : 'site TBD'}</span>
+                                            )}
+                                        </td>
+                                        <td className="inv-details inv-order-lines-cell" title={lines.map((l) => `${l.material_name} × ${fmt(l.qty_base)} ${l.base_unit}`).join(', ')}>
+                                            {preview}
+                                            {more > 0 && <span className="inv-vendor-supplies-more"> +{more}</span>}
+                                        </td>
+                                        <td className="num inv-qty inv-order-units">{fmt(orderUnits(o))}</td>
+                                        <td className="inv-order-pi">
+                                            {o.pi_path ? (
+                                                <a className="chip chip-tool" href={apiUrl(o.pi_path)} target="_blank" rel="noreferrer" title={o.pi_name || 'Proforma invoice'}>
+                                                    <Icon name="file" />
+                                                    PI
+                                                </a>
+                                            ) : canMove && o.status === 'placed' ? (
+                                                <PiPicker compact name="" uploading={piBusyId === o.id} onPick={(f) => attachPi(o, f)} />
+                                            ) : (
+                                                <span className="inv-dash">·</span>
+                                            )}
+                                        </td>
+                                        <td className="inv-order-status">
+                                            <span className={`inv-kbadge inv-order-badge is-${o.status}`}>
+                                                {o.status === 'received' && o.receipt_count > 0
+                                                    ? `received · ${fmt(o.receipt_count)} receipt${o.receipt_count === 1 ? '' : 's'}`
+                                                    : o.status}
+                                            </span>
+                                        </td>
+                                        {canMove && (
+                                            <td className="inv-row-actions">
+                                                {o.status === 'placed' && (
+                                                    <>
+                                                        <button type="button" className="btn-primary btn-sm" onClick={() => onGoto('receive', { order: o })}>
+                                                            Receive
+                                                        </button>
+                                                        <button type="button" className="chip chip-tool" onClick={() => setStatus(o, 'cancelled')}>
+                                                            Cancel
+                                                        </button>
+                                                    </>
+                                                )}
+                                                {o.status === 'cancelled' && (
+                                                    <button type="button" className="chip chip-tool" onClick={() => setStatus(o, 'placed')}>
+                                                        Reopen
+                                                    </button>
+                                                )}
+                                            </td>
+                                        )}
+                                    </tr>
+                                );
+                            })}
+                        </tbody>
+                    </table>
+                </div>
+            ) : !loading ? (
+                <EmptyState
+                    icon="clip"
+                    title={filter === 'open' ? 'No open orders' : `No ${filter === 'all' ? '' : filter + ' '}orders`}
+                    action={
+                        canMove && mode == null ? (
+                            <button type="button" className="btn-primary" onClick={() => setMode('new')}>
+                                Log an order
+                            </button>
+                        ) : null
+                    }
+                >
+                    {filter === 'open'
+                        ? 'Orders placed with vendors appear here until they are received or cancelled.'
+                        : 'Change the filter to see other orders.'}
+                </EmptyState>
+            ) : null}
+        </section>
+    );
+}
+
+function ReceiveView({ inventory, canMove, onDone, onGoto, order, onOrderConsumed }) {
     const { materials, vendors, locations, balances, createMovementsBatch, createLocation, uploadPhoto, reload } = inventory;
     const activeMaterials = materials.filter((m) => m.active);
     const activeVendors = (vendors || []).filter((v) => v.active);
@@ -1062,7 +1635,11 @@ function ReceiveView({ inventory, canMove, onDone, onGoto }) {
     const [note, setNote] = useState('');
     const [busy, setBusy] = useState(false);
     const [err, setErr] = useState(null);
-    const { lines, addLine, removeLine, updateLine, resetLines } = useOrderLines();
+    const { lines, addLine, removeLine, updateLine, resetLines, replaceLines } = useOrderLines();
+    // Set when this receipt fulfils a purchase order; sent as order_id so the
+    // server links the movements and closes the order in one transaction.
+    const [orderId, setOrderId] = useState(null);
+    const [orderLabel, setOrderLabel] = useState('');
 
     const vendor = activeVendors.find((v) => v.id === vendorId) || null;
 
@@ -1071,6 +1648,30 @@ function ReceiveView({ inventory, canMove, onDone, onGoto }) {
             setToLocationId(pickDefaultStore(stores, balMap, activeMaterials, LS_RECEIVE_DEST));
         }
     }, [stores, toLocationId, balMap, activeMaterials]);
+
+    // Pre-fill from a purchase order handed over by the Orders view.
+    useEffect(() => {
+        if (!order) return;
+        setOrderId(order.id);
+        setOrderLabel(`${order.reference ? `${order.reference} · ` : ''}${order.vendor_name || 'order'}`);
+        if (order.vendor_id) setVendorId(order.vendor_id);
+        if (order.destination_location_id) setToLocationId(order.destination_location_id);
+        if (order.reference) setReference(order.reference);
+        replaceLines(
+            (order.lines || []).map((l) => ({
+                materialId: l.material_id,
+                packSize: String(l.pack_size || 1),
+                packQty: String(l.pack_qty || '')
+            }))
+        );
+        setErr(null);
+    }, [order, replaceLines]);
+
+    function dropOrder() {
+        setOrderId(null);
+        setOrderLabel('');
+        if (onOrderConsumed) onOrderConsumed();
+    }
 
     // Default a line's pack size from its material the moment one is chosen.
     function onPickMaterial(key, materialId) {
@@ -1106,6 +1707,7 @@ function ReceiveView({ inventory, canMove, onDone, onGoto }) {
             const result = await createMovementsBatch({
                 kind: 'receipt',
                 to_location_id: toLocationId,
+                order_id: orderId || undefined,
                 vendor_id: vendorId || undefined,
                 reference: reference || undefined,
                 note: note || undefined,
@@ -1120,7 +1722,10 @@ function ReceiveView({ inventory, canMove, onDone, onGoto }) {
             await reload();
             const n = (result.movements && result.movements.length) || validLines.length;
             rememberLocation(LS_RECEIVE_DEST, toLocationId);
-            onDone(`Received ${fmt(totalUnits)} units across ${fmt(n)} material${n === 1 ? '' : 's'}.`);
+            onDone(
+                `Received ${fmt(totalUnits)} units across ${fmt(n)} material${n === 1 ? '' : 's'}${orderId ? ` — order ${orderLabel} closed` : ''}.`
+            );
+            if (orderId) dropOrder();
             resetLines();
             setReference('');
             setNote('');
@@ -1154,7 +1759,20 @@ function ReceiveView({ inventory, canMove, onDone, onGoto }) {
     return (
         <div className="inv-form-layout">
             <section className="inv-panel">
-                <SectionHead title="Receive from vendor" caption="One vendor, one delivery — add every material on the docket" />
+                <SectionHead
+                    title="Receive from vendor"
+                    caption={
+                        orderId
+                            ? `Receiving purchase order ${orderLabel} — recording this closes the order`
+                            : 'One vendor, one delivery — add every material on the docket'
+                    }
+                >
+                    {orderId && (
+                        <button type="button" className="chip chip-tool" onClick={dropOrder}>
+                            Not this order
+                        </button>
+                    )}
+                </SectionHead>
                 <form id="inv-receive-form" className="inv-order-form" onSubmit={onSubmit}>
                     <FormStep n="01" title="From whom & where" hint="Applies to every line below">
                         <label className="inv-field">

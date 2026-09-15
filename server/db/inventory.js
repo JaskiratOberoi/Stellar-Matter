@@ -840,6 +840,28 @@ async function createMovementsBatch(orgId, header, lines, opts = {}) {
                 movementIds.push(id);
             }
         }
+        // Receiving from a purchase order: link every movement back to the
+        // order and close it, all inside the same transaction as the stock.
+        if (header.orderId) {
+            const ord = await client.query(
+                `SELECT id, status FROM inventory_orders WHERE org_id = $1 AND id = $2 FOR UPDATE`,
+                [orgId, header.orderId]
+            );
+            if (!ord.rows.length) throw httpError('Order not found', 404);
+            if (ord.rows[0].status !== 'placed') {
+                throw httpError(`Order is already ${ord.rows[0].status}`, 409);
+            }
+            await client.query(`UPDATE inventory_movements SET order_id = $1 WHERE id = ANY($2::bigint[])`, [
+                header.orderId,
+                movementIds
+            ]);
+            await client.query(
+                `UPDATE inventory_orders
+                 SET status = 'received', received_at = NOW(), received_by = $3
+                 WHERE org_id = $1 AND id = $2`,
+                [orgId, header.orderId, opts.createdBy ?? null]
+            );
+        }
         await client.query('COMMIT');
         const movements = [];
         for (const id of movementIds) {
@@ -919,6 +941,213 @@ async function voidMovement(orgId, id, opts = {}) {
 // Headline counts plus a low-stock list. Low stock is judged on central-store
 // on-hand (kind='store') vs. the material's reorder_level, since the store is
 // what ops reorders against; per-BU shortfalls surface in the Stock matrix.
+// -- Purchase orders -------------------------------------------------------
+
+function newOrderId() {
+    return `invord-${crypto.randomBytes(8).toString('hex')}`;
+}
+
+const ORDER_STATUSES = new Set(['placed', 'received', 'cancelled']);
+
+// DATE columns come back as local-midnight JS Dates from node-postgres, which
+// shift a day depending on the server's timezone; select them as text.
+const ORDER_SELECT = `
+    SELECT o.id, o.org_id, o.vendor_id, o.reference,
+           to_char(o.ordered_on, 'YYYY-MM-DD')  AS ordered_on,
+           to_char(o.expected_on, 'YYYY-MM-DD') AS expected_on,
+           o.direct_dispatch, o.destination_location_id, o.status,
+           o.pi_path, o.pi_name, o.note, o.created_at, o.created_by,
+           o.received_at, o.received_by, o.cancelled_at, o.cancelled_by,
+           v.name AS vendor_name,
+           l.name AS destination_name, l.kind AS destination_kind,
+           COALESCE((
+               SELECT json_agg(json_build_object(
+                   'id', ol.id,
+                   'material_id', ol.material_id,
+                   'material_name', m.name,
+                   'base_unit', m.base_unit,
+                   'pack_size', ol.pack_size,
+                   'pack_qty', ol.pack_qty,
+                   'qty_base', ol.qty_base
+               ) ORDER BY ol.position, ol.id)
+               FROM inventory_order_lines ol
+               JOIN inventory_materials m ON m.id = ol.material_id
+               WHERE ol.order_id = o.id
+           ), '[]'::json) AS lines,
+           (SELECT COUNT(*)::int FROM inventory_movements mv
+             WHERE mv.order_id = o.id AND mv.voided_at IS NULL) AS receipt_count
+    FROM inventory_orders o
+    LEFT JOIN inventory_vendors v ON v.id = o.vendor_id
+    LEFT JOIN inventory_locations l ON l.id = o.destination_location_id`;
+
+async function listOrders(orgId, { status = null, limit = 500 } = {}) {
+    const pool = getPool();
+    const params = [orgId];
+    let where = 'WHERE o.org_id = $1';
+    if (status && ORDER_STATUSES.has(status)) {
+        params.push(status);
+        where += ` AND o.status = $${params.length}`;
+    }
+    params.push(limit);
+    const r = await pool.query(
+        `${ORDER_SELECT}
+         ${where}
+         ORDER BY (o.status = 'placed') DESC, o.expected_on ASC NULLS LAST, o.ordered_on DESC, o.created_at DESC
+         LIMIT $${params.length}`,
+        params
+    );
+    return r.rows;
+}
+
+async function getOrder(orgId, id) {
+    const pool = getPool();
+    const r = await pool.query(`${ORDER_SELECT} WHERE o.org_id = $1 AND o.id = $2`, [orgId, id]);
+    return r.rows[0] || null;
+}
+
+/**
+ * @param {string} orgId
+ * @param {{ vendorId: string, reference?: string|null, orderedOn: string, expectedOn?: string|null,
+ *           directDispatch?: boolean, destinationLocationId?: string|null, note?: string|null,
+ *           piPath?: string|null, piName?: string|null }} header
+ * @param {{ materialId: string, packSize: number, packQty: number }[]} lines
+ */
+async function createOrder(orgId, header, lines, opts = {}) {
+    if (!Array.isArray(lines) || !lines.length) throw httpError('At least one line is required', 400);
+    const pool = getPool();
+    const client = await pool.connect();
+    const id = newOrderId();
+    try {
+        await client.query('BEGIN');
+        const ven = await client.query(`SELECT id FROM inventory_vendors WHERE org_id = $1 AND id = $2`, [
+            orgId,
+            header.vendorId
+        ]);
+        if (!ven.rows.length) throw httpError('Unknown vendor', 404);
+        if (header.destinationLocationId) {
+            const loc = await client.query(`SELECT id FROM inventory_locations WHERE org_id = $1 AND id = $2`, [
+                orgId,
+                header.destinationLocationId
+            ]);
+            if (!loc.rows.length) throw httpError('Unknown destination location', 404);
+        }
+        await client.query(
+            `INSERT INTO inventory_orders
+                (id, org_id, vendor_id, reference, ordered_on, expected_on, direct_dispatch,
+                 destination_location_id, note, pi_path, pi_name, created_by)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+            [
+                id,
+                orgId,
+                header.vendorId,
+                header.reference ?? null,
+                header.orderedOn,
+                header.expectedOn ?? null,
+                header.directDispatch === true,
+                header.destinationLocationId ?? null,
+                header.note ?? null,
+                header.piPath ?? null,
+                header.piName ?? null,
+                opts.createdBy ?? null
+            ]
+        );
+        let position = 0;
+        for (const line of lines) {
+            const mat = await client.query(`SELECT id FROM inventory_materials WHERE org_id = $1 AND id = $2`, [
+                orgId,
+                line.materialId
+            ]);
+            if (!mat.rows.length) throw httpError('Unknown material', 404);
+            const packSize = Math.max(1, Number(line.packSize) || 1);
+            const packQty = Number(line.packQty);
+            if (!Number.isFinite(packQty) || packQty < 1) throw httpError('Each line needs a pack count of 1 or more', 400);
+            await client.query(
+                `INSERT INTO inventory_order_lines (order_id, material_id, pack_size, pack_qty, qty_base, position)
+                 VALUES ($1, $2, $3, $4, $5, $6)`,
+                [id, line.materialId, packSize, packQty, packSize * packQty, position++]
+            );
+        }
+        await client.query('COMMIT');
+    } catch (err) {
+        await client.query('ROLLBACK').catch(() => {});
+        throw err;
+    } finally {
+        client.release();
+    }
+    return getOrder(orgId, id);
+}
+
+const ORDER_EDITABLE = {
+    reference: 'reference',
+    expectedOn: 'expected_on',
+    directDispatch: 'direct_dispatch',
+    destinationLocationId: 'destination_location_id',
+    note: 'note',
+    piPath: 'pi_path',
+    piName: 'pi_name'
+};
+
+/**
+ * Patch header fields and/or move status. placed -> received | cancelled;
+ * cancelled -> placed (reopen). A received order is closed for good — its
+ * stock is in the ledger; correct that there.
+ */
+async function updateOrder(orgId, id, fields, opts = {}) {
+    const pool = getPool();
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        const cur = await client.query(`SELECT id, status FROM inventory_orders WHERE org_id = $1 AND id = $2 FOR UPDATE`, [
+            orgId,
+            id
+        ]);
+        if (!cur.rows.length) throw httpError('Order not found', 404);
+        const current = cur.rows[0].status;
+        const sets = [];
+        const params = [orgId, id];
+        const push = (col, val) => {
+            params.push(val);
+            sets.push(`${col} = $${params.length}`);
+        };
+        for (const [key, col] of Object.entries(ORDER_EDITABLE)) {
+            if (fields[key] !== undefined) push(col, fields[key]);
+        }
+        if (fields.destinationLocationId) {
+            const loc = await client.query(`SELECT id FROM inventory_locations WHERE org_id = $1 AND id = $2`, [
+                orgId,
+                fields.destinationLocationId
+            ]);
+            if (!loc.rows.length) throw httpError('Unknown destination location', 404);
+        }
+        if (fields.status !== undefined && fields.status !== current) {
+            if (!ORDER_STATUSES.has(fields.status)) throw httpError('Unknown status', 400);
+            if (current === 'received') throw httpError('A received order cannot change status', 409);
+            if (fields.status === 'received') {
+                // Manual close without stock — allowed, but recorded as such.
+                push('received_at', new Date());
+                push('received_by', opts.actorId ?? null);
+            } else if (fields.status === 'cancelled') {
+                push('cancelled_at', new Date());
+                push('cancelled_by', opts.actorId ?? null);
+            } else if (fields.status === 'placed') {
+                push('cancelled_at', null);
+                push('cancelled_by', null);
+            }
+            push('status', fields.status);
+        }
+        if (sets.length) {
+            await client.query(`UPDATE inventory_orders SET ${sets.join(', ')} WHERE org_id = $1 AND id = $2`, params);
+        }
+        await client.query('COMMIT');
+    } catch (err) {
+        await client.query('ROLLBACK').catch(() => {});
+        throw err;
+    } finally {
+        client.release();
+    }
+    return getOrder(orgId, id);
+}
+
 async function getSummary(orgId) {
     const pool = getPool();
     const [materials, locations, vendors, movements, voided, lowStock] = await Promise.all([
@@ -1005,5 +1234,9 @@ module.exports = {
     createMovementsBatch,
     createDispatchToAllBus,
     voidMovement,
+    listOrders,
+    getOrder,
+    createOrder,
+    updateOrder,
     getSummary
 };

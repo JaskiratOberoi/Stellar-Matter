@@ -612,6 +612,137 @@ router.post('/photos', requireMover, adminWriteLimiter, (req, res) => {
     });
 });
 
+// -- Purchase orders -------------------------------------------------------
+//
+// Placed with a vendor, tracked to delivery, one PI document. Anyone who can
+// move stock can log one (requireMover); status moves placed -> received via
+// the Receive form (movements/batch with order_id) or by hand, or -> cancelled.
+
+const docs = require('../inventoryDocs');
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+function isoDateOrNull(v, label) {
+    const s = trimStr(v);
+    if (!s) return null;
+    if (!ISO_DATE.test(s) || Number.isNaN(new Date(`${s}T12:00:00`).getTime())) {
+        const err = new Error(`${label} must be a date (YYYY-MM-DD)`);
+        err.status = 400;
+        throw err;
+    }
+    return s;
+}
+
+router.get('/orders', async (req, res) => {
+    if (!dbGuard(res)) return;
+    try {
+        const status = trimStr(req.query.status) || null;
+        const orders = await inv.listOrders(orgOf(req), { status });
+        res.json({ orders });
+    } catch (err) {
+        sendError(res, err);
+    }
+});
+
+router.post('/documents', requireMover, adminWriteLimiter, (req, res) => {
+    if (!dbGuard(res)) return;
+    docs.uploadDocument.single('document')(req, res, (err) => {
+        if (err) {
+            const status = err.status || (err.code === 'LIMIT_FILE_SIZE' ? 413 : 400);
+            return res.status(status).json({ error: err.message || 'Upload failed' });
+        }
+        if (!req.file) return res.status(400).json({ error: 'No file uploaded (field "document")' });
+        res.json({ url: docs.urlFor(req.file.filename), name: req.file.originalname || 'document.pdf' });
+    });
+});
+
+router.post('/orders', requireMover, adminWriteLimiter, async (req, res) => {
+    if (!dbGuard(res)) return;
+    try {
+        const body = req.body || {};
+        const vendorId = trimStr(body.vendor_id);
+        if (!vendorId) return res.status(400).json({ error: 'vendor_id is required' });
+        const orderedOn = isoDateOrNull(body.ordered_on, 'ordered_on') || new Date().toISOString().slice(0, 10);
+        const expectedOn = isoDateOrNull(body.expected_on, 'expected_on');
+        const rawLines = Array.isArray(body.lines) ? body.lines : [];
+        const lines = [];
+        for (const [i, l] of rawLines.entries()) {
+            const materialId = trimStr(l && l.material_id);
+            if (!materialId) return res.status(400).json({ error: `lines[${i}].material_id is required` });
+            const packSize = optInt(l.pack_size, `lines[${i}].pack_size`, { min: 1, allowNull: true }) ?? 1;
+            const packQty = optInt(l.pack_qty, `lines[${i}].pack_qty`, { min: 1 });
+            if (packQty === undefined) return res.status(400).json({ error: `lines[${i}].pack_qty is required` });
+            lines.push({ materialId, packSize, packQty });
+        }
+        if (!lines.length) return res.status(400).json({ error: 'At least one line is required' });
+        const header = {
+            vendorId,
+            reference: body.reference != null ? trimStr(body.reference) || null : null,
+            orderedOn,
+            expectedOn,
+            directDispatch: body.direct_dispatch === true || body.direct_dispatch === 'true',
+            destinationLocationId: trimStr(body.destination_location_id) || null,
+            note: body.note != null ? trimStr(body.note) || null : null,
+            piPath: trimStr(body.pi_path) || null,
+            piName: trimStr(body.pi_name) || null
+        };
+        const order = await inv.createOrder(orgOf(req), header, lines, {
+            createdBy: (req.user && req.user.id) || null
+        });
+        await logAudit(req, {
+            action: 'inventory.order.create',
+            targetType: 'inventory_order',
+            targetId: order.id,
+            outcome: 'success',
+            after: {
+                vendor: order.vendor_name,
+                reference: order.reference,
+                expected_on: order.expected_on,
+                lines: order.lines.length,
+                units: order.lines.reduce((s, l) => s + l.qty_base, 0),
+                direct_dispatch: order.direct_dispatch,
+                destination: order.destination_name,
+                pi: Boolean(order.pi_path)
+            }
+        });
+        res.json({ order });
+    } catch (err) {
+        sendError(res, err);
+    }
+});
+
+router.patch('/orders/:id', requireMover, adminWriteLimiter, async (req, res) => {
+    if (!dbGuard(res)) return;
+    try {
+        const orgId = orgOf(req);
+        const before = await inv.getOrder(orgId, req.params.id);
+        if (!before) return res.status(404).json({ error: 'Order not found' });
+        const body = req.body || {};
+        const fields = {};
+        if (body.reference !== undefined) fields.reference = trimStr(body.reference) || null;
+        if (body.expected_on !== undefined) fields.expectedOn = isoDateOrNull(body.expected_on, 'expected_on');
+        if (body.direct_dispatch !== undefined) fields.directDispatch = body.direct_dispatch === true || body.direct_dispatch === 'true';
+        if (body.destination_location_id !== undefined) fields.destinationLocationId = trimStr(body.destination_location_id) || null;
+        if (body.note !== undefined) fields.note = trimStr(body.note) || null;
+        if (body.pi_path !== undefined) fields.piPath = trimStr(body.pi_path) || null;
+        if (body.pi_name !== undefined) fields.piName = trimStr(body.pi_name) || null;
+        if (body.status !== undefined) fields.status = trimStr(body.status);
+        const order = await inv.updateOrder(orgId, req.params.id, fields, {
+            actorId: (req.user && req.user.id) || null
+        });
+        await logAudit(req, {
+            action: fields.status && fields.status !== before.status ? 'inventory.order.status' : 'inventory.order.update',
+            targetType: 'inventory_order',
+            targetId: req.params.id,
+            outcome: 'success',
+            before: { status: before.status, expected_on: before.expected_on, pi: Boolean(before.pi_path) },
+            after: order ? { status: order.status, expected_on: order.expected_on, pi: Boolean(order.pi_path) } : null
+        });
+        res.json({ order });
+    } catch (err) {
+        sendError(res, err);
+    }
+});
+
 // -- Batch movements (orders) ----------------------------------------------
 //
 // One header (vendor + destination for receipts, from + to / all-BUs for
@@ -690,7 +821,9 @@ router.post('/movements/batch', requireMover, adminWriteLimiter, async (req, res
             vendorId: body.vendor_id != null ? trimStr(body.vendor_id) || null : null,
             reference: body.reference != null ? trimStr(body.reference) || null : null,
             note: body.note != null ? trimStr(body.note) || null : null,
-            occurredAt
+            occurredAt,
+            // Receiving a purchase order: links the movements and closes it.
+            orderId: kind === 'receipt' && body.order_id != null ? trimStr(body.order_id) || null : null
         };
         const allowNegative = body.allow_negative === true || body.allow_negative === 'true';
 
@@ -711,6 +844,7 @@ router.post('/movements/batch', requireMover, adminWriteLimiter, async (req, res
                 from_location_id: fromLocationId,
                 to_location_id: toLocationId,
                 to_all_bus: toAllBus || undefined,
+                order_id: header.orderId || undefined,
                 occurred_at: occurredAt || undefined
             },
             metadata: allowNegative ? { allow_negative: true } : undefined

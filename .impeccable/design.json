@@ -1,0 +1,127 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-09-15T13:40:00+05:30",
+  "title": "Design System: Stellar Matter",
+  "extensions": {
+    "colorMeta": {
+      "lime-signal": { "role": "primary", "displayName": "Lime Signal", "canonical": "#D4FF3A", "tonalRamp": ["#1e2600", "#3a4a00", "#5c7500", "#83a600", "#abd400", "#d4ff3a", "#e4ff7d", "#f3ffbf"] },
+      "bench-black": { "role": "neutral", "displayName": "Bench Black", "canonical": "#09090B", "tonalRamp": ["#09090b", "#121215", "#1a1a1f", "#232329", "#3e3e46", "#6b6b74", "#96969e", "#bebec4"] },
+      "ink": { "role": "neutral", "displayName": "Ink", "canonical": "#FAFAF7", "tonalRamp": ["#2a2a30", "#3e3e46", "#6b6b74", "#96969e", "#bebec4", "#dcdcd8", "#ededea", "#fafaf7"] },
+      "signal-info": { "role": "tertiary", "displayName": "Signal Info", "canonical": "#7DC8FF", "tonalRamp": ["#0a2a45", "#0f4470", "#155f9c", "#2f7fc0", "#55a3e0", "#7dc8ff", "#a6dbff", "#d1edff"] },
+      "signal-success": { "role": "tertiary", "displayName": "Signal Success", "canonical": "#7EE787", "tonalRamp": ["#0d3312", "#155320", "#1f7a2f", "#2fa142", "#52c65d", "#7ee787", "#a8f0ad", "#d3f8d5"] },
+      "signal-warning": { "role": "tertiary", "displayName": "Signal Warning", "canonical": "#FFC43C", "tonalRamp": ["#3d2b00", "#664700", "#946800", "#c48c00", "#e8ab14", "#ffc43c", "#ffd77a", "#ffebb8"] },
+      "signal-danger": { "role": "tertiary", "displayName": "Signal Danger", "canonical": "#FF7A75", "tonalRamp": ["#4a0f0d", "#7a1c18", "#a52c27", "#cc463f", "#ea6059", "#ff7a75", "#ffa19d", "#ffc9c6"] }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Display", "purpose": "Overview page title only; compacts to Headline on working views." },
+      "figure": { "displayName": "Figure", "purpose": "Glance-strip figures and docket totals; tabular, tight tracking." },
+      "label": { "displayName": "Label", "purpose": "Uppercase mono annotations: field labels, table headers, eyebrows, chips. 11px floor." }
+    },
+    "shadows": [
+      { "name": "lift", "value": "0 4px 14px -4px rgb(0 0 0 / 0.55)", "purpose": "Hovered tile." },
+      { "name": "float", "value": "0 18px 44px -12px rgb(0 0 0 / 0.7)", "purpose": "Floating action pill and menus." },
+      { "name": "menu", "value": "0 12px 32px rgba(0, 0, 0, 0.45)", "purpose": "Combobox dropdown." }
+    ],
+    "motion": [
+      { "name": "ease", "value": "cubic-bezier(0.2, 0, 0.15, 1)", "purpose": "The only curve; exponential ease-out." },
+      { "name": "dur-fast", "value": "120ms", "purpose": "Colour and border state changes." },
+      { "name": "dur-base", "value": "190ms", "purpose": "Transforms, toggles, tile lift." }
+    ],
+    "breakpoints": [
+      { "name": "tabs-compact", "value": "1200px" },
+      { "name": "stack-forms", "value": "1000px" },
+      { "name": "phone", "value": "640px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The one filled action on a screen: Dispatch, Record receipt, Run tracer.",
+      "html": "<button class=\"ds-btn-primary\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.2\" stroke-linecap=\"round\"><path d=\"M12 5v14M5 12h14\"/></svg>Record receipt</button>",
+      "css": ".ds-btn-primary { display: inline-flex; align-items: center; gap: 0.5rem; background: #D4FF3A; color: #0A0A0A; border: 1px solid #D4FF3A; border-radius: 6px; padding: 0.75rem 1rem; font: 650 0.875rem/1 'Inter Variable', Inter, system-ui, sans-serif; letter-spacing: 0.01em; cursor: pointer; transition: filter 120ms cubic-bezier(0.2,0,0.15,1), box-shadow 120ms cubic-bezier(0.2,0,0.15,1); } .ds-btn-primary:hover { filter: brightness(1.08); box-shadow: 0 0 0 3px rgb(212 255 58 / 0.16); } .ds-btn-primary:focus-visible { outline: none; box-shadow: 0 0 0 2px #09090B, 0 0 0 4px #D4FF3A; }"
+    },
+    {
+      "name": "Chip",
+      "kind": "chip",
+      "refersTo": "chip",
+      "description": "Filters, quick picks, business-unit selection and row actions. Pressed state is the lime signal.",
+      "html": "<div class=\"ds-chip-row\"><button class=\"ds-chip\">Today</button><button class=\"ds-chip\" aria-pressed=\"true\">This month</button><button class=\"ds-chip ds-chip-danger\">Void</button></div>",
+      "css": ".ds-chip-row { display: flex; gap: 0.5rem; } .ds-chip { display: inline-flex; align-items: center; min-height: 30px; padding: 0 0.75rem; border: 1px solid #2A2A30; border-radius: 6px; background: #1A1A1F; color: #BEBEC4; font: 600 0.75rem/1 'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, monospace; text-transform: uppercase; letter-spacing: 0.06em; cursor: pointer; transition: border-color 120ms, background 120ms, color 120ms; } .ds-chip:hover { border-color: #3E3E46; background: #232329; color: #FAFAF7; } .ds-chip[aria-pressed='true'] { border-color: rgb(212 255 58 / 0.55); background: rgb(212 255 58 / 0.14); color: #D4FF3A; } .ds-chip-danger { color: #FF7A75; border-color: rgb(255 122 117 / 0.4); }"
+    },
+    {
+      "name": "Field",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "A labelled text field: mono label above, surface fill, lime border on focus.",
+      "html": "<label class=\"ds-field\"><span>Reference / invoice #</span><input class=\"ds-input\" placeholder=\"Optional\"></label>",
+      "css": ".ds-field { display: flex; flex-direction: column; gap: 0.5rem; font: 400 0.875rem/1.5 'Inter Variable', Inter, system-ui, sans-serif; color: #BEBEC4; } .ds-field > span { font: 600 0.6875rem/1.3 'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, monospace; text-transform: uppercase; letter-spacing: 0.1em; color: #96969E; } .ds-input { padding: 0.75rem; background: #121215; border: 1px solid #2A2A30; border-radius: 6px; color: #FAFAF7; font: inherit; font-size: 0.875rem; transition: border-color 120ms; } .ds-input::placeholder { color: #96969E; } .ds-input:hover { border-color: #3E3E46; } .ds-input:focus { outline: none; border-color: #D4FF3A; } .ds-input:focus-visible { box-shadow: 0 0 0 2px #09090B, 0 0 0 4px #D4FF3A; }"
+    },
+    {
+      "name": "Index Tabs",
+      "kind": "nav",
+      "refersTo": "chip",
+      "description": "The numbered table-of-contents navigation on a rule; the active tab is underlined in lime.",
+      "html": "<nav class=\"ds-index\"><button class=\"ds-index-item ds-active\"><span class=\"ds-index-n\">01</span><span><span class=\"ds-index-label\">Stock</span><span class=\"ds-index-cap\">On-hand matrix</span></span></button><button class=\"ds-index-item\"><span class=\"ds-index-n\">02</span><span><span class=\"ds-index-label\">Receive</span><span class=\"ds-index-cap\">Vendor intake</span></span></button><button class=\"ds-index-item\"><span class=\"ds-index-n\">03</span><span><span class=\"ds-index-label\">Dispatch</span><span class=\"ds-index-cap\">Ship &amp; transfer</span></span></button></nav>",
+      "css": ".ds-index { display: flex; border-top: 1px solid #2A2A30; border-bottom: 1px solid #2A2A30; background: #09090B; } .ds-index-item { display: flex; gap: 0.75rem; align-items: flex-start; flex: 1 1 150px; padding: 1rem 1.25rem; background: none; border: 0; border-right: 1px solid #2A2A30; border-bottom: 2px solid transparent; color: #96969E; font: 400 0.875rem/1.4 'Inter Variable', Inter, system-ui, sans-serif; text-align: left; cursor: pointer; transition: color 120ms, border-color 120ms; } .ds-index-item:last-child { border-right: 0; } .ds-index-item:hover { color: #BEBEC4; } .ds-index-item.ds-active { color: #FAFAF7; border-bottom-color: #D4FF3A; } .ds-index-n { font: 700 0.75rem/1.4 'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, monospace; letter-spacing: 0.04em; color: #96969E; } .ds-active .ds-index-n { color: #D4FF3A; } .ds-index-label { display: block; font-weight: 600; } .ds-index-cap { display: block; margin-top: 3px; font-size: 0.6875rem; letter-spacing: 0.02em; color: #96969E; }"
+    },
+    {
+      "name": "Glance Figure",
+      "kind": "custom",
+      "refersTo": "card",
+      "description": "One figure of the glance strip: a big tabular number on a vertical rule, a mono label and an honest caption.",
+      "html": "<div class=\"ds-figures\"><div class=\"ds-figure\"><span class=\"ds-figure-num\">55</span><span class=\"ds-figure-label\">Active materials</span><span class=\"ds-figure-cap\">tracked in the catalog</span></div><div class=\"ds-figure\"><span class=\"ds-figure-num\">366</span><span class=\"ds-figure-label\">Ledger entries</span><span class=\"ds-figure-cap\">18 voided, excluded from stock</span></div><div class=\"ds-figure ds-alert\"><span class=\"ds-figure-num\">3</span><span class=\"ds-figure-label\">Below reorder</span><span class=\"ds-figure-cap\">needs restocking</span></div></div>",
+      "css": ".ds-figures { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); background: #09090B; padding: 1rem 0; } .ds-figure { padding: 0 1.5rem; border-left: 1px solid #2A2A30; } .ds-figure:first-child { padding-left: 0; border-left: 0; } .ds-figure-num { display: block; font: 700 2.5rem/1 'Inter Variable', Inter, system-ui, sans-serif; letter-spacing: -0.04em; color: #FAFAF7; font-variant-numeric: tabular-nums; } .ds-figure-label { display: block; margin-top: 0.75rem; font: 600 0.6875rem/1 'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, monospace; text-transform: uppercase; letter-spacing: 0.12em; color: #BEBEC4; } .ds-figure-cap { display: block; margin-top: 0.5rem; font: 400 0.75rem/1.4 'Inter Variable', Inter, system-ui, sans-serif; color: #96969E; } .ds-alert .ds-figure-num, .ds-alert .ds-figure-label { color: #FF7A75; }"
+    },
+    {
+      "name": "Docket",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "The summary beside a movement form: quiet until there is something to record, then the lines about to be written.",
+      "html": "<aside class=\"ds-docket\"><p class=\"ds-docket-head\">Dispatch docket</p><div class=\"ds-docket-big\">−300<span class=\"ds-docket-unit\">units</span></div><dl class=\"ds-docket-dl\"><div><dt>From</dt><dd>Rohtak Warehouse</dd></div><div><dt>To</dt><dd class=\"ds-strong\">Meerut</dd></div><div><dt>Date</dt><dd>15 Sept 2026</dd></div></dl><ul class=\"ds-docket-lines\"><li><span>EDTA Vials</span><span class=\"ds-qty\">300 <em>vial</em></span></li></ul><button class=\"ds-btn-primary ds-full\">Record dispatch</button></aside>",
+      "css": ".ds-docket { width: 330px; padding: 1.25rem; background: #121215; border: 1px solid #2A2A30; border-top: 2px solid #D4FF3A; border-radius: 0 0 10px 10px; color: #FAFAF7; font: 400 0.875rem/1.5 'Inter Variable', Inter, system-ui, sans-serif; } .ds-docket-head { margin: 0 0 0.75rem; font: 600 0.6875rem/1 'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, monospace; text-transform: uppercase; letter-spacing: 0.14em; color: #96969E; } .ds-docket-big { display: flex; align-items: baseline; gap: 0.5rem; padding-bottom: 1rem; margin-bottom: 1rem; border-bottom: 1px solid #2A2A30; font-size: 2.25rem; font-weight: 700; line-height: 1; letter-spacing: -0.04em; color: #D4FF3A; font-variant-numeric: tabular-nums; } .ds-docket-unit { font: 500 0.6875rem/1 'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, monospace; text-transform: uppercase; letter-spacing: 0.1em; color: #96969E; } .ds-docket-dl { margin: 0; } .ds-docket-dl > div { display: flex; justify-content: space-between; gap: 1rem; padding: 0.5rem 0; border-bottom: 1px dashed #2A2A30; } .ds-docket-dl dt { font-size: 0.8125rem; color: #96969E; } .ds-docket-dl dd { margin: 0; text-align: right; color: #BEBEC4; } .ds-docket-dl dd.ds-strong { color: #FAFAF7; font-weight: 700; } .ds-docket-lines { list-style: none; margin: 0.75rem 0 0; padding: 0.75rem 0 0; border-top: 1px solid #3E3E46; } .ds-docket-lines li { display: flex; justify-content: space-between; padding: 0.5rem 0; } .ds-qty { font-weight: 600; font-variant-numeric: tabular-nums; } .ds-qty em { font: 500 0.6875rem/1 'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, monospace; text-transform: uppercase; letter-spacing: 0.1em; color: #96969E; margin-left: 0.5rem; } .ds-btn-primary { display: inline-flex; justify-content: center; align-items: center; background: #D4FF3A; color: #0A0A0A; border: 1px solid #D4FF3A; border-radius: 6px; padding: 0.75rem 1rem; font: 650 0.875rem/1 'Inter Variable', Inter, system-ui, sans-serif; cursor: pointer; } .ds-full { width: 100%; margin-top: 1.25rem; } .ds-btn-primary:hover { filter: brightness(1.08); box-shadow: 0 0 0 3px rgb(212 255 58 / 0.16); }"
+    },
+    {
+      "name": "Status Pill",
+      "kind": "chip",
+      "refersTo": "status-pill-ok",
+      "description": "Run state in the topbar: a dot and a dated verdict in the semantic colour.",
+      "html": "<div class=\"ds-pills\"><span class=\"ds-pill ds-ok\">last run ok · 15:25</span><span class=\"ds-pill ds-err\">last run failed · 13:23</span><span class=\"ds-pill ds-run\">running</span></div>",
+      "css": ".ds-pills { display: flex; gap: 0.75rem; background: #121215; padding: 0.75rem; } .ds-pill { display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.25rem 0.75rem; border-radius: 999px; border: 1px solid transparent; font: 650 0.75rem/1.4 'Inter Variable', Inter, system-ui, sans-serif; white-space: nowrap; } .ds-pill::before { content: ''; width: 6px; height: 6px; border-radius: 999px; background: currentColor; } .ds-ok { background: rgb(126 231 135 / 0.12); color: #7EE787; border-color: rgb(126 231 135 / 0.4); } .ds-err { background: rgb(255 122 117 / 0.12); color: #FF7A75; border-color: rgb(255 122 117 / 0.4); } .ds-run { background: rgb(125 200 255 / 0.12); color: #7DC8FF; border-color: rgb(125 200 255 / 0.4); }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Lab Bench",
+    "overview": "Everything sits on a dark bench under one work-light. The ground is near-black, surfaces are barely lighter, and structure comes from hairline rules rather than boxes: section heads sit on a rule, tables are rows on rules, figures stand on a rule with a mono caption underneath. The one colour is a lime signal, used for what is live, selected or actionable, and never as decoration. Meaning gets its own hues so a negative balance or a voided row is unmistakable without reading.\n\nDensity is working density. Numbers lead: tabular figures, tight tracking on the big ones, the material name in the same weight everywhere so it can be scanned down a column. Labels are uppercase mono, small and widely spaced, so they read as annotations on the bench rather than competing with the data. Copy is honest about scope and state.\n\nThe system was chosen deliberately over a light \"Daylight\" alternative and a task-first \"Field Card\" alternative; it inherits the operators' existing habits and spends its effort on hierarchy and table craft. Print is the exception: on paper the bench becomes white with dark ink and plain rules.",
+    "keyCharacteristics": [
+      "Near-black ground, tonal surfaces, hairline rules; no cards-within-cards.",
+      "One lime signal, reserved for live/selected/actionable.",
+      "Semantic colour for state: in, out, adjusted, negative, voided, inactive.",
+      "Uppercase mono labels over sans data; tabular numerals everywhere.",
+      "Section heads on a rule with title, honest caption and tools; sticky under the topbar.",
+      "Phones get the same content as stacked cards and a fixed action bar, never a sideways scroll."
+    ],
+    "rules": [
+      { "name": "The One Signal Rule", "body": "Lime means live, selected or actionable. It never colours a heading, a border for decoration, or a number that has nothing to say yet — an empty docket shows its +0 in Ink Tertiary.", "section": "colors" },
+      { "name": "The State Has Its Own Hue Rule", "body": "In / out / adjusted / negative / voided / inactive are told apart by colour and treatment, never by lime and never by strike-through alone: voided rows are struck and dimmed with a dated tag; inactive catalog rows are dimmed and tagged, not struck.", "section": "colors" },
+      { "name": "The Tabular Number Rule", "body": "Every numeral that can be compared down a column is tabular-nums; big figures also tighten to −0.04em.", "section": "typography" },
+      { "name": "The Mono Annotates Rule", "body": "Mono is for labels, codes, units and timestamps — never for body copy or as a technical costume on headings.", "section": "typography" },
+      { "name": "The Rules Not Boxes Rule", "body": "Sections, tables and forms are separated by hairlines. A bordered surface is reserved for things that genuinely float (docket, tile, menu, progress strip).", "section": "elevation" }
+    ],
+    "dos": [
+      "Do put every section on a rule with a title, an honest caption and tools to the right.",
+      "Do show negatives in Signal Danger, overdraw in Signal Warning, voids struck-and-dated, inactive dimmed-and-tagged.",
+      "Do keep numerals tabular and material names at the same weight down a column.",
+      "Do stack tables into cards below 640px and keep the primary action reachable in a fixed bar.",
+      "Do print on white with dark ink and treat one business unit as one unbreakable block."
+    ],
+    "donts": [
+      "Don't use lime for anything that is not live, selected or actionable — including empty totals.",
+      "Don't add thick coloured left borders, nested cards, or gradient text; structure is hairlines.",
+      "Don't print a placeholder as data (the noon timestamp on date-only entries, a · in a stacked card).",
+      "Don't strike through a disabled catalog item; strike-through means a voided transaction.",
+      "Don't use window.prompt/alert for edits that can happen inline in the row."
+    ]
+  }
+}

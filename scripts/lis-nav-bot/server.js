@@ -1790,6 +1790,14 @@ try {
 } catch (e) {
     console.warn('[stellar-matter] inventory photo serving disabled:', e.message);
 }
+// Purchase-order documents (PI PDFs) — same arrangement as photos.
+try {
+    const { DOCS_DIR, URL_PREFIX: DOCS_PREFIX, ensureDocsDir } = require('../../server/inventoryDocs');
+    ensureDocsDir();
+    app.use(DOCS_PREFIX, express.static(DOCS_DIR, { fallthrough: false, maxAge: '365d', immutable: true }));
+} catch (e) {
+    console.warn('[stellar-matter] inventory document serving disabled:', e.message);
+}
 
 const publicDir = path.join(__dirname, 'public');
 app.use(express.static(publicDir));

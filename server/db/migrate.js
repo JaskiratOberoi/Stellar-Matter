@@ -634,6 +634,69 @@ async function migrateInventory(client) {
          ON inventory_movements (vendor_id) WHERE vendor_id IS NOT NULL;`
     );
 
+    // Purchase orders placed with vendors, tracked to delivery. An order is a
+    // header (vendor, reference, dates, where it ships to, the PI document)
+    // plus lines. Status is set by people, not derived: placed -> received
+    // (via the Receive form, which links its movements back here) or
+    // cancelled. destination_location_id is optional — vendors sometimes ship
+    // straight to a business unit (direct_dispatch), and sometimes it is
+    // simply not decided at order time.
+    await client.query(`
+        CREATE TABLE IF NOT EXISTS inventory_orders (
+            id TEXT PRIMARY KEY,
+            org_id TEXT NOT NULL DEFAULT 'org-default'
+                REFERENCES organizations(id) ON DELETE RESTRICT,
+            vendor_id TEXT REFERENCES inventory_vendors(id) ON DELETE SET NULL,
+            reference TEXT,
+            ordered_on DATE NOT NULL,
+            expected_on DATE,
+            direct_dispatch BOOLEAN NOT NULL DEFAULT false,
+            destination_location_id TEXT
+                REFERENCES inventory_locations(id) ON DELETE SET NULL,
+            status TEXT NOT NULL DEFAULT 'placed'
+                CHECK (status IN ('placed', 'received', 'cancelled')),
+            pi_path TEXT,
+            pi_name TEXT,
+            note TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            created_by TEXT,
+            received_at TIMESTAMPTZ,
+            received_by TEXT,
+            cancelled_at TIMESTAMPTZ,
+            cancelled_by TEXT
+        );
+    `);
+    await client.query(
+        `CREATE INDEX IF NOT EXISTS inventory_orders_org_status_idx
+         ON inventory_orders (org_id, status, expected_on);`
+    );
+    await client.query(`
+        CREATE TABLE IF NOT EXISTS inventory_order_lines (
+            id BIGSERIAL PRIMARY KEY,
+            order_id TEXT NOT NULL REFERENCES inventory_orders(id) ON DELETE CASCADE,
+            material_id TEXT NOT NULL REFERENCES inventory_materials(id) ON DELETE RESTRICT,
+            pack_size INT NOT NULL DEFAULT 1 CHECK (pack_size > 0),
+            pack_qty INT NOT NULL CHECK (pack_qty > 0),
+            qty_base INT NOT NULL CHECK (qty_base > 0),
+            position INT NOT NULL DEFAULT 0
+        );
+    `);
+    await client.query(
+        `CREATE INDEX IF NOT EXISTS inventory_order_lines_order_idx
+         ON inventory_order_lines (order_id, position);`
+    );
+    // A receipt booked from an order points back to it, so the order can show
+    // what actually arrived and the ledger can show what an entry fulfilled.
+    await client.query(
+        `ALTER TABLE inventory_movements
+         ADD COLUMN IF NOT EXISTS order_id TEXT
+             REFERENCES inventory_orders(id) ON DELETE SET NULL;`
+    );
+    await client.query(
+        `CREATE INDEX IF NOT EXISTS inventory_movements_order_idx
+         ON inventory_movements (order_id) WHERE order_id IS NOT NULL;`
+    );
+
     // Optional proof-of-goods photo per movement line. Stores a URL path such
     // as /inventory-photos/<file>; the file itself lives on the bind-mounted
     // out/ volume so it survives container rebuilds.

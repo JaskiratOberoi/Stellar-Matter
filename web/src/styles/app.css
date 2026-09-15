@@ -4087,13 +4087,105 @@ td.inv-low {
     white-space: normal;
 }
 
-/* Six index tabs fit one row down to a laptop; the old 170px basis wrapped
-   the sixth ("Catalog") onto a row of its own below 1200px. */
-@media (max-width: 1200px) {
+/* Seven index tabs fit one row down to a laptop; the old 170px basis wrapped
+   the last one onto a row of its own. Captions go first when space is short. */
+@media (max-width: 1360px) {
     .inv-index-item {
-        flex-basis: 150px;
+        flex-basis: 128px;
         padding: var(--sp-4) var(--sp-3);
     }
+
+    .inv-index-cap {
+        display: none;
+    }
+}
+
+/* Purchase orders */
+.inv-order-form-layout {
+    margin-bottom: var(--sp-8);
+    padding-bottom: var(--sp-6);
+    border-bottom: 1px solid rgb(var(--nx-rule-strong));
+}
+
+.inv-toggle-field {
+    min-height: 44px;
+}
+
+.inv-pi {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--sp-3);
+    flex-wrap: wrap;
+}
+
+.inv-pi .chip svg,
+.inv-order-pi .chip svg,
+.btn-primary svg {
+    flex: none;
+}
+
+.inv-pi-name {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--sp-1);
+    max-width: 32ch;
+    font-size: var(--fs-xs);
+    color: rgb(var(--nx-ink-2));
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.inv-order-pi .chip {
+    display: inline-flex;
+    gap: var(--sp-1);
+    text-decoration: none;
+}
+
+.inv-due {
+    display: block;
+    margin-top: 2px;
+    font: 500 var(--fs-3xs) / 1 var(--font-mono);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: rgb(var(--nx-ink-3));
+}
+
+.inv-due.is-warning {
+    color: rgb(var(--nx-signal-warning));
+}
+
+.inv-due.is-danger {
+    color: rgb(var(--nx-signal-danger));
+    font-weight: 700;
+}
+
+.inv-order-badge.is-placed {
+    background: rgb(var(--nx-signal-info) / 0.16);
+    color: rgb(var(--nx-signal-info));
+}
+
+.inv-order-badge.is-received {
+    background: rgb(var(--nx-signal-success) / 0.16);
+    color: rgb(var(--nx-signal-success));
+}
+
+.inv-order-badge.is-cancelled {
+    background: rgb(var(--nx-surface-3));
+    color: rgb(var(--nx-ink-3));
+}
+
+.inv-order-row.is-cancelled td {
+    color: rgb(var(--nx-ink-3));
+}
+
+.inv-orders-table .inv-order-lines-cell {
+    max-width: 30ch;
+    white-space: normal;
+}
+
+.inv-orders-table .inv-row-actions {
+    white-space: nowrap;
 }
 
 /* Phone: ledger and vendor rows become stacked cards instead of a sideways
@@ -4187,6 +4279,42 @@ td.inv-low {
     .inv-vendors-table td.inv-vendor-supplies { order: 4; flex: 1 1 auto; font-size: var(--fs-xs); color: rgb(var(--nx-ink-2)); }
     .inv-vendors-table td.inv-row-actions { order: 5; flex: 1 1 100%; justify-content: flex-end; margin-top: var(--sp-1); padding-left: 0; }
     .inv-vendors-table td.inv-vendor-edit-cell { flex: 1 1 100%; }
+
+    /* Orders: vendor + units first, then expected/destination, then materials, PI, status, actions. */
+    .inv-orders-table thead { display: none; }
+    .inv-orders-table,
+    .inv-orders-table tbody { display: block; width: 100%; }
+    .inv-table.inv-orders-table { min-width: 0; }
+    .inv-orders-table tbody tr {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: var(--sp-1) var(--sp-3);
+        padding: var(--sp-3) 0;
+        border-bottom: 1px solid rgb(var(--nx-rule-soft));
+    }
+    .inv-orders-table tbody tr td {
+        display: block;
+        min-width: 0;
+        max-width: none;
+        padding: 0;
+        border: 0;
+        white-space: normal;
+        overflow-wrap: anywhere;
+    }
+    .inv-orders-table tbody tr td:has(> .inv-dash:only-child) { display: none; }
+    .inv-orders-table td.inv-order-vendor { order: 1; flex: 1 1 60%; font-size: var(--fs-base); }
+    .inv-orders-table td.inv-order-units { order: 2; flex: 0 0 auto; margin-left: auto; font-weight: 600; }
+    .inv-orders-table td.inv-order-when { order: 3; flex: 0 0 auto; display: flex; gap: var(--sp-2); }
+    .inv-orders-table td.inv-order-when .inv-when-time { margin-top: 0; }
+    .inv-orders-table td.inv-order-expected { order: 4; flex: 0 0 auto; }
+    .inv-orders-table td.inv-order-dest { order: 5; flex: 1 1 100%; }
+    .inv-orders-table td.inv-order-lines-cell { order: 6; flex: 1 1 100%; }
+    .inv-orders-table td.inv-order-pi { order: 7; flex: 0 0 auto; }
+    .inv-orders-table td.inv-order-status { order: 8; flex: 0 0 auto; }
+    .inv-orders-table tbody tr td.inv-row-actions { order: 9; flex: 1 1 100%; display: flex; flex-wrap: wrap; gap: var(--sp-2); justify-content: flex-end; margin-top: var(--sp-1); white-space: normal; }
+    .inv-orders-table tbody tr td.inv-row-actions > * + * { margin-left: 0; }
+    .inv-orders-table tbody tr td.inv-row-actions:empty { display: none; }
 }
 
 /* Docket — the sticky receipt beside a form: figure, breakdown, action. */

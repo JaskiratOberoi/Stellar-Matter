@@ -20,7 +20,9 @@ function buildApiProxy(env) {
         // Inventory proof-of-goods photos are served by the backend at this
         // top-level path (not under /api), so the dev proxy needs it too or
         // <img src="/inventory-photos/..."> would 404 against Vite.
-        '/inventory-photos': opts
+        '/inventory-photos': opts,
+        // Purchase-order PI PDFs, same arrangement.
+        '/inventory-docs': opts
     };
 }
 
