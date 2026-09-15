@@ -1127,7 +1127,7 @@ function PiPicker({ name, uploading, onPick, onClear, compact }) {
                 disabled={uploading}
             >
                 <Icon name="file" />
-                {uploading ? 'Uploading…' : name ? (compact ? 'Replace PI' : 'Replace') : 'Attach PI (PDF)'}
+                {uploading ? 'Uploading…' : name ? (compact ? 'Replace PI' : 'Replace') : compact ? 'Attach PI' : 'Attach PI (PDF)'}
             </button>
             {name && !compact && (
                 <span className="inv-pi-name" title={name}>
@@ -1143,7 +1143,7 @@ function PiPicker({ name, uploading, onPick, onClear, compact }) {
     );
 }
 
-function OrderForm({ inventory, onDone, onCancel }) {
+function OrderForm({ inventory, onDone }) {
     const { materials, vendors, locations, createOrder, createLocation, uploadDocument, reload } = inventory;
     const activeMaterials = materials.filter((m) => m.active);
     const activeVendors = (vendors || []).filter((v) => v.active);
@@ -1370,11 +1370,6 @@ function OrderForm({ inventory, onDone, onCancel }) {
                             + Add material
                         </button>
                     </div>
-                    <div className="form-actions">
-                        <button type="button" className="chip chip-tool" onClick={onCancel} disabled={busy}>
-                            Cancel
-                        </button>
-                    </div>
                 </form>
             </section>
 
@@ -1474,8 +1469,21 @@ function OrdersView({ inventory, canMove, onDone, onGoto }) {
 
     return (
         <section className="inv-panel">
-            <SectionHead title="Purchase orders" caption={caption}>
-                <div className="chip-tool-group" role="group" aria-label="Filter orders">
+            <SectionHead title="Purchase orders" caption={mode === 'new' ? 'New order' : caption}>
+                {canMove && mode == null && (
+                    <button type="button" className="btn-primary btn-sm" onClick={() => setMode('new')}>
+                        <Icon name="clip" />
+                        Log order
+                    </button>
+                )}
+                {canMove && mode === 'new' && (
+                    <button type="button" className="chip chip-tool" onClick={() => setMode(null)}>
+                        Cancel
+                    </button>
+                )}
+            </SectionHead>
+            {mode == null && (
+                <div className="inv-orders-filters chip-tool-group" role="group" aria-label="Filter orders">
                     {ORDER_FILTERS.map((f) => (
                         <button
                             key={f.id}
@@ -1488,13 +1496,7 @@ function OrdersView({ inventory, canMove, onDone, onGoto }) {
                         </button>
                     ))}
                 </div>
-                {canMove && mode == null && (
-                    <button type="button" className="btn-primary btn-sm" onClick={() => setMode('new')}>
-                        <Icon name="clip" />
-                        Log order
-                    </button>
-                )}
-            </SectionHead>
+            )}
 
             {canMove && mode === 'new' && (
                 <OrderForm
@@ -1504,7 +1506,6 @@ function OrdersView({ inventory, canMove, onDone, onGoto }) {
                         setMode(null);
                         load();
                     }}
-                    onCancel={() => setMode(null)}
                 />
             )}
 

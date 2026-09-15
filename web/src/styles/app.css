@@ -4188,6 +4188,12 @@ td.inv-low {
     white-space: nowrap;
 }
 
+/* Filter strip sits under the section head, like the ledger's, so the
+   sticky head stays one line tall on a phone. */
+.inv-orders-filters {
+    margin: calc(-1 * var(--sp-1)) 0 var(--sp-4);
+}
+
 /* Phone: ledger and vendor rows become stacked cards instead of a sideways
    scroll. Cells keep their order of importance via flex order. */
 @media (max-width: 640px) {
@@ -4280,7 +4286,23 @@ td.inv-low {
     .inv-vendors-table td.inv-row-actions { order: 5; flex: 1 1 100%; justify-content: flex-end; margin-top: var(--sp-1); padding-left: 0; }
     .inv-vendors-table td.inv-vendor-edit-cell { flex: 1 1 100%; }
 
-    /* Orders: vendor + units first, then expected/destination, then materials, PI, status, actions. */
+    /* Orders on a phone: one card per order.
+         vendor ................................ units
+         ORDERED · PO-REF        → EXPECTED · DUE TONE
+         deliver to
+         materials
+         [PI] [status]                   [Receive] [Cancel] */
+    .inv-orders-filters {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        scrollbar-width: none;
+        margin-left: calc(-1 * var(--sp-4));
+        margin-right: calc(-1 * var(--sp-4));
+        padding: 0 var(--sp-4);
+    }
+    .inv-orders-filters::-webkit-scrollbar { display: none; }
+    .inv-orders-filters .chip { flex: 0 0 auto; }
+
     .inv-orders-table thead { display: none; }
     .inv-orders-table,
     .inv-orders-table tbody { display: block; width: 100%; }
@@ -4290,7 +4312,7 @@ td.inv-low {
         flex-wrap: wrap;
         align-items: baseline;
         gap: var(--sp-1) var(--sp-3);
-        padding: var(--sp-3) 0;
+        padding: var(--sp-4) 0;
         border-bottom: 1px solid rgb(var(--nx-rule-soft));
     }
     .inv-orders-table tbody tr td {
@@ -4303,18 +4325,49 @@ td.inv-low {
         overflow-wrap: anywhere;
     }
     .inv-orders-table tbody tr td:has(> .inv-dash:only-child) { display: none; }
-    .inv-orders-table td.inv-order-vendor { order: 1; flex: 1 1 60%; font-size: var(--fs-base); }
-    .inv-orders-table td.inv-order-units { order: 2; flex: 0 0 auto; margin-left: auto; font-weight: 600; }
-    .inv-orders-table td.inv-order-when { order: 3; flex: 0 0 auto; display: flex; gap: var(--sp-2); }
-    .inv-orders-table td.inv-order-when .inv-when-time { margin-top: 0; }
-    .inv-orders-table td.inv-order-expected { order: 4; flex: 0 0 auto; }
-    .inv-orders-table td.inv-order-dest { order: 5; flex: 1 1 100%; }
-    .inv-orders-table td.inv-order-lines-cell { order: 6; flex: 1 1 100%; }
-    .inv-orders-table td.inv-order-pi { order: 7; flex: 0 0 auto; }
-    .inv-orders-table td.inv-order-status { order: 8; flex: 0 0 auto; }
-    .inv-orders-table tbody tr td.inv-row-actions { order: 9; flex: 1 1 100%; display: flex; flex-wrap: wrap; gap: var(--sp-2); justify-content: flex-end; margin-top: var(--sp-1); white-space: normal; }
+
+    .inv-orders-table td.inv-order-vendor { order: 1; flex: 1 1 60%; font-size: var(--fs-base); font-weight: 600; }
+    .inv-orders-table td.inv-order-units { order: 2; flex: 0 0 auto; margin-left: auto; font-size: var(--fs-base); font-weight: 700; }
+
+    /* Dates read as one mono annotation line: ordered · ref on the left,
+       expected + due tone on the right. */
+    .inv-orders-table td.inv-order-when,
+    .inv-orders-table td.inv-order-expected {
+        font: 500 var(--fs-2xs) / 1.3 var(--font-mono);
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: rgb(var(--nx-ink-3));
+    }
+    .inv-orders-table td.inv-order-when { order: 3; flex: 1 1 auto; display: flex; gap: var(--sp-2); align-items: baseline; }
+    .inv-orders-table td.inv-order-when .inv-when-date,
+    .inv-orders-table td.inv-order-expected .inv-when-date { font: inherit; color: inherit; }
+    .inv-orders-table td.inv-order-when .inv-when-time { margin-top: 0; color: rgb(var(--nx-ink-2)); }
+    .inv-orders-table td.inv-order-expected { order: 4; flex: 0 0 auto; margin-left: auto; text-align: right; }
+    .inv-orders-table td.inv-order-expected .inv-when-date::before { content: '→ '; }
+    .inv-orders-table td.inv-order-expected .inv-due { display: inline; margin: 0 0 0 var(--sp-2); font-size: inherit; }
+
+    .inv-orders-table td.inv-order-dest { order: 5; flex: 1 1 100%; margin-top: var(--sp-1); color: rgb(var(--nx-ink-2)); }
+    .inv-orders-table td.inv-order-lines-cell { order: 6; flex: 1 1 100%; max-width: none; color: rgb(var(--nx-ink)); }
+
+    /* Last row: proof and state on the left, the verbs on the right. */
+    .inv-orders-table td.inv-order-pi { order: 7; flex: 0 0 auto; margin-top: var(--sp-2); }
+    .inv-orders-table td.inv-order-status { order: 8; flex: 0 0 auto; margin-top: var(--sp-2); }
+    .inv-orders-table tbody tr td.inv-row-actions {
+        order: 9;
+        flex: 1 0 auto;
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--sp-2);
+        justify-content: flex-end;
+        margin-top: var(--sp-2);
+        margin-left: auto;
+        white-space: normal;
+    }
     .inv-orders-table tbody tr td.inv-row-actions > * + * { margin-left: 0; }
     .inv-orders-table tbody tr td.inv-row-actions:empty { display: none; }
+    .inv-orders-table tbody tr td.inv-row-actions .btn-primary,
+    .inv-orders-table tbody tr td.inv-row-actions .chip,
+    .inv-orders-table td.inv-order-pi .chip { min-height: 40px; }
 }
 
 /* Docket — the sticky receipt beside a form: figure, breakdown, action. */
