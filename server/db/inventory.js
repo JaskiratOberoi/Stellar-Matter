@@ -442,10 +442,25 @@ async function listBalances(orgId) {
     const r = await pool.query(
         `SELECT b.material_id, b.location_id, b.on_hand,
                 m.name AS material_name, m.base_unit, m.reorder_level, m.metric_kind,
-                l.name AS location_name, l.kind AS location_kind
+                l.name AS location_name, l.kind AS location_kind,
+                lm.created_at AS last_recorded_at,
+                COALESCE(cu.display_name, cu.username, lm.created_by) AS last_recorded_by
          FROM inventory_balances b
          JOIN inventory_materials m ON m.id = b.material_id AND m.org_id = b.org_id
          JOIN inventory_locations l ON l.id = b.location_id AND l.org_id = b.org_id
+         -- The newest live movement touching this cell: when the balance last
+         -- changed and who keyed it in (super-admin stamp on the stock matrix).
+         LEFT JOIN LATERAL (
+             SELECT mv.created_at, mv.created_by
+             FROM inventory_movements mv
+             WHERE mv.org_id = b.org_id
+               AND mv.material_id = b.material_id
+               AND mv.voided_at IS NULL
+               AND (mv.to_location_id = b.location_id OR mv.from_location_id = b.location_id)
+             ORDER BY mv.created_at DESC, mv.id DESC
+             LIMIT 1
+         ) lm ON true
+         LEFT JOIN users cu ON cu.id = lm.created_by
          WHERE b.org_id = $1
          ORDER BY m.name, l.name`,
         [orgId]

@@ -485,7 +485,7 @@ export function InventoryPage() {
                     )}
 
                     <div className="inv-view">
-                        {view === 'stock' && <StockView inventory={inventory} onGoto={goto} />}
+                        {view === 'stock' && <StockView inventory={inventory} showRecorded={isSuperAdmin} onGoto={goto} />}
                         {view === 'orders' && (
                             <OrdersView
                                 inventory={inventory}
@@ -663,11 +663,26 @@ function EmptyState({ icon = 'box', title, children, action }) {
 
 // -- Stock matrix ----------------------------------------------------------
 
-function StockView({ inventory, onGoto }) {
+// showRecorded (super admin only): every cell's tooltip carries when that
+// balance last changed and by whom, and a trailing column shows the same for
+// the material's most recent change anywhere.
+function StockView({ inventory, showRecorded = false, onGoto }) {
     const { materials, locations, balances } = inventory;
     const activeMaterials = materials.filter((m) => m.active);
     const activeLocations = locations.filter((l) => l.active);
     const balMap = useBalanceMap(balances);
+    const stamps = useMemo(() => {
+        const cell = new Map();
+        const row = new Map();
+        for (const b of balances) {
+            if (!b.last_recorded_at) continue;
+            const s = { at: b.last_recorded_at, who: b.last_recorded_by || null, where: b.location_name };
+            cell.set(balanceKey(b.material_id, b.location_id), s);
+            const cur = row.get(b.material_id);
+            if (!cur || new Date(s.at) > new Date(cur.at)) row.set(b.material_id, s);
+        }
+        return { cell, row };
+    }, [balances]);
     const [query, setQuery] = useState('');
     const [hideEmpty, setHideEmpty] = useState(false);
     const [showAllLocations, setShowAllLocations] = useState(false);
@@ -792,6 +807,7 @@ function StockView({ inventory, onGoto }) {
                                 </th>
                             ))}
                             <th className="num inv-total-col">Total</th>
+                            {showRecorded && <th className="inv-stock-rec">Last recorded</th>}
                         </tr>
                     </thead>
                     <tbody>
@@ -804,22 +820,43 @@ function StockView({ inventory, onGoto }) {
                                 {shownLocations.map((l) => {
                                     const val = balMap.get(balanceKey(m.id, l.id)) || 0;
                                     const low = storeIds.has(l.id) && m.reorder_level > 0 && val < m.reorder_level;
+                                    const st = showRecorded ? stamps.cell.get(balanceKey(m.id, l.id)) : null;
+                                    const tip = [];
+                                    if (low) tip.push(`Below reorder level (${fmt(m.reorder_level)})`);
+                                    if (st) tip.push(`rec ${fmtRecorded(new Date(st.at))}${st.who ? ` · ${st.who}` : ''}`);
                                     return (
                                         <td
                                             key={l.id}
                                             className={`num${val === 0 ? ' inv-zero' : ''}${val < 0 ? ' inv-neg' : ''}${low ? ' inv-low' : ''}`}
-                                            title={low ? `Below reorder level (${fmt(m.reorder_level)})` : undefined}
+                                            title={tip.length ? tip.join('\n') : undefined}
                                         >
                                             {val === 0 ? '·' : fmt(val)}
                                         </td>
                                     );
                                 })}
                                 <td className="num inv-total-col">{fmt(totalFor(m.id))}</td>
+                                {showRecorded && (() => {
+                                    const st = stamps.row.get(m.id);
+                                    return (
+                                        <td className="inv-stock-rec" title={st ? 'When this material\'s stock last changed anywhere, and by whom' : undefined}>
+                                            {st ? (
+                                                <>
+                                                    <span className="inv-stock-rec-at">{fmtRecorded(new Date(st.at))}</span>
+                                                    <span className="inv-stock-rec-by">
+                                                        {st.who || '—'}{st.where ? ` · ${st.where}` : ''}
+                                                    </span>
+                                                </>
+                                            ) : (
+                                                <span className="inv-dash">·</span>
+                                            )}
+                                        </td>
+                                    );
+                                })()}
                             </tr>
                         ))}
                         {!rows.length && (
                             <tr>
-                                <td colSpan={shownLocations.length + 2} className="muted inv-nomatch">
+                                <td colSpan={shownLocations.length + (showRecorded ? 3 : 2)} className="muted inv-nomatch">
                                     No materials match “{query}”.
                                 </td>
                             </tr>
@@ -838,6 +875,7 @@ function StockView({ inventory, onGoto }) {
                                     );
                                 })}
                                 <td className="num inv-total-col">{fmt(grandTotal)}</td>
+                                {showRecorded && <td className="inv-stock-rec" />}
                             </tr>
                         </tfoot>
                     )}

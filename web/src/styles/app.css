@@ -5647,3 +5647,29 @@ tr.inv-voided td:nth-child(3) {
     border-left: 1px solid rgb(var(--nx-rule-soft));
     padding-left: var(--sp-5);
 }
+
+/* Stock matrix, super admin: trailing "Last recorded" column — when the
+   material's stock last changed anywhere, by whom and where. */
+.inv-matrix th.inv-stock-rec,
+.inv-matrix td.inv-stock-rec {
+    text-align: left;
+    white-space: nowrap;
+    padding-left: var(--sp-5);
+    border-left: 1px solid rgb(var(--nx-rule-soft));
+}
+
+.inv-stock-rec-at {
+    display: block;
+    font: 500 var(--fs-3xs) / 1.3 var(--font-mono);
+    letter-spacing: 0.02em;
+    color: rgb(var(--nx-ink-2));
+    font-variant-numeric: tabular-nums;
+}
+
+.inv-stock-rec-by {
+    display: block;
+    margin-top: 2px;
+    font-size: var(--fs-3xs);
+    line-height: 1.3;
+    color: rgb(var(--nx-ink-3));
+}
