@@ -3968,13 +3968,21 @@ td.inv-low {
     min-width: 16ch;
 }
 
+/* Stays a real table-cell (a flex td drops out of table layout, so its
+   bottom border sits at its own content height instead of the row's and the
+   row rule breaks at the column edge). Lines stack as blocks instead. */
 .inv-vendor-contact {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
     min-width: 12ch;
     font-size: var(--fs-xs);
     color: rgb(var(--nx-ink-2));
+}
+
+.inv-vendor-contact > span {
+    display: block;
+}
+
+.inv-vendor-contact > span + span {
+    margin-top: 2px;
 }
 
 .inv-vendor-contact-line {
