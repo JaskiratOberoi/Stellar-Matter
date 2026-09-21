@@ -481,7 +481,13 @@ export function InventoryPage() {
                     <div className="inv-view">
                         {view === 'stock' && <StockView inventory={inventory} onGoto={goto} />}
                         {view === 'orders' && (
-                            <OrdersView inventory={inventory} canMove={canMove} onDone={showFlash} onGoto={goto} />
+                            <OrdersView
+                                inventory={inventory}
+                                canMove={canMove}
+                                showRecorded={role === 'super_admin'}
+                                onDone={showFlash}
+                                onGoto={goto}
+                            />
                         )}
                         {view === 'receive' && (
                             <ReceiveView
@@ -1410,7 +1416,9 @@ function OrderForm({ inventory, onDone }) {
     );
 }
 
-function OrdersView({ inventory, canMove, onDone, onGoto }) {
+// showRecorded (super admin only): under the ordered-on date, also print when
+// the order was actually keyed in and by whom.
+function OrdersView({ inventory, canMove, showRecorded = false, onDone, onGoto }) {
     const { fetchOrders, updateOrder, uploadDocument } = inventory;
     const [orders, setOrders] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -1545,6 +1553,17 @@ function OrdersView({ inventory, canMove, onDone, onGoto }) {
                                         <td className="inv-when inv-order-when">
                                             <span className="inv-when-date">{fmtDateInput(o.ordered_on)}</span>
                                             {o.reference && <span className="inv-when-time">{o.reference}</span>}
+                                            {showRecorded && o.created_at && (
+                                                <span
+                                                    className="inv-when-recorded"
+                                                    title="When this order was actually recorded, and by whom"
+                                                >
+                                                    rec {fmtRecorded(new Date(o.created_at))}
+                                                    {(o.created_by_name || o.created_by) && (
+                                                        <> · {o.created_by_name || o.created_by}</>
+                                                    )}
+                                                </span>
+                                            )}
                                         </td>
                                         <td className="inv-mat-cell inv-order-vendor">{o.vendor_name || '—'}</td>
                                         <td className="inv-order-expected">

@@ -962,6 +962,7 @@ const ORDER_SELECT = `
            o.received_at, o.received_by, o.cancelled_at, o.cancelled_by,
            v.name AS vendor_name,
            l.name AS destination_name, l.kind AS destination_kind,
+           COALESCE(cu.display_name, cu.username) AS created_by_name,
            COALESCE((
                SELECT json_agg(json_build_object(
                    'id', ol.id,
@@ -980,7 +981,8 @@ const ORDER_SELECT = `
              WHERE mv.order_id = o.id AND mv.voided_at IS NULL) AS receipt_count
     FROM inventory_orders o
     LEFT JOIN inventory_vendors v ON v.id = o.vendor_id
-    LEFT JOIN inventory_locations l ON l.id = o.destination_location_id`;
+    LEFT JOIN inventory_locations l ON l.id = o.destination_location_id
+    LEFT JOIN users cu ON cu.id = o.created_by`;
 
 async function listOrders(orgId, { status = null, limit = 500 } = {}) {
     const pool = getPool();

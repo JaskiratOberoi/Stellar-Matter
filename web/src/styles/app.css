@@ -4364,6 +4364,8 @@ td.inv-low {
     .inv-orders-table td.inv-order-when .inv-when-date,
     .inv-orders-table td.inv-order-expected .inv-when-date { font: inherit; color: inherit; }
     .inv-orders-table td.inv-order-when .inv-when-time { margin-top: 0; color: rgb(var(--nx-ink-2)); }
+    .inv-orders-table td.inv-order-when { flex-wrap: wrap; }
+    .inv-orders-table td.inv-order-when .inv-when-recorded { flex: 1 1 100%; margin-top: 0; text-transform: none; white-space: normal; }
     .inv-orders-table td.inv-order-expected { order: 4; flex: 0 0 auto; margin-left: auto; text-align: right; }
     .inv-orders-table td.inv-order-expected .inv-when-date::before { content: '→ '; }
     .inv-orders-table td.inv-order-expected .inv-due { display: inline; margin: 0 0 0 var(--sp-2); font-size: inherit; }
