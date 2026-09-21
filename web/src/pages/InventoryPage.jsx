@@ -493,6 +493,7 @@ export function InventoryPage() {
                             <ReceiveView
                                 inventory={inventory}
                                 canMove={canMove}
+                                showRecorded={role === 'super_admin'}
                                 onDone={showFlash}
                                 onGoto={goto}
                                 order={receiveOrder}
@@ -1646,8 +1647,12 @@ function OrdersView({ inventory, canMove, showRecorded = false, onDone, onGoto }
     );
 }
 
-function ReceiveView({ inventory, canMove, onDone, onGoto, order, onOrderConsumed }) {
-    const { materials, vendors, locations, balances, createMovementsBatch, createLocation, uploadPhoto, reload } = inventory;
+// showRecorded (super admin only): stamp the purchase order being received and
+// the recent-receipts list with when each was actually keyed in, and by whom.
+function ReceiveView({ inventory, canMove, showRecorded = false, onDone, onGoto, order, onOrderConsumed }) {
+    const { materials, vendors, locations, balances, createMovementsBatch, createLocation, uploadPhoto, reload, fetchMovements } = inventory;
+    // Bumped after every successful receipt so the recent list refetches.
+    const [recentTick, setRecentTick] = useState(0);
     const activeMaterials = materials.filter((m) => m.active);
     const activeVendors = (vendors || []).filter((v) => v.active);
     const activeLocations = locations.filter((l) => l.active);
@@ -1667,6 +1672,8 @@ function ReceiveView({ inventory, canMove, onDone, onGoto, order, onOrderConsume
     // server links the movements and closes the order in one transaction.
     const [orderId, setOrderId] = useState(null);
     const [orderLabel, setOrderLabel] = useState('');
+    // The order row itself, kept so the header can show when it was recorded.
+    const [orderMeta, setOrderMeta] = useState(null);
 
     const vendor = activeVendors.find((v) => v.id === vendorId) || null;
 
@@ -1681,6 +1688,7 @@ function ReceiveView({ inventory, canMove, onDone, onGoto, order, onOrderConsume
         if (!order) return;
         setOrderId(order.id);
         setOrderLabel(`${order.reference ? `${order.reference} · ` : ''}${order.vendor_name || 'order'}`);
+        setOrderMeta(order);
         if (order.vendor_id) setVendorId(order.vendor_id);
         if (order.destination_location_id) setToLocationId(order.destination_location_id);
         if (order.reference) setReference(order.reference);
@@ -1697,6 +1705,7 @@ function ReceiveView({ inventory, canMove, onDone, onGoto, order, onOrderConsume
     function dropOrder() {
         setOrderId(null);
         setOrderLabel('');
+        setOrderMeta(null);
         if (onOrderConsumed) onOrderConsumed();
     }
 
@@ -1757,6 +1766,7 @@ function ReceiveView({ inventory, canMove, onDone, onGoto, order, onOrderConsume
             setReference('');
             setNote('');
             setOccurredOn(todayDateInput());
+            setRecentTick((t) => t + 1);
         } catch (e2) {
             setErr(String(e2.message || e2));
         } finally {
@@ -1789,9 +1799,21 @@ function ReceiveView({ inventory, canMove, onDone, onGoto, order, onOrderConsume
                 <SectionHead
                     title="Receive from vendor"
                     caption={
-                        orderId
-                            ? `Receiving purchase order ${orderLabel} — recording this closes the order`
-                            : 'One vendor, one delivery — add every material on the docket'
+                        orderId ? (
+                            <>
+                                Receiving purchase order {orderLabel} — recording this closes the order
+                                {showRecorded && orderMeta && orderMeta.created_at && (
+                                    <RecordedStamp
+                                        at={orderMeta.created_at}
+                                        who={orderMeta.created_by_name || orderMeta.created_by}
+                                        what="order"
+                                        className="inv-sechead-rec"
+                                    />
+                                )}
+                            </>
+                        ) : (
+                            'One vendor, one delivery — add every material on the docket'
+                        )
                     }
                 >
                     {orderId && (
@@ -1951,7 +1973,88 @@ function ReceiveView({ inventory, canMove, onDone, onGoto, order, onOrderConsume
                 disabled={busy || anyUploading || !validLines.length}
                 label={busy ? 'Recording…' : anyUploading ? 'Uploading photo…' : 'Record receipt'}
             />
+            <RecentReceipts fetchMovements={fetchMovements} tick={recentTick} showRecorded={showRecorded} />
         </div>
+    );
+}
+
+// Small mono stamp: "rec 9/21/2026 10:48 · Ramesh Kumar". Shown to super
+// admins only; `what` names the thing recorded for the tooltip.
+function RecordedStamp({ at, who, what = 'entry', className = 'inv-when-recorded' }) {
+    const d = new Date(at);
+    if (Number.isNaN(d.getTime())) return null;
+    return (
+        <span className={className} title={`When this ${what} was actually recorded, and by whom`}>
+            rec {fmtRecorded(d)}
+            {who && <> · {who}</>}
+        </span>
+    );
+}
+
+// The last few receipts, under the Receive form, so the operator sees what
+// just landed and a super admin sees when each was actually keyed in.
+const RECENT_RECEIPTS = 8;
+
+function RecentReceipts({ fetchMovements, tick, showRecorded }) {
+    const [rows, setRows] = useState([]);
+    const [err, setErr] = useState(null);
+
+    useEffect(() => {
+        let alive = true;
+        fetchMovements({ kind: 'receipt', limit: RECENT_RECEIPTS, voided: 'exclude' })
+            .then((j) => { if (alive) { setRows(j.movements || []); setErr(null); } })
+            .catch((e) => { if (alive) setErr(String(e.message || e)); });
+        return () => { alive = false; };
+    }, [fetchMovements, tick]);
+
+    if (err) return null;
+    if (!rows.length) return null;
+
+    return (
+        <section className="inv-panel inv-recent">
+            <SectionHead title="Recent receipts" caption={`Last ${fmt(rows.length)} recorded`} />
+            <div className="inv-table-wrap">
+                <table className="inv-table inv-ledger-table inv-recent-table">
+                    <thead>
+                        <tr>
+                            <th>When</th>
+                            <th>Type</th>
+                            <th>Material</th>
+                            <th>Into</th>
+                            <th className="num">Qty</th>
+                            <th>Details</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {rows.map((r) => {
+                            const when = new Date(r.occurred_at);
+                            return (
+                                <tr key={r.id}>
+                                    <td className="inv-when">
+                                        <span className="inv-when-date">{when.toLocaleDateString()}</span>
+                                        {fmtWhenTime(when) && <span className="inv-when-time">{fmtWhenTime(when)}</span>}
+                                        {showRecorded && r.created_at && (
+                                            <RecordedStamp at={r.created_at} who={r.created_by_name || r.created_by} what="receipt" />
+                                        )}
+                                    </td>
+                                    <td><span className={`inv-kbadge inv-k-${r.kind}`}>{r.kind}</span></td>
+                                    <td className="inv-mat-cell">{r.material_name}</td>
+                                    <td className="inv-route">{r.to_location_name || '—'}</td>
+                                    <td className="num inv-qty">
+                                        {fmt(r.qty_base)}<span className="inv-unit">{r.base_unit}</span>
+                                    </td>
+                                    <td className="muted small inv-details">
+                                        {(r.vendor_name || r.vendor) && <div>Vendor: {r.vendor_name || r.vendor}</div>}
+                                        {r.reference && <div>Ref: {r.reference}</div>}
+                                        {!r.vendor_name && !r.vendor && !r.reference && <span className="inv-dash">·</span>}
+                                    </td>
+                                </tr>
+                            );
+                        })}
+                    </tbody>
+                </table>
+            </div>
+        </section>
     );
 }
 
