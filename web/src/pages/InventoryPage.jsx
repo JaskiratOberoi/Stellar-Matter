@@ -496,7 +496,14 @@ export function InventoryPage() {
                         {view === 'dispatch' && (
                             <DispatchView inventory={inventory} canMove={canMove} onDone={showFlash} onGoto={goto} />
                         )}
-                        {view === 'ledger' && <LedgerView inventory={inventory} canMove={canMove} onDone={showFlash} />}
+                        {view === 'ledger' && (
+                            <LedgerView
+                                inventory={inventory}
+                                canMove={canMove}
+                                showRecorded={role === 'super_admin'}
+                                onDone={showFlash}
+                            />
+                        )}
                         {view === 'vendors' && (
                             <VendorsView inventory={inventory} canManageCatalog={canManageCatalog} onDone={showFlash} />
                         )}
@@ -2323,6 +2330,12 @@ function fmtWhenTime(d) {
     return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
 }
 
+// Wall-clock moment a row was keyed in — always date + time, never elided,
+// since the point is to compare it against the movement's own date.
+function fmtRecorded(d) {
+    return `${d.toLocaleDateString()} ${d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}`;
+}
+
 function shiftDateInput(days) {
     const d = new Date();
     d.setDate(d.getDate() + days);
@@ -2364,7 +2377,10 @@ const LEDGER_EMPTY_FILTERS = {
 
 const LEDGER_PAGE = 50;
 
-function LedgerView({ inventory, canMove, onDone }) {
+// showRecorded (super admin only): under the movement's own date, also print
+// when the row was actually keyed in and by whom, so a back-dated entry is
+// visible as such.
+function LedgerView({ inventory, canMove, showRecorded = false, onDone }) {
     const { materials, locations, vendors, fetchMovements, voidMovement, reload } = inventory;
     const [rows, setRows] = useState([]);
     const [cursor, setCursor] = useState(null);
@@ -2618,6 +2634,17 @@ function LedgerView({ inventory, canMove, onDone }) {
                                     <td className="inv-when">
                                         <span className="inv-when-date">{when.toLocaleDateString()}</span>
                                         {fmtWhenTime(when) && <span className="inv-when-time">{fmtWhenTime(when)}</span>}
+                                        {showRecorded && r.created_at && (
+                                            <span
+                                                className="inv-when-recorded"
+                                                title="When this entry was actually recorded, and by whom"
+                                            >
+                                                rec {fmtRecorded(new Date(r.created_at))}
+                                                {(r.created_by_name || r.created_by) && (
+                                                    <> · {r.created_by_name || r.created_by}</>
+                                                )}
+                                            </span>
+                                        )}
                                     </td>
                                     <td><span className={`inv-kbadge inv-k-${r.kind}`}>{r.kind}</span></td>
                                     <td className="inv-mat-cell">{r.material_name}</td>

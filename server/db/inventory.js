@@ -557,12 +557,14 @@ async function listMovements(
                 m.name AS material_name, m.base_unit,
                 fl.name AS from_location_name, tl.name AS to_location_name,
                 v.name AS vendor_name,
+                COALESCE(cu.display_name, cu.username) AS created_by_name,
                 COUNT(*) OVER()::int AS total_count
          FROM inventory_movements mv
          JOIN inventory_materials m ON m.id = mv.material_id
          LEFT JOIN inventory_locations fl ON fl.id = mv.from_location_id
          LEFT JOIN inventory_locations tl ON tl.id = mv.to_location_id
          LEFT JOIN inventory_vendors v ON v.id = mv.vendor_id
+         LEFT JOIN users cu ON cu.id = mv.created_by
          WHERE ${where.join(' AND ')}
          ORDER BY mv.id DESC
          LIMIT $${params.length}`,
