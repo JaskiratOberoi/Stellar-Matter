@@ -5415,3 +5415,235 @@ tr.inv-voided td:nth-child(3) {
         align-items: stretch;
     }
 }
+
+/* -- Consumption dashboard (super admin) ---------------------------------- */
+
+/* Tighter figures strip: the section head already carries the title. */
+.inv-figures--compact {
+    margin: var(--sp-2) 0 var(--sp-8);
+    padding-bottom: var(--sp-6);
+    border-bottom: 1px solid rgb(var(--nx-rule-soft));
+}
+
+.inv-figures--compact .inv-figure-num {
+    font-size: clamp(1.5rem, 2.4vw, 2rem);
+}
+
+.inv-figure-num--text {
+    font-size: var(--fs-lg) !important;
+    letter-spacing: -0.015em;
+    line-height: 1.15;
+    overflow-wrap: anywhere;
+}
+
+.inv-figure-of {
+    font-size: 0.55em;
+    font-weight: 500;
+    color: rgb(var(--nx-ink-3));
+    letter-spacing: 0;
+}
+
+.inv-cons-up { color: rgb(var(--nx-signal-success)); }
+.inv-cons-down { color: rgb(var(--nx-signal-warning)); }
+
+.inv-cons-windows {
+    display: flex;
+    gap: var(--sp-2);
+}
+
+.inv-cons-windows .chip.active {
+    background: rgb(var(--nx-accent));
+    color: rgb(var(--nx-accent-ink, 10 10 10));
+    border-color: rgb(var(--nx-accent));
+}
+
+/* Sparkline: one bar per month, the current month in lime. */
+.inv-spark {
+    display: inline-flex;
+    align-items: flex-end;
+    gap: 2px;
+    height: 18px;
+    vertical-align: middle;
+}
+
+.inv-spark i {
+    display: block;
+    width: 5px;
+    min-height: 1px;
+    background: rgb(var(--nx-ink-3) / 0.55);
+    border-radius: 1px;
+}
+
+.inv-spark i.is-now {
+    background: rgb(var(--nx-accent));
+}
+
+.inv-figure-cap .inv-spark {
+    height: 14px;
+}
+
+/* BU list on the left, the selected site's grid on the right. */
+.inv-cons-layout {
+    display: grid;
+    grid-template-columns: minmax(300px, 380px) minmax(0, 1fr);
+    gap: var(--sp-8);
+    align-items: start;
+}
+
+.inv-cons-list-head {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+    margin-bottom: var(--sp-3);
+}
+
+.inv-cons-list-head .inv-search {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.inv-cons-count {
+    flex: 0 0 auto;
+    font: 500 var(--fs-3xs) / 1 var(--font-mono);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: rgb(var(--nx-ink-3));
+}
+
+.inv-cons-table .inv-cons-name {
+    white-space: normal;
+}
+
+.inv-cons-table .inv-dot {
+    margin-right: var(--sp-2);
+}
+
+.inv-cons-row {
+    cursor: pointer;
+    transition: background var(--dur-fast) var(--ease);
+}
+
+.inv-cons-row:focus-visible {
+    outline: 2px solid rgb(var(--nx-accent));
+    outline-offset: -2px;
+}
+
+.inv-cons-row.is-selected td {
+    background: rgb(var(--nx-surface-raised, var(--nx-surface)));
+    color: rgb(var(--nx-ink));
+}
+
+.inv-cons-row.is-selected td:first-child {
+    box-shadow: inset 3px 0 0 rgb(var(--nx-accent));
+    padding-left: var(--sp-3);
+}
+
+.inv-cons-row.is-idle td {
+    color: rgb(var(--nx-ink-3));
+}
+
+.inv-cons-spark {
+    width: 1%;
+}
+
+.inv-cons-detail {
+    min-width: 0;
+}
+
+.inv-cons-detail-head {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: var(--sp-4);
+    flex-wrap: wrap;
+    padding-bottom: var(--sp-3);
+    margin-bottom: var(--sp-3);
+    border-bottom: 1px solid rgb(var(--nx-rule-strong));
+}
+
+.inv-cons-detail-title {
+    margin: 0;
+    font-size: var(--fs-lg);
+    font-weight: 650;
+    letter-spacing: -0.015em;
+    color: rgb(var(--nx-ink));
+}
+
+.inv-cons-detail-title .inv-dot {
+    margin-right: var(--sp-2);
+}
+
+.inv-cons-detail-cap {
+    margin: var(--sp-1) 0 0;
+    font-size: var(--fs-xs);
+    color: rgb(var(--nx-ink-2));
+}
+
+.inv-cons-legend {
+    font-size: var(--fs-2xs);
+    color: rgb(var(--nx-ink-3));
+}
+
+.inv-cons-legend b {
+    font-weight: 600;
+    color: rgb(var(--nx-ink-2));
+}
+
+/* The current month and the send-ahead column are the two things to read. */
+.inv-cons-grid th.is-now,
+.inv-cons-grid td.is-now {
+    color: rgb(var(--nx-ink));
+    background: rgb(var(--nx-surface) / 0.6);
+}
+
+.inv-cons-grid th.is-now {
+    color: rgb(var(--nx-accent));
+}
+
+.inv-cons-grid .inv-cons-send.is-due {
+    color: rgb(var(--nx-accent));
+    font-weight: 700;
+}
+
+.inv-cons-grid tfoot td {
+    font-weight: 600;
+    color: rgb(var(--nx-ink));
+    border-top: 1px solid rgb(var(--nx-rule-strong));
+    border-bottom: 0;
+}
+
+@media (max-width: 900px) {
+    .inv-cons-layout {
+        grid-template-columns: minmax(0, 1fr);
+        gap: var(--sp-6);
+    }
+
+    .inv-cons-detail {
+        scroll-margin-top: var(--sp-4);
+    }
+}
+
+@media (max-width: 640px) {
+    .inv-figures--compact {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: var(--sp-4) 0;
+    }
+
+    .inv-figures--compact .inv-figure:nth-child(odd) {
+        padding-left: 0;
+        border-left: 0;
+    }
+}
+
+/* Grid: the three planning columns sit next to the material name; a hairline
+   separates them from the month run, which scrolls when the window is long. */
+.inv-cons-grid .inv-cons-avg {
+    font-weight: 600;
+    color: rgb(var(--nx-ink));
+}
+
+.inv-cons-grid th.inv-cons-m0,
+.inv-cons-grid td.inv-cons-m0 {
+    border-left: 1px solid rgb(var(--nx-rule-soft));
+    padding-left: var(--sp-5);
+}

@@ -20,7 +20,8 @@ const VIEWS = [
     { id: 'dispatch', label: 'Dispatch', icon: 'out', caption: 'Ship & transfer' },
     { id: 'ledger', label: 'Ledger', icon: 'list', caption: 'Movement history' },
     { id: 'vendors', label: 'Vendors', icon: 'truck', caption: 'Suppliers & GST' },
-    { id: 'catalog', label: 'Catalog', icon: 'tag', caption: 'Materials & sites', adminOnly: true }
+    { id: 'catalog', label: 'Catalog', icon: 'tag', caption: 'Materials & sites', adminOnly: true },
+    { id: 'consumption', label: 'Consumption', icon: 'chart', caption: 'Monthly by BU', superOnly: true }
 ];
 
 function fmt(n) {
@@ -85,6 +86,8 @@ function Icon({ name, className }) {
             return (<svg {...p}><path d="M14 3H7a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V8z" /><path d="M14 3v5h5" /></svg>);
         case 'warn':
             return (<svg {...p}><path d="M12 9v4" /><path d="M12 17h.01" /><path d="M10.3 3.9 2 18a2 2 0 0 0 1.7 3h16.6a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" /></svg>);
+        case 'chart':
+            return (<svg {...p}><path d="M4 20V10" /><path d="M10 20V4" /><path d="M16 20v-8" /><path d="M22 20H2" /></svg>);
         default:
             return null;
     }
@@ -358,6 +361,7 @@ export function InventoryPage() {
     const role = user ? user.role : null;
     const canManageCatalog = !authRequired || (role && CATALOG_ROLES.has(role));
     const canMove = !authRequired || (role && MOVER_ROLES.has(role));
+    const isSuperAdmin = role === 'super_admin';
 
     const showFlash = useCallback((msg) => {
         setFlash(msg);
@@ -386,7 +390,9 @@ export function InventoryPage() {
         }
     }, [inventory, showFlash]);
 
-    const visibleViews = VIEWS.filter((v) => !v.adminOnly || canManageCatalog);
+    const visibleViews = VIEWS.filter(
+        (v) => (!v.adminOnly || canManageCatalog) && (!v.superOnly || isSuperAdmin)
+    );
 
     // A purchase order handed to the Receive view pre-fills it; cleared once
     // the receipt is recorded or the operator abandons it.
@@ -517,6 +523,7 @@ export function InventoryPage() {
                                 onDone={showFlash}
                             />
                         )}
+                        {view === 'consumption' && isSuperAdmin && <ConsumptionView inventory={inventory} />}
                         {view === 'vendors' && (
                             <VendorsView inventory={inventory} canManageCatalog={canManageCatalog} onDone={showFlash} />
                         )}
@@ -2473,6 +2480,380 @@ function DispatchView({ inventory, canMove, showRecorded = false, onDone, onGoto
                 showRecorded={showRecorded}
             />
         </div>
+    );
+}
+
+// -- Consumption (super admin) ---------------------------------------------
+//
+// Units dispatched into each business unit / lab, by month. The list on the
+// left ranks BUs by this month's draw; picking one opens a material × month
+// grid with the monthly average, what the BU holds now, and how much to send
+// ahead to cover a typical month.
+
+const CONSUMPTION_WINDOWS = [6, 12];
+
+function monthLabel(ym) {
+    const [y, m] = ym.split('-').map(Number);
+    return new Date(y, m - 1, 1).toLocaleDateString(undefined, { month: 'short', year: '2-digit' });
+}
+
+function pctChange(now, before) {
+    if (!before) return null;
+    return Math.round(((now - before) / before) * 100);
+}
+
+// Shape the flat (location, material, month) rows into per-BU series.
+function buildConsumption(data, locations, matById) {
+    if (!data) return null;
+    const months = data.months || [];
+    const idx = new Map(months.map((m, i) => [m, i]));
+    const byLoc = new Map();
+    const monthTotals = new Array(months.length).fill(0);
+    const matThisMonth = new Map();
+    const last = months.length - 1;
+
+    for (const r of data.rows || []) {
+        const mi = idx.get(r.month);
+        if (mi == null) continue;
+        const qty = Number(r.qty) || 0;
+        let bu = byLoc.get(r.location_id);
+        if (!bu) {
+            bu = { id: r.location_id, series: new Array(months.length).fill(0), mats: new Map(), total: 0 };
+            byLoc.set(r.location_id, bu);
+        }
+        bu.series[mi] += qty;
+        bu.total += qty;
+        let mat = bu.mats.get(r.material_id);
+        if (!mat) {
+            mat = { id: r.material_id, series: new Array(months.length).fill(0), total: 0 };
+            bu.mats.set(r.material_id, mat);
+        }
+        mat.series[mi] += qty;
+        mat.total += qty;
+        monthTotals[mi] += qty;
+        if (mi === last) matThisMonth.set(r.material_id, (matThisMonth.get(r.material_id) || 0) + qty);
+    }
+
+    // Average over the months since the BU's first dispatch in the window, so
+    // a site that came online recently is not diluted by empty months.
+    const avgOf = (series) => {
+        const first = series.findIndex((v) => v > 0);
+        if (first < 0) return 0;
+        const span = series.length - first;
+        return series.reduce((a, b) => a + b, 0) / span;
+    };
+
+    const bus = [];
+    for (const l of locations) {
+        if (l.kind !== 'business_unit' && l.kind !== 'lab') continue;
+        const bu = byLoc.get(l.id);
+        if (!bu && !l.active) continue;
+        const series = bu ? bu.series : new Array(months.length).fill(0);
+        const mats = bu
+            ? [...bu.mats.values()]
+                  .map((m) => ({ ...m, avg: avgOf(m.series), material: matById.get(m.id) || null }))
+                  .sort((a, b) => b.total - a.total)
+            : [];
+        bus.push({
+            loc: l,
+            series,
+            total: bu ? bu.total : 0,
+            thisMonth: series[last] || 0,
+            lastMonth: last > 0 ? series[last - 1] || 0 : 0,
+            avg: avgOf(series),
+            mats
+        });
+    }
+    bus.sort((a, b) => b.thisMonth - a.thisMonth || b.total - a.total || a.loc.name.localeCompare(b.loc.name));
+
+    let top = null;
+    for (const [id, qty] of matThisMonth) if (!top || qty > top.qty) top = { id, qty };
+    const active = bus.filter((b) => b.total > 0).length;
+
+    return {
+        months,
+        bus,
+        stats: {
+            thisMonth: monthTotals[last] || 0,
+            lastMonth: last > 0 ? monthTotals[last - 1] || 0 : 0,
+            avg: avgOf(monthTotals),
+            monthTotals,
+            busThisMonth: bus.filter((b) => b.thisMonth > 0).length,
+            busActive: active,
+            busAll: bus.length,
+            topMaterial: top ? { qty: top.qty, material: matById.get(top.id) || null } : null
+        }
+    };
+}
+
+function Spark({ series, max }) {
+    const peak = max || Math.max(1, ...series);
+    const last = series.length - 1;
+    return (
+        <span className="inv-spark" aria-hidden="true">
+            {series.map((v, i) => (
+                <i
+                    key={i}
+                    className={i === last ? 'is-now' : ''}
+                    style={{ height: `${v > 0 ? Math.max(8, Math.round((v / peak) * 100)) : 0}%` }}
+                />
+            ))}
+        </span>
+    );
+}
+
+function ConsumptionView({ inventory }) {
+    const { materials, locations, balances, fetchConsumption } = inventory;
+    const [windowMonths, setWindowMonths] = useState(12);
+    const [data, setData] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [err, setErr] = useState(null);
+    const [query, setQuery] = useState('');
+    const [selectedId, setSelectedId] = useState(null);
+    const balMap = useBalanceMap(balances);
+    const matById = useMemo(() => new Map(materials.map((m) => [m.id, m])), [materials]);
+    const detailRef = useRef(null);
+
+    useEffect(() => {
+        let alive = true;
+        setLoading(true);
+        fetchConsumption({ months: windowMonths })
+            .then((j) => { if (alive) { setData(j); setErr(null); } })
+            .catch((e) => { if (alive) setErr(String(e.message || e)); })
+            .finally(() => { if (alive) setLoading(false); });
+        return () => { alive = false; };
+    }, [fetchConsumption, windowMonths]);
+
+    const model = useMemo(() => buildConsumption(data, locations, matById), [data, locations, matById]);
+
+    const shownBus = useMemo(() => {
+        if (!model) return [];
+        const q = query.trim().toLowerCase();
+        if (!q) return model.bus;
+        return model.bus.filter(
+            (b) => b.loc.name.toLowerCase().includes(q) || (b.loc.bu_code || '').toLowerCase().includes(q)
+        );
+    }, [model, query]);
+
+    const selected = useMemo(() => {
+        if (!model) return null;
+        return model.bus.find((b) => b.loc.id === selectedId) || model.bus.find((b) => b.total > 0) || model.bus[0] || null;
+    }, [model, selectedId]);
+
+    function pick(id) {
+        setSelectedId(id);
+        // On a phone the grid sits below the list; bring it into view.
+        if (window.innerWidth <= 900 && detailRef.current) {
+            detailRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+    }
+
+    if (loading && !model) return <div className="inv-loading muted">Loading consumption…</div>;
+    if (err) return <div className="results-error nexus-card">{err}</div>;
+    if (!model) return null;
+
+    const { months, stats } = model;
+    const change = pctChange(stats.thisMonth, stats.lastMonth);
+    const anyData = stats.busActive > 0;
+    const sparkMax = Math.max(1, ...model.bus.map((b) => Math.max(...b.series)));
+
+    return (
+        <section className="inv-panel inv-cons">
+            <SectionHead
+                title="Consumption by business unit"
+                caption={`Units dispatched into each BU or lab, by month · last ${windowMonths} months`}
+            >
+                <div className="inv-cons-windows" role="group" aria-label="Window">
+                    {CONSUMPTION_WINDOWS.map((n) => (
+                        <button
+                            key={n}
+                            type="button"
+                            className={`chip chip-tool${windowMonths === n ? ' active' : ''}`}
+                            onClick={() => setWindowMonths(n)}
+                        >
+                            {n} mo
+                        </button>
+                    ))}
+                </div>
+            </SectionHead>
+
+            {!anyData ? (
+                <EmptyState icon="out" title="No dispatches in this window">
+                    Consumption is read from dispatches into business units and labs. Record a dispatch and it shows up here.
+                </EmptyState>
+            ) : (
+                <>
+                    <div className="inv-figures inv-figures--compact" aria-label="Consumption at a glance">
+                        <div className="inv-figure">
+                            <span className="inv-figure-num">{fmt(stats.thisMonth)}</span>
+                            <span className="inv-figure-label">This month</span>
+                            <span className="inv-figure-cap">
+                                {change == null ? 'units sent to BUs' : (
+                                    <span className={change >= 0 ? 'inv-cons-up' : 'inv-cons-down'}>
+                                        {change >= 0 ? '+' : ''}{change}% vs last month
+                                    </span>
+                                )}
+                            </span>
+                        </div>
+                        <div className="inv-figure">
+                            <span className="inv-figure-num">{fmt(stats.lastMonth)}</span>
+                            <span className="inv-figure-label">Last month</span>
+                            <span className="inv-figure-cap">{months.length > 1 ? monthLabel(months[months.length - 2]) : '—'}</span>
+                        </div>
+                        <div className="inv-figure">
+                            <span className="inv-figure-num">{fmt(Math.round(stats.avg))}</span>
+                            <span className="inv-figure-label">Avg per month</span>
+                            <span className="inv-figure-cap"><Spark series={stats.monthTotals} /></span>
+                        </div>
+                        <div className="inv-figure">
+                            <span className="inv-figure-num">{fmt(stats.busThisMonth)}<span className="inv-figure-of"> / {fmt(stats.busAll)}</span></span>
+                            <span className="inv-figure-label">BUs supplied</span>
+                            <span className="inv-figure-cap">this month · {fmt(stats.busActive)} active in window</span>
+                        </div>
+                        <div className="inv-figure">
+                            <span className="inv-figure-num inv-figure-num--text">
+                                {stats.topMaterial ? (stats.topMaterial.material ? stats.topMaterial.material.name : '—') : '—'}
+                            </span>
+                            <span className="inv-figure-label">Top material</span>
+                            <span className="inv-figure-cap">
+                                {stats.topMaterial
+                                    ? `${fmt(stats.topMaterial.qty)} ${stats.topMaterial.material ? stats.topMaterial.material.base_unit : ''} this month`
+                                    : 'nothing sent yet this month'}
+                            </span>
+                        </div>
+                    </div>
+
+                    <div className="inv-cons-layout">
+                        <div className="inv-cons-list">
+                            <div className="inv-cons-list-head">
+                                <input
+                                    type="search"
+                                    className="inv-search"
+                                    placeholder="Find a BU or lab"
+                                    value={query}
+                                    onChange={(e) => setQuery(e.target.value)}
+                                    aria-label="Find a business unit"
+                                />
+                                <span className="inv-cons-count">{fmt(shownBus.length)} sites</span>
+                            </div>
+                            <div className="inv-table-wrap">
+                                <table className="inv-table inv-cons-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Business unit</th>
+                                            <th>Trend</th>
+                                            <th className="num">This mo</th>
+                                            <th className="num">Avg / mo</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {shownBus.map((b) => (
+                                            <tr
+                                                key={b.loc.id}
+                                                className={`inv-cons-row${selected && selected.loc.id === b.loc.id ? ' is-selected' : ''}${b.total === 0 ? ' is-idle' : ''}`}
+                                                onClick={() => pick(b.loc.id)}
+                                                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(b.loc.id); } }}
+                                                tabIndex={0}
+                                                role="button"
+                                                aria-pressed={selected && selected.loc.id === b.loc.id ? 'true' : 'false'}
+                                            >
+                                                <td className="inv-mat-cell inv-cons-name">
+                                                    <span className={`inv-dot inv-dot-${kindDot(b.loc.kind)}`} />
+                                                    {b.loc.name}
+                                                    {!b.loc.active && <span className="inv-inactive-tag">inactive</span>}
+                                                </td>
+                                                <td className="inv-cons-spark"><Spark series={b.series} max={sparkMax} /></td>
+                                                <td className={`num${b.thisMonth === 0 ? ' inv-zero' : ''}`}>{b.thisMonth === 0 ? '·' : fmt(b.thisMonth)}</td>
+                                                <td className={`num${b.avg === 0 ? ' inv-zero' : ''}`}>{b.avg === 0 ? '·' : fmt(Math.round(b.avg))}</td>
+                                            </tr>
+                                        ))}
+                                        {!shownBus.length && (
+                                            <tr>
+                                                <td colSpan={4} className="muted inv-nomatch">No site matches “{query}”.</td>
+                                            </tr>
+                                        )}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <div className="inv-cons-detail" ref={detailRef}>
+                            {selected && (
+                                <>
+                                    <div className="inv-cons-detail-head">
+                                        <div>
+                                            <h3 className="inv-cons-detail-title">
+                                                <span className={`inv-dot inv-dot-${kindDot(selected.loc.kind)}`} />
+                                                {selected.loc.name}
+                                            </h3>
+                                            <p className="inv-cons-detail-cap">
+                                                {selected.total > 0
+                                                    ? `${fmt(selected.total)} units over ${windowMonths} months · avg ${fmt(Math.round(selected.avg))} / month since first dispatch`
+                                                    : 'No dispatches to this site in the window'}
+                                            </p>
+                                        </div>
+                                        <span className="inv-cons-legend">
+                                            <b>Send ahead</b> = one month's average minus what the site holds now
+                                        </span>
+                                    </div>
+
+                                    {selected.mats.length > 0 && (
+                                        <div className="inv-table-wrap">
+                                            <table className="inv-matrix inv-cons-grid">
+                                                <thead>
+                                                    <tr>
+                                                        <th className="sticky-col">Material</th>
+                                                        <th className="num inv-cons-send">Send ahead</th>
+                                                        <th className="num">On hand</th>
+                                                        <th className="num inv-cons-avg">Avg / mo</th>
+                                                        {months.map((m, i) => (
+                                                            <th key={m} className={`num${i === 0 ? ' inv-cons-m0' : ''}${i === months.length - 1 ? ' is-now' : ''}`}>{monthLabel(m)}</th>
+                                                        ))}
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {selected.mats.map((m) => {
+                                                        const onHand = balMap.get(balanceKey(m.id, selected.loc.id)) || 0;
+                                                        const send = Math.max(0, Math.ceil(m.avg - onHand));
+                                                        return (
+                                                            <tr key={m.id}>
+                                                                <td className="sticky-col">
+                                                                    <span className="inv-mat-name">{m.material ? m.material.name : m.id}</span>
+                                                                    <span className="inv-unit">{m.material ? m.material.base_unit : ''}</span>
+                                                                </td>
+                                                                <td className={`num inv-cons-send${send > 0 ? ' is-due' : ' inv-zero'}`}>{send > 0 ? fmt(send) : '·'}</td>
+                                                                <td className={`num${onHand === 0 ? ' inv-zero' : ''}${onHand < 0 ? ' inv-neg' : ''}`}>{onHand === 0 ? '·' : fmt(onHand)}</td>
+                                                                <td className="num inv-cons-avg">{fmt(Math.round(m.avg))}</td>
+                                                                {m.series.map((v, i) => (
+                                                                    <td key={months[i]} className={`num${v === 0 ? ' inv-zero' : ''}${i === 0 ? ' inv-cons-m0' : ''}${i === months.length - 1 ? ' is-now' : ''}`}>
+                                                                        {v === 0 ? '·' : fmt(v)}
+                                                                    </td>
+                                                                ))}
+                                                            </tr>
+                                                        );
+                                                    })}
+                                                </tbody>
+                                                <tfoot>
+                                                    <tr>
+                                                        <td className="sticky-col">Total</td>
+                                                        <td className="num" />
+                                                        <td className="num" />
+                                                        <td className="num inv-cons-avg">{fmt(Math.round(selected.avg))}</td>
+                                                        {selected.series.map((v, i) => (
+                                                            <td key={months[i]} className={`num${i === 0 ? ' inv-cons-m0' : ''}${i === months.length - 1 ? ' is-now' : ''}`}>{fmt(v)}</td>
+                                                        ))}
+                                                    </tr>
+                                                </tfoot>
+                                            </table>
+                                        </div>
+                                    )}
+                                </>
+                            )}
+                        </div>
+                    </div>
+                </>
+            )}
+        </section>
     );
 }
 

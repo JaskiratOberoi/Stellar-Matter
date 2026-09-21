@@ -1216,8 +1216,57 @@ async function seedDefaults(orgId) {
     return { locationsAdded: store.rowCount || 0, materialsAdded };
 }
 
+// -- Consumption (super admin dashboard) -----------------------------------
+
+// Month buckets are cut in the lab's local timezone. The UI stores
+// occurred_at at local noon, so any nearby zone lands in the same month.
+const CONSUMPTION_TZ = 'Asia/Kolkata';
+
+// ['YYYY-MM', ...] oldest → newest, n months ending with the current one.
+function monthKeysEnding(n, tz) {
+    const now = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit' }).format(new Date());
+    let [y, m] = now.split('-').map(Number);
+    const out = [];
+    for (let i = 0; i < n; i++) {
+        out.unshift(`${y}-${String(m).padStart(2, '0')}`);
+        m -= 1;
+        if (m === 0) { m = 12; y -= 1; }
+    }
+    return out;
+}
+
+/**
+ * Units dispatched into each business unit / lab, per material, per calendar
+ * month, for the last `months` months (current month included). Voided rows
+ * are excluded. One row per (location, material, month) with any activity;
+ * the caller fills the zeros.
+ */
+async function listConsumption(orgId, { months = 12 } = {}) {
+    const pool = getPool();
+    const n = Math.min(Math.max(1, Math.floor(months)), 36);
+    const keys = monthKeysEnding(n, CONSUMPTION_TZ);
+    const r = await pool.query(
+        `SELECT mv.to_location_id AS location_id, mv.material_id,
+                to_char(date_trunc('month', mv.occurred_at AT TIME ZONE $3), 'YYYY-MM') AS month,
+                SUM(mv.qty_base)::int AS qty,
+                COUNT(*)::int AS movements
+         FROM inventory_movements mv
+         JOIN inventory_locations l ON l.id = mv.to_location_id
+         WHERE mv.org_id = $1
+           AND mv.kind = 'dispatch'
+           AND mv.voided_at IS NULL
+           AND l.kind IN ('business_unit', 'lab')
+           AND (mv.occurred_at AT TIME ZONE $3) >= $2::timestamp
+         GROUP BY 1, 2, 3
+         ORDER BY 3, 1, 2`,
+        [orgId, `${keys[0]}-01`, CONSUMPTION_TZ]
+    );
+    return { months: keys, rows: r.rows };
+}
+
 module.exports = {
     seedDefaults,
+    listConsumption,
     listMaterials,
     getMaterial,
     createMaterial,

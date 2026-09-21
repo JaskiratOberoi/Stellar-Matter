@@ -431,6 +431,22 @@ router.get('/summary', async (req, res) => {
     }
 });
 
+// Super-admin consumption dashboard: units dispatched into each BU / lab
+// per material per month, so stock can be sent ahead of need.
+const requireSuperAdmin = requireRole('super_admin');
+
+router.get('/consumption', requireSuperAdmin, async (req, res) => {
+    if (!dbGuard(res)) return;
+    try {
+        const raw = Number(req.query.months);
+        const months = Number.isFinite(raw) ? Math.min(Math.max(1, Math.floor(raw)), 36) : 12;
+        const result = await inv.listConsumption(orgOf(req), { months });
+        res.json(result);
+    } catch (err) {
+        sendError(res, err);
+    }
+});
+
 // -- Movements -------------------------------------------------------------
 
 router.get('/movements', async (req, res) => {

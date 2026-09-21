@@ -192,6 +192,17 @@ export function useInventory() {
         return request(`/api/inventory/movements${qs ? `?${qs}` : ''}`);
     }, []);
 
+    // Super admin only (the API returns 403 otherwise): dispatches into each
+    // BU / lab per material per month, for the consumption dashboard.
+    const fetchConsumption = useCallback((params = {}) => {
+        const q = new URLSearchParams();
+        for (const [k, v] of Object.entries(params)) {
+            if (v != null && v !== '') q.set(k, String(v));
+        }
+        const qs = q.toString();
+        return request(`/api/inventory/consumption${qs ? `?${qs}` : ''}`);
+    }, []);
+
     const fetchOnHand = useCallback(async (materialId, locationId) => {
         const q = new URLSearchParams({ material_id: materialId, location_id: locationId });
         const j = await request(`/api/inventory/on-hand?${q.toString()}`);
@@ -230,6 +241,7 @@ export function useInventory() {
         seedDefaults,
         syncBusLocations,
         fetchMovements,
+        fetchConsumption,
         fetchOnHand,
         fetchLabs
     };
