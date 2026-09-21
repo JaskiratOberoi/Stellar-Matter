@@ -501,7 +501,13 @@ export function InventoryPage() {
                             />
                         )}
                         {view === 'dispatch' && (
-                            <DispatchView inventory={inventory} canMove={canMove} onDone={showFlash} onGoto={goto} />
+                            <DispatchView
+                                inventory={inventory}
+                                canMove={canMove}
+                                showRecorded={role === 'super_admin'}
+                                onDone={showFlash}
+                                onGoto={goto}
+                            />
                         )}
                         {view === 'ledger' && (
                             <LedgerView
@@ -1973,7 +1979,13 @@ function ReceiveView({ inventory, canMove, showRecorded = false, onDone, onGoto,
                 disabled={busy || anyUploading || !validLines.length}
                 label={busy ? 'Recording…' : anyUploading ? 'Uploading photo…' : 'Record receipt'}
             />
-            <RecentReceipts fetchMovements={fetchMovements} tick={recentTick} showRecorded={showRecorded} />
+            <RecentMovements
+                kind="receipt"
+                title="Recent receipts"
+                fetchMovements={fetchMovements}
+                tick={recentTick}
+                showRecorded={showRecorded}
+            />
         </div>
     );
 }
@@ -1991,28 +2003,31 @@ function RecordedStamp({ at, who, what = 'entry', className = 'inv-when-recorded
     );
 }
 
-// The last few receipts, under the Receive form, so the operator sees what
-// just landed and a super admin sees when each was actually keyed in.
-const RECENT_RECEIPTS = 8;
+// The last few movements of one kind, under the Receive / Dispatch form, so
+// the operator sees what just went through and a super admin sees when each
+// was actually keyed in. Receipts show only the destination; dispatches show
+// the route.
+const RECENT_MOVEMENTS = 8;
 
-function RecentReceipts({ fetchMovements, tick, showRecorded }) {
+function RecentMovements({ kind, title, fetchMovements, tick, showRecorded }) {
     const [rows, setRows] = useState([]);
     const [err, setErr] = useState(null);
+    const isDispatch = kind === 'dispatch';
 
     useEffect(() => {
         let alive = true;
-        fetchMovements({ kind: 'receipt', limit: RECENT_RECEIPTS, voided: 'exclude' })
+        fetchMovements({ kind, limit: RECENT_MOVEMENTS, voided: 'exclude' })
             .then((j) => { if (alive) { setRows(j.movements || []); setErr(null); } })
             .catch((e) => { if (alive) setErr(String(e.message || e)); });
         return () => { alive = false; };
-    }, [fetchMovements, tick]);
+    }, [fetchMovements, kind, tick]);
 
     if (err) return null;
     if (!rows.length) return null;
 
     return (
         <section className="inv-panel inv-recent">
-            <SectionHead title="Recent receipts" caption={`Last ${fmt(rows.length)} recorded`} />
+            <SectionHead title={title} caption={`Last ${fmt(rows.length)} recorded`} />
             <div className="inv-table-wrap">
                 <table className="inv-table inv-ledger-table inv-recent-table">
                     <thead>
@@ -2020,7 +2035,7 @@ function RecentReceipts({ fetchMovements, tick, showRecorded }) {
                             <th>When</th>
                             <th>Type</th>
                             <th>Material</th>
-                            <th>Into</th>
+                            <th>{isDispatch ? 'Movement' : 'Into'}</th>
                             <th className="num">Qty</th>
                             <th>Details</th>
                         </tr>
@@ -2034,12 +2049,22 @@ function RecentReceipts({ fetchMovements, tick, showRecorded }) {
                                         <span className="inv-when-date">{when.toLocaleDateString()}</span>
                                         {fmtWhenTime(when) && <span className="inv-when-time">{fmtWhenTime(when)}</span>}
                                         {showRecorded && r.created_at && (
-                                            <RecordedStamp at={r.created_at} who={r.created_by_name || r.created_by} what="receipt" />
+                                            <RecordedStamp at={r.created_at} who={r.created_by_name || r.created_by} what={kind} />
                                         )}
                                     </td>
                                     <td><span className={`inv-kbadge inv-k-${r.kind}`}>{r.kind}</span></td>
                                     <td className="inv-mat-cell">{r.material_name}</td>
-                                    <td className="inv-route">{r.to_location_name || '—'}</td>
+                                    <td className="inv-route">
+                                        {isDispatch ? (
+                                            <>
+                                                {r.from_location_name || '—'}
+                                                <span className="inv-arrow">→</span>
+                                                {r.to_location_name || '—'}
+                                            </>
+                                        ) : (
+                                            r.to_location_name || '—'
+                                        )}
+                                    </td>
                                     <td className="num inv-qty">
                                         {fmt(r.qty_base)}<span className="inv-unit">{r.base_unit}</span>
                                     </td>
@@ -2060,8 +2085,12 @@ function RecentReceipts({ fetchMovements, tick, showRecorded }) {
 
 // -- Dispatch --------------------------------------------------------------
 
-function DispatchView({ inventory, canMove, onDone, onGoto }) {
-    const { materials, locations, balances, createMovementsBatch, createLocation, uploadPhoto, reload, syncBusLocations } = inventory;
+// showRecorded (super admin only): stamp the recent-dispatches list with when
+// each was actually keyed in, and by whom.
+function DispatchView({ inventory, canMove, showRecorded = false, onDone, onGoto }) {
+    const { materials, locations, balances, createMovementsBatch, createLocation, uploadPhoto, reload, syncBusLocations, fetchMovements } = inventory;
+    // Bumped after every successful dispatch so the recent list refetches.
+    const [recentTick, setRecentTick] = useState(0);
     const buOptions = useBuOptions();
     const activeMaterials = materials.filter((m) => m.active);
     const activeLocations = locations.filter((l) => l.active);
@@ -2210,6 +2239,7 @@ function DispatchView({ inventory, canMove, onDone, onGoto }) {
             setReference('');
             setNote('');
             setOccurredOn(todayDateInput());
+            setRecentTick((t) => t + 1);
         } catch (e2) {
             setErr(String(e2.message || e2));
         } finally {
@@ -2434,6 +2464,13 @@ function DispatchView({ inventory, canMove, onDone, onGoto }) {
                 err={err}
                 disabled={busy || anyUploading || !validLines.length || (isAllBus && allBuEstimate === 0)}
                 label={busy ? 'Dispatching…' : anyUploading ? 'Uploading photo…' : isAllBus ? 'Dispatch to all BUs/labs' : 'Record dispatch'}
+            />
+            <RecentMovements
+                kind="dispatch"
+                title="Recent dispatches"
+                fetchMovements={fetchMovements}
+                tick={recentTick}
+                showRecorded={showRecorded}
             />
         </div>
     );
