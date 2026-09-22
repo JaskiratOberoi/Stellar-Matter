@@ -504,7 +504,9 @@ async function listMovements(
         beforeId = null,
         materialId = null,
         locationId = null,
+        locationDir = null,
         vendorId = null,
+        createdBy = null,
         kind = null,
         q = null,
         from = null,
@@ -519,13 +521,26 @@ async function listMovements(
         params.push(materialId);
         where.push(`mv.material_id = $${params.length}`);
     }
+    // A location matches on either leg by default; locationDir narrows it to
+    // the side the caller cares about ("what left this store" vs "what landed").
     if (locationId) {
         params.push(locationId);
-        where.push(`(mv.from_location_id = $${params.length} OR mv.to_location_id = $${params.length})`);
+        const n = params.length;
+        where.push(
+            locationDir === 'from'
+                ? `mv.from_location_id = $${n}`
+                : locationDir === 'to'
+                  ? `mv.to_location_id = $${n}`
+                  : `(mv.from_location_id = $${n} OR mv.to_location_id = $${n})`
+        );
     }
     if (vendorId) {
         params.push(vendorId);
         where.push(`mv.vendor_id = $${params.length}`);
+    }
+    if (createdBy) {
+        params.push(createdBy);
+        where.push(`mv.created_by = $${params.length}`);
     }
     if (kind) {
         params.push(kind);
@@ -589,6 +604,28 @@ async function listMovements(
     const rows = r.rows.map(({ total_count, ...row }) => row);
     const nextCursor = rows.length === limit ? rows[rows.length - 1].id : null;
     return { movements: rows, nextCursor, total };
+}
+
+/**
+ * Everyone who has ever recorded a movement in this org, for the ledger's
+ * "recorded by" filter. Built from the ledger itself rather than the user
+ * directory, so the list only offers picks that can return rows and a
+ * since-deleted account still shows up (by id) instead of vanishing.
+ */
+async function listMovementUsers(orgId) {
+    const pool = getPool();
+    const r = await pool.query(
+        `SELECT mv.created_by AS id,
+                COALESCE(NULLIF(u.display_name, ''), u.username, mv.created_by) AS name,
+                COUNT(*)::int AS movements
+         FROM inventory_movements mv
+         LEFT JOIN users u ON u.id = mv.created_by
+         WHERE mv.org_id = $1 AND mv.created_by IS NOT NULL AND mv.created_by <> ''
+         GROUP BY mv.created_by, u.display_name, u.username
+         ORDER BY name ASC`,
+        [orgId]
+    );
+    return r.rows;
 }
 
 async function getMovement(orgId, id) {
@@ -1297,6 +1334,7 @@ module.exports = {
     listBalances,
     getOnHand,
     listMovements,
+    listMovementUsers,
     getMovement,
     createMovement,
     createMovementsBatch,

@@ -32,6 +32,7 @@ const requireMover = requireRole('super_admin', 'admin', 'operator');
 const requireCatalogAdmin = requireRole('super_admin', 'admin');
 
 const MOVEMENT_KINDS = new Set(['receipt', 'dispatch', 'adjustment']);
+const LOCATION_DIRS = new Set(['from', 'to']);
 const LOCATION_KINDS = new Set(['store', 'business_unit', 'lab']);
 
 function orgOf(req) {
@@ -449,6 +450,19 @@ router.get('/consumption', requireSuperAdmin, async (req, res) => {
 
 // -- Movements -------------------------------------------------------------
 
+// Distinct authors of this org's movements, to populate the ledger's
+// "recorded by" filter. Read-only and org-scoped like every other GET here;
+// it exposes no more than the created_by_name already on each movement.
+router.get('/movement-users', async (req, res) => {
+    if (!dbGuard(res)) return;
+    try {
+        const users = await inv.listMovementUsers(orgOf(req));
+        res.json({ users });
+    } catch (err) {
+        sendError(res, err);
+    }
+});
+
 router.get('/movements', async (req, res) => {
     if (!dbGuard(res)) return;
     try {
@@ -467,7 +481,13 @@ router.get('/movements', async (req, res) => {
             beforeId: Number.isFinite(beforeId) ? beforeId : null,
             materialId: trimStr(req.query.material_id) || null,
             locationId: trimStr(req.query.location_id) || null,
+            // Which leg of the movement the location must match; anything
+            // other than from/to leaves it matching either.
+            locationDir: LOCATION_DIRS.has(trimStr(req.query.location_dir))
+                ? trimStr(req.query.location_dir)
+                : null,
             vendorId: trimStr(req.query.vendor_id) || null,
+            createdBy: trimStr(req.query.created_by) || null,
             kind: MOVEMENT_KINDS.has(trimStr(req.query.kind)) ? trimStr(req.query.kind) : null,
             q: trimStr(req.query.q).slice(0, 200) || null,
             from,

@@ -192,6 +192,13 @@ export function useInventory() {
         return request(`/api/inventory/movements${qs ? `?${qs}` : ''}`);
     }, []);
 
+    // Everyone who has recorded a movement, for the ledger's "recorded by"
+    // filter. Fetched by that view on demand rather than on every reload.
+    const fetchMovementUsers = useCallback(async () => {
+        const j = await request('/api/inventory/movement-users');
+        return j.users || [];
+    }, []);
+
     // Super admin only (the API returns 403 otherwise): dispatches into each
     // BU / lab per material per month, for the consumption dashboard.
     const fetchConsumption = useCallback((params = {}) => {
@@ -241,6 +248,7 @@ export function useInventory() {
         seedDefaults,
         syncBusLocations,
         fetchMovements,
+        fetchMovementUsers,
         fetchConsumption,
         fetchOnHand,
         fetchLabs

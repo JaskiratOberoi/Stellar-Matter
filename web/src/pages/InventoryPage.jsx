@@ -2947,11 +2947,21 @@ const LEDGER_EMPTY_FILTERS = {
     kind: '',
     materialId: '',
     locationId: '',
+    // '' matches a movement's from *or* to leg; 'from' / 'to' pin it to one side.
+    locationDir: '',
     vendorId: '',
+    createdBy: '',
     from: '',
     to: '',
     hideVoided: false
 };
+
+// Which leg of a movement the location filter has to match.
+const LEDGER_LOCATION_DIRS = [
+    { value: '', label: 'From or to' },
+    { value: 'from', label: 'From only' },
+    { value: 'to', label: 'To only' }
+];
 
 const LEDGER_PAGE = 50;
 
@@ -2959,8 +2969,12 @@ const LEDGER_PAGE = 50;
 // when the row was actually keyed in and by whom, so a back-dated entry is
 // visible as such.
 function LedgerView({ inventory, canMove, showRecorded = false, onDone }) {
-    const { materials, locations, vendors, fetchMovements, voidMovement, reload } = inventory;
+    const { materials, locations, vendors, fetchMovements, fetchMovementUsers, voidMovement, reload } = inventory;
     const [rows, setRows] = useState([]);
+    // Authors of past movements, for the "recorded by" filter. Only fetched
+    // when the recorder is shown at all, so nothing extra is requested for
+    // roles that cannot see who keyed an entry in.
+    const [movementUsers, setMovementUsers] = useState([]);
     const [cursor, setCursor] = useState(null);
     const [total, setTotal] = useState(0);
     const [loading, setLoading] = useState(false);
@@ -2985,7 +2999,9 @@ function LedgerView({ inventory, canMove, showRecorded = false, onDone }) {
         if (filters.kind) p.kind = filters.kind;
         if (filters.materialId) p.material_id = filters.materialId;
         if (filters.locationId) p.location_id = filters.locationId;
+        if (filters.locationId && filters.locationDir) p.location_dir = filters.locationDir;
         if (filters.vendorId) p.vendor_id = filters.vendorId;
+        if (filters.createdBy) p.created_by = filters.createdBy;
         if (filters.from) p.from = dateInputToIsoDayStart(filters.from);
         // `to` is inclusive of the whole day, so send the next day's midnight.
         if (filters.to) p.to = dateInputToIsoDayStart(filters.to, 1);
@@ -3018,6 +3034,21 @@ function LedgerView({ inventory, canMove, showRecorded = false, onDone }) {
         setCursor(null);
         load(true);
     }, [load]);
+
+    useEffect(() => {
+        if (!showRecorded) return undefined;
+        let cancelled = false;
+        fetchMovementUsers()
+            .then((u) => {
+                if (!cancelled) setMovementUsers(u);
+            })
+            // The filter is a convenience; failing to list authors must not
+            // take the ledger down with it.
+            .catch(() => {});
+        return () => {
+            cancelled = true;
+        };
+    }, [fetchMovementUsers, showRecorded]);
 
     const activeCount = Object.keys(LEDGER_EMPTY_FILTERS).filter((k) => filters[k] !== LEDGER_EMPTY_FILTERS[k]).length;
 
@@ -3118,7 +3149,14 @@ function LedgerView({ inventory, canMove, showRecorded = false, onDone }) {
                     <select
                         className="inv-search inv-ledger-select"
                         value={filters.locationId}
-                        onChange={(e) => setFilter({ locationId: e.target.value })}
+                        onChange={(e) =>
+                            setFilter({
+                                locationId: e.target.value,
+                                // A side with no location is meaningless, so
+                                // clearing the location resets the direction.
+                                ...(e.target.value ? null : { locationDir: '' })
+                            })
+                        }
                         aria-label="Filter by location"
                     >
                         <option value="">All locations</option>
@@ -3126,6 +3164,18 @@ function LedgerView({ inventory, canMove, showRecorded = false, onDone }) {
                             <option key={l.id} value={l.id}>
                                 {l.name} · {kindLabel(l.kind)}{l.active ? '' : ' (inactive)'}
                             </option>
+                        ))}
+                    </select>
+                    <select
+                        className="inv-search inv-ledger-select inv-ledger-dir"
+                        value={filters.locationDir}
+                        onChange={(e) => setFilter({ locationDir: e.target.value })}
+                        disabled={!filters.locationId}
+                        title={filters.locationId ? 'Which side of the movement that location is' : 'Pick a location first'}
+                        aria-label="Match that location as origin, destination, or either"
+                    >
+                        {LEDGER_LOCATION_DIRS.map((d) => (
+                            <option key={d.value || 'any'} value={d.value}>{d.label}</option>
                         ))}
                     </select>
                     <select
@@ -3139,6 +3189,19 @@ function LedgerView({ inventory, canMove, showRecorded = false, onDone }) {
                             <option key={v.id} value={v.id}>{v.name}{v.active ? '' : ' (inactive)'}</option>
                         ))}
                     </select>
+                    {showRecorded && (
+                        <select
+                            className="inv-search inv-ledger-select"
+                            value={filters.createdBy}
+                            onChange={(e) => setFilter({ createdBy: e.target.value })}
+                            aria-label="Filter by who recorded the entry"
+                        >
+                            <option value="">Recorded by anyone</option>
+                            {movementUsers.map((u) => (
+                                <option key={u.id} value={u.id}>{u.name} ({fmt(u.movements)})</option>
+                            ))}
+                        </select>
+                    )}
                 </div>
                 <div className="inv-ledger-filter-row">
                     <div className="chip-row" role="group" aria-label="Date quick picks">

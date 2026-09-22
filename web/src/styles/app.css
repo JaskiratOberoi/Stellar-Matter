@@ -2969,6 +2969,17 @@ table.packages td.envelope-cell {
     max-width: 260px;
 }
 
+/* Rider on the location select — narrower, and greyed until a location is
+   picked, since a side with no location says nothing. */
+.inv-ledger-dir {
+    flex: 0 1 140px;
+}
+
+.inv-ledger-dir:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
 .inv-ledger-date {
     display: inline-flex;
     align-items: center;
