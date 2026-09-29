@@ -3,6 +3,7 @@ import { DateChips } from './DateChips.jsx';
 import { BuChips } from './BuChips.jsx';
 import { RegionGroupChips } from './RegionGroupChips.jsx';
 import { SalesChips } from './SalesChips.jsx';
+import { ClientCodePicker } from './ClientCodePicker.jsx';
 
 /** localStorage key for the Collate toggle. Survives reload. */
 const LS_TRACER_COLLATE = 'lis-nav-bot.tracer.collate';
@@ -29,6 +30,7 @@ const LS_TRACER_COLLATE = 'lis-nav-bot.tracer.collate';
  *     businessUnits: string[],
  *     buGroups: { id: string, label: string, parent: string|null, scopeLabel: string }[],
  *     salesPeople: { id: string | number, label: string }[],
+ *     clientCodes: string[],
  *     collate: boolean,
  *   }) => void | Promise<void>,
  * }} props
@@ -52,6 +54,7 @@ export function TracerForm({
     const [fromHour, setFromHour] = useState('');
     const [toHour, setToHour] = useState('');
     const [bu, setBu] = useState('');
+    const [clientCodes, setClientCodes] = useState(/** @type {{ code: string, name: string|null }[]} */ ([]));
     const [collate, setCollate] = useState(() => {
         try {
             return localStorage.getItem(LS_TRACER_COLLATE) === '1';
@@ -75,9 +78,10 @@ export function TracerForm({
     const hasSalesPick = salesSelectedIds.size > 0;
     const buGroups = (buOptions.groups || []).filter((g) => buGroupSelected.has(g.id));
     const hasGroupPick = buGroups.length > 0;
+    const hasCodePick = clientCodes.length > 0;
 
-    /** At least one of BU chips / BU group / BU text fallback / salesperson — matches server validation */
-    const canRun = datesOk && (hasBuPick || hasGroupPick || hasBuFallback || hasSalesPick) && !viewerDisabled;
+    /** At least one of BU chips / BU group / BU text fallback / salesperson / client code — matches server validation */
+    const canRun = datesOk && (hasBuPick || hasGroupPick || hasBuFallback || hasSalesPick || hasCodePick) && !viewerDisabled;
 
     async function handleSubmit(e) {
         e.preventDefault();
@@ -97,6 +101,7 @@ export function TracerForm({
             businessUnits,
             buGroups: buGroups.map((g) => ({ id: g.id, label: g.label, parent: g.parent, scopeLabel: g.scopeLabel })),
             salesPeople,
+            clientCodes: clientCodes.map((c) => c.code),
             collate
         });
     }
@@ -195,6 +200,13 @@ export function TracerForm({
                 onClear={salesActions.clear}
             />
 
+            <ClientCodePicker
+                selected={clientCodes}
+                onAdd={(item) => setClientCodes((prev) => (prev.some((c) => c.code === item.code) ? prev : [...prev, item]))}
+                onRemove={(code) => setClientCodes((prev) => prev.filter((c) => c.code !== code))}
+                onClear={() => setClientCodes([])}
+            />
+
             <div className="tracer-form-actions">
                 <button type="submit" className="btn-primary" disabled={!canRun || busy}>
                     {busy ? 'Running…' : 'Run tracer'}
@@ -203,7 +215,7 @@ export function TracerForm({
                     className="inv-toggle"
                     title={
                         collate
-                            ? 'Collate on — all selected BUs and sales scopes merge into one SID-deduped block.'
+                            ? 'Collate on — all selected BUs, sales scopes and client codes merge into one SID-deduped block.'
                             : 'Collate off — each BU and each salesperson gets its own block.'
                     }
                 >

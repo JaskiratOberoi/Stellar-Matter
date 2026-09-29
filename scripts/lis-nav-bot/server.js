@@ -194,6 +194,39 @@ async function resolveTracerBuGroups(raw) {
     return out;
 }
 
+/**
+ * Client codes picked one by one in the Tracer's Client codes combobox run as
+ * a single by-codes scope, shaped like a region group so the tracer lib takes
+ * it down the same path. The key is a hash of the sorted code list so two
+ * different picks land on two banner rows; web/src/lib/clientCodeScope.js
+ * computes the same key and label for the wall.
+ *
+ * @param {unknown} raw
+ */
+async function resolveTracerClientCodes(raw) {
+    const codes = [
+        ...new Set((Array.isArray(raw) ? raw : []).map((c) => String(c || '').trim().toUpperCase()).filter(Boolean))
+    ]
+        .sort()
+        .slice(0, 500);
+    if (!codes.length) return null;
+    let h = 5381;
+    for (const ch of codes.join(',')) h = ((h * 33) ^ ch.charCodeAt(0)) >>> 0;
+    const bare = [...new Set(codes.map((c) => c.split(/\s+/)[0]))];
+    const shown = bare.slice(0, 3).join(', ');
+    const scopeLabel = `Client codes · ${shown}${bare.length > 3 ? ` +${bare.length - 3}` : ''}`;
+    return {
+        id: `codes-${h.toString(36)}`,
+        label: 'CLIENT CODES',
+        parent: null,
+        codes: await expandClientCodes(codes),
+        residual: false,
+        subtractCodes: [],
+        scopeLabel,
+        picked: codes
+    };
+}
+
 const SALES_OVERRIDES_PATH = path.join(__dirname, 'data', 'sales-overrides.json');
 
 /**
@@ -1099,6 +1132,39 @@ app.get('/api/tracer/sales-marketing-users/codes', async (req, res) => {
  * names lazily when the operator opens it. Unknown codes are omitted rather
  * than erroring — a stale mirror should degrade to bare codes, not a failure.
  */
+/**
+ * Type-ahead for the Tracer's Client codes combobox: active master codes whose
+ * code starts with, or whose lab name contains, the query. Code-prefix hits
+ * rank first so typing "HLD05" lists codes rather than lab names.
+ */
+app.get('/api/tracer/client-codes/search', async (req, res) => {
+    const q = String(req.query.q || '').trim().slice(0, 60);
+    if (!q) return res.json({ results: [] });
+    if (!useDatabase()) return res.json({ results: [] });
+    const like = q.replace(/[\\%_]/g, (m) => `\\${m}`);
+    try {
+        const r = await getPool().query(
+            `SELECT code, name, city_label, business_unit_name
+               FROM client_locations
+              WHERE active IS NOT FALSE
+                AND (code ILIKE $1 || '%' OR name ILIKE '%' || $1 || '%')
+              ORDER BY (code ILIKE $1 || '%') DESC, code
+              LIMIT 30`,
+            [like]
+        );
+        res.json({
+            results: r.rows.map((row) => ({
+                code: String(row.code).trim().toUpperCase(),
+                name: row.name || null,
+                city: row.city_label || null,
+                businessUnit: row.business_unit_name || null
+            }))
+        });
+    } catch (e) {
+        res.status(500).json({ error: String(e && e.message ? e.message : e), results: [] });
+    }
+});
+
 app.get('/api/tracer/client-codes', async (req, res) => {
     const raw = typeof req.query.codes === 'string' ? req.query.codes : '';
     const codes = [
@@ -1600,9 +1666,11 @@ app.post('/api/tracer-run', requireRunStarter, async (req, res) => {
     const regInfo = parseTracerRegions(body.regions);
     const salesInfo = parseTracerSalesPeople(body.salesPeople);
     const buGroups = await resolveTracerBuGroups(body.buGroups);
+    const clientCodeScope = await resolveTracerClientCodes(body.clientCodes);
+    if (clientCodeScope) buGroups.push(clientCodeScope);
     if (businessUnits.length === 0 && regInfo.targets.length === 0 && salesInfo.targets.length === 0 && buGroups.length === 0) {
         return res.status(400).json({
-            error: 'Select at least one business unit, region (state/city), and/or salesperson.'
+            error: 'Select at least one business unit, region, salesperson or client code.'
         });
     }
 
@@ -1640,8 +1708,13 @@ app.post('/api/tracer-run', requireRunStarter, async (req, res) => {
         if (salesInfo.targets.length) {
             parts.push(`${salesInfo.targets.length} sales`);
         }
-        if (buGroups.length) {
-            parts.push(`${buGroups.length} group${buGroups.length === 1 ? '' : 's'}`);
+        const regionGroupCount = buGroups.length - (clientCodeScope ? 1 : 0);
+        if (regionGroupCount) {
+            parts.push(`${regionGroupCount} group${regionGroupCount === 1 ? '' : 's'}`);
+        }
+        if (clientCodeScope) {
+            const n = clientCodeScope.picked.length;
+            parts.push(`${n} client code${n === 1 ? '' : 's'}`);
         }
         const tail = parts.length ? ` + ${parts.join(' + ')}` : '';
         return `Collated · ${businessUnits.length} BU${businessUnits.length === 1 ? '' : 's'}${tail}`;
@@ -1737,6 +1810,7 @@ app.post('/api/tracer-run', requireRunStarter, async (req, res) => {
                 regions: body.regions || null,
                 sales_people: body.salesPeople || null,
                 bu_groups: buGroups.length ? buGroups.map((g) => ({ id: g.id, parent: g.parent, codes: g.residual ? -g.subtractCodes.length : g.codes.length })) : null,
+                client_codes: clientCodeScope ? clientCodeScope.picked : null,
                 from_date: fromDate,
                 to_date: toDate,
                 bucket_test_codes: ALL_SPECIALTY_CODES,

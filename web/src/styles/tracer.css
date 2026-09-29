@@ -384,3 +384,73 @@
         text-decoration: none;
     }
 }
+
+/* Client codes: type-ahead over thousands of codes, picks shown as
+   removable chips under the field. */
+.client-code-field-block {
+    margin-top: var(--sp-4);
+}
+
+.client-code-combo {
+    max-width: 560px;
+}
+
+.client-code-option-main {
+    display: flex;
+    align-items: baseline;
+    gap: var(--sp-2);
+    min-width: 0;
+}
+
+.client-code-option-code {
+    flex-shrink: 0;
+    font-family: var(--font-mono);
+    font-size: var(--fs-xs);
+    letter-spacing: 0.04em;
+}
+
+.client-code-option-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: rgb(var(--nx-ink-2));
+}
+
+.client-code-menu-msg {
+    margin: 0;
+    padding: var(--sp-2) var(--sp-3);
+}
+
+.client-code-picked {
+    margin-top: var(--sp-3);
+}
+
+.client-code-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--sp-1);
+    padding-right: var(--sp-1);
+    cursor: default;
+}
+
+.client-code-chip-x {
+    display: inline-grid;
+    place-items: center;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    border: 0;
+    border-radius: var(--r-xs);
+    background: transparent;
+    color: rgb(var(--nx-ink-3));
+    font-size: 1rem;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.client-code-chip-x:hover,
+.client-code-chip-x:focus-visible {
+    background: rgb(var(--nx-ink) / 0.1);
+    color: rgb(var(--nx-ink));
+    outline: none;
+}

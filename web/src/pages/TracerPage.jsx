@@ -11,6 +11,7 @@ import {
     waitForRunIdle
 } from '../lib/tracer.js';
 import { TracerBanner } from '../components/TracerBanner.jsx';
+import { clientCodeScope } from '../lib/clientCodeScope.js';
 import '../styles/tracer.css';
 import { TracerForm } from '../components/TracerForm.jsx';
 import { RunModal } from '../components/RunModal.jsx';
@@ -205,6 +206,8 @@ export function TracerPage({
         if (sp.length > 0) body.salesPeople = sp;
         const bg = Array.isArray(snap.buGroups) ? snap.buGroups : [];
         if (bg.length > 0) body.buGroups = bg.map((g) => ({ id: g.id }));
+        const cc = Array.isArray(snap.clientCodes) ? snap.clientCodes : [];
+        if (cc.length > 0) body.clientCodes = cc;
         if (snap.collate) body.collate = true;
         return body;
     }, []);
@@ -238,6 +241,9 @@ export function TracerPage({
                     label: g.scopeLabel || `${g.label} · region`
                 });
             }
+            // Picked client codes run as one scope, keyed the way the server keys it.
+            const cc = clientCodeScope(snap.clientCodes);
+            if (cc) scopeTargets.push({ kind: 'group', key: cc.key, label: cc.label });
 
             setTracerBusy(true);
             try {
