@@ -48,9 +48,11 @@ export function ClientCodePicker({ selected, onAdd, onRemove, onClear }) {
         setLoading(true);
         const t = setTimeout(async () => {
             try {
-                const r = await apiFetch(`/api/tracer/client-codes/search?q=${encodeURIComponent(q)}`);
+                const res = await apiFetch(`/api/tracer/client-codes/search?q=${encodeURIComponent(q)}`);
+                const j = await res.json().catch(() => ({}));
                 if (seq !== seqRef.current) return;
-                setResults(Array.isArray(r.results) ? r.results : []);
+                if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
+                setResults(Array.isArray(j.results) ? j.results : []);
                 setError(null);
                 setActive(0);
             } catch (e) {
