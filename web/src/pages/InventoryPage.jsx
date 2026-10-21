@@ -103,9 +103,72 @@ function Icon({ name, className }) {
             return (<svg {...p}><path d="M12 9v4" /><path d="M12 17h.01" /><path d="M10.3 3.9 2 18a2 2 0 0 0 1.7 3h16.6a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" /></svg>);
         case 'chart':
             return (<svg {...p}><path d="M4 20V10" /><path d="M10 20V4" /><path d="M16 20v-8" /><path d="M22 20H2" /></svg>);
+        case 'more':
+            return (<svg {...p}><circle cx="5" cy="12" r="1.2" /><circle cx="12" cy="12" r="1.2" /><circle cx="19" cy="12" r="1.2" /></svg>);
         default:
             return null;
     }
+}
+
+const BOTTOM_PRIMARY = ['stock', 'receive', 'dispatch', 'ledger'];
+
+function BottomTabs({ views, view, onPick }) {
+    const [moreOpen, setMoreOpen] = useState(false);
+    const primary = BOTTOM_PRIMARY.map((id) => views.find((v) => v.id === id)).filter(Boolean);
+    const rest = views.filter((v) => !BOTTOM_PRIMARY.includes(v.id));
+    const inMore = rest.some((v) => v.id === view);
+    const pick = (id) => {
+        setMoreOpen(false);
+        onPick(id);
+        window.scrollTo({ top: 0 });
+    };
+    return (
+        <>
+            <nav className="inv-bottom-tabs" aria-label="Inventory views">
+                {primary.map((v) => (
+                    <button
+                        key={v.id}
+                        type="button"
+                        className={view === v.id ? 'is-active' : undefined}
+                        aria-current={view === v.id ? 'page' : undefined}
+                        onClick={() => pick(v.id)}
+                    >
+                        <Icon name={v.icon} />
+                        <span>{v.label}</span>
+                    </button>
+                ))}
+                {rest.length > 0 && (
+                    <button
+                        type="button"
+                        className={inMore || moreOpen ? 'is-active' : undefined}
+                        aria-expanded={moreOpen ? 'true' : 'false'}
+                        onClick={() => setMoreOpen((o) => !o)}
+                    >
+                        <Icon name="more" />
+                        <span>{inMore ? rest.find((v) => v.id === view).label : 'More'}</span>
+                    </button>
+                )}
+            </nav>
+            {moreOpen && (
+                <div className="inv-more-sheet" role="dialog" aria-label="More views" onClick={() => setMoreOpen(false)}>
+                    <div className="inv-more-panel" onClick={(e) => e.stopPropagation()}>
+                        {rest.map((v) => (
+                            <button
+                                key={v.id}
+                                type="button"
+                                className={view === v.id ? 'is-active' : undefined}
+                                onClick={() => pick(v.id)}
+                            >
+                                <Icon name={v.icon} />
+                                <span className="inv-more-label">{v.label}</span>
+                                <span className="inv-more-cap">{v.caption}</span>
+                            </button>
+                        ))}
+                    </div>
+                </div>
+            )}
+        </>
+    );
 }
 
 // Section rule: kicker number, title, caption on the left; tools on the right.
@@ -561,6 +624,10 @@ export function InventoryPage() {
                             </button>
                         ))}
                     </nav>
+
+                    {/* Phones: the four everyday views sit under the thumb,
+                        the rest behind More. CSS shows this at <=640px only. */}
+                    <BottomTabs views={visibleViews} view={view} onPick={setView} />
 
                     {canManageCatalog && !hasStore && view !== 'catalog' && (
                         <div className="inv-banner">
@@ -3673,6 +3740,7 @@ function LedgerView({ inventory, canMove, showRecorded = false, onDone, initialF
 
     const activeCount = Object.keys(LEDGER_EMPTY_FILTERS).filter((k) => filters[k] !== LEDGER_EMPTY_FILTERS[k]).length;
 
+    const [filtersOpen, setFiltersOpen] = useState(false);
     const clearFilters = () => {
         setSearch('');
         setFilters(LEDGER_EMPTY_FILTERS);
@@ -3730,6 +3798,15 @@ function LedgerView({ inventory, canMove, showRecorded = false, onDone, initialF
                     onChange={(e) => setSearch(e.target.value)}
                     aria-label="Search movements"
                 />
+                {/* Phones: the filter block folds away so rows come first. */}
+                <button
+                    type="button"
+                    className={`chip chip-tool inv-ledger-filter-toggle${activeCount ? ' active' : ''}`}
+                    aria-expanded={filtersOpen ? 'true' : 'false'}
+                    onClick={() => setFiltersOpen((o) => !o)}
+                >
+                    Filters{activeCount ? ` (${activeCount})` : ''} {filtersOpen ? '▴' : '▾'}
+                </button>
                 {activeCount > 0 && (
                     <button type="button" className="chip chip-tool" onClick={clearFilters}>
                         Clear {activeCount > 1 ? `(${activeCount})` : ''}
@@ -3737,7 +3814,11 @@ function LedgerView({ inventory, canMove, showRecorded = false, onDone, initialF
                 )}
             </SectionHead>
 
-            <div className="inv-ledger-filters" role="group" aria-label="Ledger filters">
+            <div
+                className={`inv-ledger-filters${filtersOpen ? '' : ' is-folded'}`}
+                role="group"
+                aria-label="Ledger filters"
+            >
                 <div className="inv-ledger-filter-row">
                     <select
                         className="inv-search inv-ledger-select"

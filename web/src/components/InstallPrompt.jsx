@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { usePwaInstall } from '../hooks/usePwaInstall.js';
 
 /**
@@ -9,6 +10,15 @@ import { usePwaInstall } from '../hooks/usePwaInstall.js';
 export function InstallPrompt() {
     const { installMode, wasDismissed, triggerNativeInstall, dismissInstallPrompt } = usePwaInstall();
     const [visible, setVisible] = useState(false);
+    const location = useLocation();
+    // Not for outside requesters or before sign-in, and never on top of a
+    // form's action bar (Receive / Dispatch).
+    const tab = new URLSearchParams(location.search).get('tab');
+    const suppressed =
+        location.pathname === '/login' ||
+        location.pathname === '/request' ||
+        tab === 'receive' ||
+        tab === 'dispatch';
 
     useEffect(() => {
         if (installMode === 'installed' || wasDismissed) return;
@@ -17,7 +27,7 @@ export function InstallPrompt() {
         }
     }, [installMode, wasDismissed]);
 
-    if (!visible || installMode === 'installed') return null;
+    if (!visible || suppressed || installMode === 'installed') return null;
 
     const onDismiss = () => {
         dismissInstallPrompt();

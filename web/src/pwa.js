@@ -21,12 +21,21 @@ export function initPwa() {
 function showUpdateToast(onRefresh) {
     if (document.getElementById('pwa-update-toast')) return;
 
+    // Receive / Dispatch keep unsaved entries as drafts that come back after a
+    // reload, so refreshing mid-entry is safe; say so rather than leave the
+    // operator guessing.
+    let hasDraft = false;
+    try {
+        hasDraft = ['stellar-matter.draft.receive', 'stellar-matter.draft.dispatch'].some((k) => localStorage.getItem(k));
+    } catch {
+        hasDraft = false;
+    }
     const toast = document.createElement('div');
     toast.id = 'pwa-update-toast';
     toast.className = 'pwa-toast';
     toast.setAttribute('role', 'status');
     toast.innerHTML = `
-        <span class="pwa-toast-msg">New version available</span>
+        <span class="pwa-toast-msg">New version available${hasDraft ? ' · your unsaved entry comes back after refreshing' : ''}</span>
         <button type="button" class="pwa-toast-btn">Refresh</button>
         <button type="button" class="pwa-toast-dismiss" aria-label="Dismiss">×</button>
     `;
