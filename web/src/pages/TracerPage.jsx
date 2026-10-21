@@ -11,6 +11,7 @@ import {
     waitForRunIdle
 } from '../lib/tracer.js';
 import { TracerBanner } from '../components/TracerBanner.jsx';
+import { TracerTable } from '../components/TracerTable.jsx';
 import { clientCodeScope } from '../lib/clientCodeScope.js';
 import '../styles/tracer.css';
 import { TracerForm } from '../components/TracerForm.jsx';
@@ -22,6 +23,7 @@ import { RunProgress } from '../components/RunProgress.jsx';
 // Banners are rebuilt from it once tiles load, so a reload (or an iOS PWA
 // being evicted in the background) does not wipe the results wall.
 const LS_LAST_BATCH = 'stellar-matter.tracer.lastBatch.v1';
+const LS_RESULTS_VIEW = 'stellar-matter.tracer.resultsView';
 
 function readLastBatch() {
     try {
@@ -145,6 +147,22 @@ export function TracerPage({
             pendingFromBatch(readLastBatch())
         )
     );
+    // Results layout: one comparable table (default) or a card block per scope.
+    const [resultsView, setResultsView] = useState(() => {
+        try {
+            return window.localStorage.getItem(LS_RESULTS_VIEW) === 'cards' ? 'cards' : 'table';
+        } catch {
+            return 'table';
+        }
+    });
+    const chooseResultsView = useCallback((v) => {
+        setResultsView(v);
+        try {
+            window.localStorage.setItem(LS_RESULTS_VIEW, v);
+        } catch {
+            /* storage blocked */
+        }
+    }, []);
     const [runOutcome, setRunOutcome] = useState(() => {
         const b = readLastBatch();
         return b ? b.outcome || null : null;
@@ -377,6 +395,20 @@ export function TracerPage({
 
     // Scopes the last run reported as failed, keyed like banner rows.
     const failedKeys = new Set(((runOutcome && runOutcome.failed) || []).map((l) => tracerBuKey(l)));
+    // Table rows in wall order: collated, then units, then other scopes.
+    const tableRows = [
+        ...(collatedBannerRow
+            ? [{ ...collatedBannerRow, key: collatedBannerRow.bannerKey, group: 'collated' }]
+            : []),
+        ...bannerRows.map((r) => ({ ...r, key: `bu:${r.buKey}`, label: r.bu, failed: failedKeys.has(r.buKey) })),
+        ...regionBannerRows.map((r) => ({
+            ...r,
+            key: r.bannerKey,
+            group: r.kind === 'sales' ? 'sales' : 'scope',
+            failed: failedKeys.has(tracerBuKey(r.label))
+        }))
+    ];
+
     let outcomeLine = null;
     if (runOutcome && !busy) {
         const at = new Date(runOutcome.at);
@@ -471,12 +503,42 @@ export function TracerPage({
                             ) : null}
                         </div>
                         <div className="inv-sechead-tools">
+                            <div className="tracer-view-toggle" role="radiogroup" aria-label="Results layout">
+                                {['table', 'cards'].map((v) => (
+                                    <button
+                                        key={v}
+                                        type="button"
+                                        role="radio"
+                                        aria-checked={resultsView === v ? 'true' : 'false'}
+                                        className="chip chip-tool"
+                                        onClick={() => chooseResultsView(v)}
+                                    >
+                                        {v === 'table' ? 'Table' : 'Cards'}
+                                    </button>
+                                ))}
+                            </div>
                             <button type="button" className="chip chip-tool" onClick={() => window.print()}>
-                                Print all
+                                Print / Save PDF
                             </button>
                         </div>
                     </div>
                 ) : null}
+
+                {tableRows.length > 0 && (
+                    <div className={`tracer-results-table${resultsView === 'table' ? ' is-active' : ''}`}>
+                        <TracerTable
+                            rows={tableRows}
+                            clientPagesByNorm={clientPagesByNorm}
+                            onOpenDetail={(tile, kind) => {
+                                if (!tile) return;
+                                setOpenTile(tile);
+                                setOpenTileKind(kind);
+                            }}
+                        />
+                    </div>
+                )}
+
+                <div className={`tracer-results-cards${resultsView === 'cards' || tableRows.length === 0 ? ' is-active' : ''}`}>
 
                 {collatedBannerRow ? (
                     <>
@@ -603,16 +665,7 @@ export function TracerPage({
                     ))}
                 </div>
 
-                {hasResults ? (
-                    <div className="tracer-pdf-row tracer-hide-print">
-                        <button type="button" className="btn-secondary" onClick={() => window.print()}>
-                            Print all
-                        </button>
-                        <span className="muted small">
-                            Each business unit prints as one block — a block that does not fit moves to the next page.
-                        </span>
-                    </div>
-                ) : null}
+                </div>
             </div>
 
             {openTile && (

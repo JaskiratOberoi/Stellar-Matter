@@ -123,7 +123,9 @@ textarea {
 }
 
 .chip[aria-pressed='true'],
-.chip[aria-selected='true'] {
+.chip[aria-selected='true'],
+.chip[aria-checked='true'],
+.chip.chip-tool.active {
     border-color: rgb(var(--nx-accent) / 0.55);
     background: rgb(var(--nx-accent) / 0.14);
     color: rgb(var(--nx-accent));
