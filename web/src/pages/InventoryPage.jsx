@@ -434,7 +434,8 @@ export function InventoryPage() {
                 </div>
             </header>
 
-            {flash && <div className="inv-flash">{flash}</div>}
+            <div className={`inv-refresh-bar${inventory.refreshing ? ' is-active' : ''}`} aria-hidden="true" />
+            {flash && <div className="inv-flash" role="status">{flash}</div>}
             {inventory.error && <div className="results-error nexus-card">{inventory.error}</div>}
 
             {inventory.loading ? (
@@ -2993,7 +2994,9 @@ function LedgerView({ inventory, canMove, showRecorded = false, onDone }) {
     const [movementUsers, setMovementUsers] = useState([]);
     const [cursor, setCursor] = useState(null);
     const [total, setTotal] = useState(0);
-    const [loading, setLoading] = useState(false);
+    // Starts true: the first fetch runs from an effect, and an empty ledger
+    // must not flash "No movements yet" before it lands.
+    const [loading, setLoading] = useState(true);
     const [err, setErr] = useState(null);
     const [filters, setFilters] = useState(LEDGER_EMPTY_FILTERS);
     // The search box updates on every keystroke; the query we actually send

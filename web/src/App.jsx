@@ -3,6 +3,7 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 import { Topbar } from './components/Topbar.jsx';
 import { RoleGate } from './components/RoleGate.jsx';
 import { InstallPrompt } from './components/InstallPrompt.jsx';
+import { SessionGuard } from './components/SessionGuard.jsx';
 import { LoginPage } from './pages/LoginPage.jsx';
 import { AdminUsersPage } from './pages/AdminUsersPage.jsx';
 import { AdminAuditLogPage } from './pages/AdminAuditLogPage.jsx';
@@ -84,6 +85,7 @@ export function App() {
                 <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
             <InstallPrompt />
+            <SessionGuard />
         </>
     );
 }
@@ -183,6 +185,7 @@ function TracerRoute() {
             <main className="main-pane tracer-main">
                 <TracerPage
                     tiles={tiles}
+                    tilesLoadedAt={loadedAt}
                     visibleTiles={visibleTiles}
                     reloadTiles={reloadTiles}
                     submit={handleSubmit}

@@ -65,7 +65,7 @@ export function LoginPage() {
                             </button>
                         </span>
                     </label>
-                    {err && <p className="login-err">{err}</p>}
+                    {err && <p className="login-err" role="alert">{err}</p>}
                     <button type="submit" className="btn-primary" disabled={busy || !username || !password}>
                         {busy ? 'Signing in…' : 'Sign in'}
                     </button>

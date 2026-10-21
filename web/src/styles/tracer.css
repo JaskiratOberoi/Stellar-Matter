@@ -150,6 +150,37 @@
     letter-spacing: -0.02em;
 }
 
+/* A scope with nothing returned: tagged in danger, figures dimmed so the
+   dashes read as missing data rather than a quiet month. */
+.tracer-banner-status {
+    display: inline-block;
+    margin-left: var(--sp-2);
+    padding: 0.2rem 0.5rem;
+    border-radius: 999px;
+    vertical-align: middle;
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: rgb(var(--nx-signal-danger));
+    background: rgb(var(--nx-signal-danger) / 0.12);
+}
+
+.tracer-banner.is-missing .tracer-stat-headline {
+    color: rgb(var(--nx-ink-3));
+}
+
+.tracer-outcome {
+    margin: var(--sp-1) 0 0;
+    font-size: 0.8125rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.tracer-outcome.is-ok { color: rgb(var(--nx-signal-success)); }
+.tracer-outcome.is-warn { color: rgb(var(--nx-signal-warning)); }
+.tracer-outcome.is-danger { color: rgb(var(--nx-signal-danger)); }
+
 .tracer-banner-range {
     margin: 0.2rem 0 0;
 }

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch, getToken } from '../apiClient.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
 
@@ -41,14 +41,20 @@ export function useInventory() {
     const [locations, setLocations] = useState([]);
     const [balances, setBalances] = useState([]);
     const [summary, setSummary] = useState(null);
+    // `loading` covers the first load only. Later reloads (after every save)
+    // set `refreshing` and leave the data on screen, so an open form, ledger
+    // filters and scroll position survive the refresh.
     const [loading, setLoading] = useState(true);
+    const [refreshing, setRefreshing] = useState(false);
     const [error, setError] = useState(null);
+    const loadedRef = useRef(false);
 
     const ready = !authLoading && (!authRequired || Boolean(getToken()));
 
     const reload = useCallback(async (opts = {}) => {
         if (!ready) return;
-        setLoading(true);
+        if (loadedRef.current) setRefreshing(true);
+        else setLoading(true);
         setError(null);
         try {
             const locQs = opts.ensureBus ? '?include_inactive=1&ensure_bus=1' : '?include_inactive=1';
@@ -64,9 +70,13 @@ export function useInventory() {
             setLocations(locs.locations || []);
             setBalances(bals.balances || []);
             setSummary(summ.summary || null);
+            loadedRef.current = true;
         } catch (e) {
             const msg = String(e.message || e);
             if (/failed to fetch|networkerror|load failed/i.test(msg)) {
+                // Already showing data: keep it; the shell's offline bar says why
+                // it isn't refreshing.
+                if (loadedRef.current) return;
                 setError(
                     'Cannot reach the API (api-matter.stellarinfomatica.com). Check your connection — the backend runs on a home server and may be unreachable off your network.',
                 );
@@ -75,6 +85,7 @@ export function useInventory() {
             }
         } finally {
             setLoading(false);
+            setRefreshing(false);
         }
     }, [ready]);
 
@@ -228,6 +239,7 @@ export function useInventory() {
         balances,
         summary,
         loading,
+        refreshing,
         error,
         ready,
         reload,

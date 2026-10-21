@@ -18,9 +18,50 @@ import { RunModal } from '../components/RunModal.jsx';
 import { CodeWiseModal } from '../components/CodeWiseModal.jsx';
 import { RunProgress } from '../components/RunProgress.jsx';
 
+// The last batch run on this device: what was asked for and how it ended.
+// Banners are rebuilt from it once tiles load, so a reload (or an iOS PWA
+// being evicted in the background) does not wipe the results wall.
+const LS_LAST_BATCH = 'stellar-matter.tracer.lastBatch.v1';
+
+function readLastBatch() {
+    try {
+        const j = JSON.parse(window.localStorage.getItem(LS_LAST_BATCH) || 'null');
+        return j && j.batchIso ? j : null;
+    } catch {
+        return null;
+    }
+}
+
+function writeLastBatch(batch) {
+    try {
+        window.localStorage.setItem(LS_LAST_BATCH, JSON.stringify(batch));
+    } catch {
+        /* storage blocked: the wall just won't survive a reload */
+    }
+}
+
+function pendingFromBatch(batch) {
+    if (!batch) return null;
+    return { ...batch, bus: new Set(batch.bus || []), scopeTargets: batch.scopeTargets || [], restored: true };
+}
+
+/** Summarise a finished run from the final /api/run/status payload. */
+function outcomeFromStatus(final, expected) {
+    const fo = (final && (final.lastFanOut || final.fanOut)) || null;
+    const failed = fo && Array.isArray(fo.failed) ? fo.failed.map(String) : [];
+    const total = fo && Array.isArray(fo.queued) && fo.queued.length ? fo.queued.length : expected;
+    return {
+        at: new Date().toISOString(),
+        total,
+        failed,
+        cancelled: !!(final && final.cancelled)
+    };
+}
+
 /**
  * @param {{
  *   tiles: object[],
+ *   tilesLoadedAt?: Date | null,
  *   visibleTiles?: object[],
  *   reloadTiles: () => Promise<void>,
  *   submit: (body: object) => Promise<{ ok: boolean, error?: string }>,
@@ -40,6 +81,7 @@ import { RunProgress } from '../components/RunProgress.jsx';
  */
 export function TracerPage({
     tiles,
+    tilesLoadedAt = null,
     visibleTiles,
     reloadTiles,
     submit,
@@ -99,10 +141,14 @@ export function TracerPage({
     const [printFocusKey, setPrintFocusKey] = useState( /** @type {string | null} */ (null));
 
     const pendingBannerRef = useRef(
-        /** @type {null | { batchIso: string, from: string, to: string, bus: Set<string>, scopeTargets: { kind: string, key: string, label: string }[], collate: boolean }} */ (
-            null
+        /** @type {null | { batchIso: string, from: string, to: string, bus: Set<string>, scopeTargets: { kind: string, key: string, label: string }[], collate: boolean, restored?: boolean }} */ (
+            pendingFromBatch(readLastBatch())
         )
     );
+    const [runOutcome, setRunOutcome] = useState(() => {
+        const b = readLastBatch();
+        return b ? b.outcome || null : null;
+    });
     const busy = running || tracerBusy;
     const showFanOut = running && !!runFanOut;
 
@@ -111,6 +157,10 @@ export function TracerPage({
     useEffect(() => {
         const p = pendingBannerRef.current;
         if (!p) return;
+        // Wait for the first tiles fetch; a batch restored mid-run waits for
+        // the run to finish (onIdle reloads tiles) so it isn't built half-done.
+        if (!tilesLoadedAt) return;
+        if (p.restored && running) return;
         pendingBannerRef.current = null;
 
         const from = p.from;
@@ -167,7 +217,7 @@ export function TracerPage({
                 return [...m.values()];
             });
         }
-    }, [tiles]);
+    }, [tiles, tilesLoadedAt, running]);
 
     useEffect(() => {
         const onAfterPrint = () => setPrintFocusKey(null);
@@ -245,27 +295,35 @@ export function TracerPage({
             const cc = clientCodeScope(snap.clientCodes);
             if (cc) scopeTargets.push({ kind: 'group', key: cc.key, label: cc.label });
 
+            const batch = {
+                batchIso,
+                from: snap.fromDate,
+                to: snap.toDate,
+                bus: [...bus],
+                scopeTargets,
+                collate: !!snap.collate,
+                outcome: null
+            };
             setTracerBusy(true);
+            setRunOutcome(null);
             try {
                 const r = await submit(buildTracerBody(snap), { endpoint: '/api/tracer-run' });
                 if (!r.ok) {
                     setLocalError(String(r.error || 'Tracer run failed'));
                     return;
                 }
+                // Saved before the wait so a reload mid-run still restores it.
+                writeLastBatch(batch);
                 const final = await waitForRunIdle(() => apiFetch('/api/run/status'));
                 if (final && final.cancelled) {
                     setLocalError(
                         'Tracer run cancelled. Any scope that finished before the stop kept its tiles; the rest were aborted on the server.'
                     );
                 }
-                pendingBannerRef.current = {
-                    batchIso,
-                    from: snap.fromDate,
-                    to: snap.toDate,
-                    bus,
-                    scopeTargets,
-                    collate: !!snap.collate
-                };
+                const outcome = outcomeFromStatus(final, snap.collate ? 1 : bus.size + scopeTargets.length);
+                writeLastBatch({ ...batch, outcome });
+                setRunOutcome(outcome);
+                pendingBannerRef.current = { ...batch, bus, scopeTargets };
                 try {
                     await reloadTiles();
                 } catch (loadErr) {
@@ -316,6 +374,27 @@ export function TracerPage({
     if (windowLabel) printSummaryParts.push(windowLabel);
     const hasResults = Boolean(collatedBannerRow) || buCount > 0 || regCount > 0;
     const resultsCaption = printSummaryParts.join(' · ');
+
+    // Scopes the last run reported as failed, keyed like banner rows.
+    const failedKeys = new Set(((runOutcome && runOutcome.failed) || []).map((l) => tracerBuKey(l)));
+    let outcomeLine = null;
+    if (runOutcome && !busy) {
+        const at = new Date(runOutcome.at);
+        const when = Number.isNaN(at.getTime())
+            ? ''
+            : ` · finished ${at.toLocaleString(undefined, { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}`;
+        const nFailed = runOutcome.failed.length;
+        if (runOutcome.cancelled) {
+            outcomeLine = { tone: 'warn', text: `Last run cancelled · ${Math.max(0, runOutcome.total - nFailed)} of ${runOutcome.total} scopes finished${when}` };
+        } else if (nFailed > 0) {
+            outcomeLine = {
+                tone: 'danger',
+                text: `${runOutcome.total - nFailed} of ${runOutcome.total} scopes ok · failed: ${runOutcome.failed.join(', ')}${when}`
+            };
+        } else {
+            outcomeLine = { tone: 'ok', text: `All ${runOutcome.total} scope${runOutcome.total === 1 ? '' : 's'} ok${when}` };
+        }
+    }
 
     return (
         <div className={`tracer-page${printFocusKey ? ' tracer-print-single' : ''}`}>
@@ -380,11 +459,16 @@ export function TracerPage({
                     </div>
                 )}
 
-                {hasResults ? (
+                {hasResults || outcomeLine ? (
                     <div className="inv-sechead tracer-results-head tracer-hide-print">
                         <div className="inv-sechead-text">
                             <h2 className="inv-sechead-title">Results</h2>
                             <p className="inv-sechead-cap">{resultsCaption}</p>
+                            {outcomeLine ? (
+                                <p className={`tracer-outcome is-${outcomeLine.tone}`} role="status">
+                                    {outcomeLine.text}
+                                </p>
+                            ) : null}
                         </div>
                         <div className="inv-sechead-tools">
                             <button type="button" className="chip chip-tool" onClick={() => window.print()}>
@@ -455,6 +539,7 @@ export function TracerPage({
                             barcodeTile={row.barcodeTile}
                             serumTile={row.serumTile}
                             clientPagesByNorm={clientPagesByNorm}
+                            failed={failedKeys.has(row.buKey)}
                             isPrintTarget={printFocusKey === `bu:${row.buKey}`}
                             onPrintSection={() => startPrintSection(`bu:${row.buKey}`)}
                             onOpenDetail={(tile, kind) => {
@@ -498,6 +583,7 @@ export function TracerPage({
                             barcodeTile={row.barcodeTile}
                             serumTile={row.serumTile}
                             clientPagesByNorm={clientPagesByNorm}
+                            failed={failedKeys.has(tracerBuKey(row.label))}
                             isPrintTarget={printFocusKey === row.bannerKey}
                             onPrintSection={() => startPrintSection(row.bannerKey)}
                             onOpenDetail={(tile, kind) => {

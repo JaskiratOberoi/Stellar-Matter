@@ -35,7 +35,7 @@ function StatCard({ title, headline, subline, est, onOpen }) {
     );
 }
 
-/** @param {{ bu: string, fromDate: string, toDate: string, generalTile: object|null, urineTile: object|null, edtaTile: object|null, flourideTile: object|null, citrateTile: object|null, sHeparinTile: object|null, lHeparinTile: object|null, lbcTile: object|null, barcodeTile: object|null, serumTile: object|null, clientPagesByNorm: Record<string, number>, isPrintTarget?: boolean, onPrintSection?: () => void, onOpenDetail?: (tile: object | null, kind: string) => void, onExpandCodeWise?: () => void }} props */
+/** @param {{ bu: string, fromDate: string, toDate: string, generalTile: object|null, urineTile: object|null, edtaTile: object|null, flourideTile: object|null, citrateTile: object|null, sHeparinTile: object|null, lHeparinTile: object|null, lbcTile: object|null, barcodeTile: object|null, serumTile: object|null, clientPagesByNorm: Record<string, number>, isPrintTarget?: boolean, onPrintSection?: () => void, onOpenDetail?: (tile: object | null, kind: string) => void, onExpandCodeWise?: () => void, failed?: boolean }} props */
 export function TracerBanner({
     bu,
     fromDate,
@@ -54,27 +54,43 @@ export function TracerBanner({
     isPrintTarget,
     onPrintSection,
     onOpenDetail,
-    onExpandCodeWise
+    onExpandCodeWise,
+    failed = false
 }) {
-    const lh = generalTile ? projectLetterheads(generalTile, clientPagesByNorm) : { headline: '0', subline: 'No data', estimated: false };
-    const env = generalTile ? projectEnvelopes(generalTile, clientPagesByNorm) : { headline: '0 BIG / 0 SMALL', subline: '0 total', estimated: false };
-    const ur = urineTile ? projectUrineContainers(urineTile) : { headline: '0', subline: 'No data' };
-    const ed = edtaTile ? projectEdtaVials(edtaTile) : { headline: '0', subline: 'No data' };
-    const fl = flourideTile ? projectFlourideVials(flourideTile) : { headline: '0', subline: 'No data' };
-    const ct = citrateTile ? projectCitrateVials(citrateTile) : { headline: '0', subline: 'No data' };
-    const sh = sHeparinTile ? projectSHeparin(sHeparinTile) : { headline: '0', subline: 'No data' };
-    const lhep = lHeparinTile ? projectLHeparin(lHeparinTile) : { headline: '0', subline: 'No data' };
-    const lbc = lbcTile ? projectLbc(lbcTile) : { headline: '0', subline: 'No data' };
-    const bc = barcodeTile ? projectBarcode(barcodeTile) : { headline: '0', subline: 'No data' };
-    const sr = serumTile ? projectSerum(serumTile) : { headline: '0', subline: 'No data' };
+    // A missing tile means nothing came back for that material (the scope
+    // failed or was cancelled), which is not the same as a counted zero.
+    const MISSING = { headline: '—', subline: 'No data returned', estimated: false };
+    const lh = generalTile ? projectLetterheads(generalTile, clientPagesByNorm) : MISSING;
+    const env = generalTile ? projectEnvelopes(generalTile, clientPagesByNorm) : MISSING;
+    const ur = urineTile ? projectUrineContainers(urineTile) : MISSING;
+    const ed = edtaTile ? projectEdtaVials(edtaTile) : MISSING;
+    const fl = flourideTile ? projectFlourideVials(flourideTile) : MISSING;
+    const ct = citrateTile ? projectCitrateVials(citrateTile) : MISSING;
+    const sh = sHeparinTile ? projectSHeparin(sHeparinTile) : MISSING;
+    const lhep = lHeparinTile ? projectLHeparin(lHeparinTile) : MISSING;
+    const lbc = lbcTile ? projectLbc(lbcTile) : MISSING;
+    const bc = barcodeTile ? projectBarcode(barcodeTile) : MISSING;
+    const sr = serumTile ? projectSerum(serumTile) : MISSING;
     const rangeLabel = fmtDateRange(fromDate, toDate);
+    const empty = ![
+        generalTile, urineTile, edtaTile, flourideTile, citrateTile,
+        sHeparinTile, lHeparinTile, lbcTile, barcodeTile, serumTile
+    ].some(Boolean);
+    const statusTag = failed ? 'Failed' : empty ? 'No results' : null;
 
     return (
-        <section className={`tracer-banner nexus-card${isPrintTarget ? ' is-printing' : ''}`}>
+        <section className={`tracer-banner nexus-card${isPrintTarget ? ' is-printing' : ''}${statusTag ? ' is-missing' : ''}`}>
             <div className="tracer-banner-head">
                 <div>
-                    <h2 className="tracer-banner-bu">{bu}</h2>
-                    <p className="muted small tracer-banner-range">{rangeLabel}</p>
+                    <h2 className="tracer-banner-bu">
+                        {bu}
+                        {statusTag ? <span className="tracer-banner-status">{statusTag}</span> : null}
+                    </h2>
+                    <p className="muted small tracer-banner-range">
+                        {statusTag
+                            ? `${rangeLabel} · ${failed ? 'this scope failed on the server' : 'nothing came back for this scope'}; dashes are missing data, not zero`
+                            : rangeLabel}
+                    </p>
                 </div>
                 <div className="tracer-banner-tools tracer-hide-print">
                     {onPrintSection ? (

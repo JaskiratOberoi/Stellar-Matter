@@ -37,6 +37,24 @@ export function authHeaders() {
     return t ? { Authorization: `Bearer ${t}` } : {};
 }
 
+// Connection and session signals for the app shell (see SessionGuard). Every
+// request goes through apiFetch, so this is the one place that can tell "the
+// server said your token is no good" apart from "the server is unreachable".
+export const SESSION_EXPIRED_EVENT = 'matter:session-expired';
+export const NETWORK_EVENT = 'matter:network';
+
+let networkDown = false;
+
+function setNetworkDown(down) {
+    if (networkDown === down) return;
+    networkDown = down;
+    window.dispatchEvent(new CustomEvent(NETWORK_EVENT, { detail: { offline: down } }));
+}
+
+export function isNetworkDown() {
+    return networkDown;
+}
+
 /**
  * @param {string} path
  * @param {RequestInit} [init]
@@ -48,5 +66,18 @@ export async function apiFetch(path, init = {}) {
     if (init.body && typeof init.body === 'string' && !headers.has('Content-Type')) {
         headers.set('Content-Type', 'application/json');
     }
-    return fetch(apiUrl(path), { ...init, headers });
+    let res;
+    try {
+        res = await fetch(apiUrl(path), { ...init, headers });
+    } catch (e) {
+        if (!(e && e.name === 'AbortError')) setNetworkDown(true);
+        throw e;
+    }
+    setNetworkDown(false);
+    // A 401 on a request that carried a token means the session ended (expired
+    // or revoked). Auth endpoints report their own failures.
+    if (res.status === 401 && t && !String(path).startsWith('/api/auth/')) {
+        window.dispatchEvent(new CustomEvent(SESSION_EXPIRED_EVENT));
+    }
+    return res;
 }
