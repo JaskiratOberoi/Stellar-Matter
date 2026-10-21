@@ -20,6 +20,7 @@ const VIEWS = [
     { id: 'receive', label: 'Receive', icon: 'in', caption: 'Vendor intake' },
     { id: 'dispatch', label: 'Dispatch', icon: 'out', caption: 'Ship & transfer' },
     { id: 'ledger', label: 'Ledger', icon: 'list', caption: 'Movement history' },
+    { id: 'count', label: 'Count', icon: 'count', caption: 'Stock-take a site', adminOnly: true },
     { id: 'vendors', label: 'Vendors', icon: 'truck', caption: 'Suppliers & GST' },
     { id: 'catalog', label: 'Catalog', icon: 'tag', caption: 'Materials & sites', adminOnly: true },
     { id: 'consumption', label: 'Consumption', icon: 'chart', caption: 'Monthly by BU', superOnly: true }
@@ -105,6 +106,8 @@ function Icon({ name, className }) {
             return (<svg {...p}><path d="M4 20V10" /><path d="M10 20V4" /><path d="M16 20v-8" /><path d="M22 20H2" /></svg>);
         case 'more':
             return (<svg {...p}><circle cx="5" cy="12" r="1.2" /><circle cx="12" cy="12" r="1.2" /><circle cx="19" cy="12" r="1.2" /></svg>);
+        case 'count':
+            return (<svg {...p}><path d="M9 4h6a1 1 0 0 1 1 1v1h2a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h2V5a1 1 0 0 1 1-1z" /><path d="m9 13 2 2 4-4" /></svg>);
         default:
             return null;
     }
@@ -685,6 +688,7 @@ export function InventoryPage() {
                                 onGoto={goto}
                             />
                         )}
+                        {view === 'count' && canManageCatalog && <CountView inventory={inventory} onDone={showFlash} />}
                         {view === 'ledger' && (
                             <LedgerView
                                 key={presetFor('ledger') ? presetFor('ledger').n : 'ledger'}
@@ -1646,7 +1650,7 @@ const DOCKET_LINE_CAP = 8;
  * number quiet until there is something to record, and on phones repeats
  * the action in a bar that stays reachable while the form scrolls.
  */
-function MovementDocket({ formId, heading, sign, total, ready, facts, lines, warn, note, err, disabled, label, review }) {
+function MovementDocket({ formId, heading, sign, total, ready, facts, lines, warn, note, err, disabled, label, review, unitLabel = 'units' }) {
     const ref = useRef(null);
     useEffect(() => {
         if ((err || review) && ref.current) ref.current.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
@@ -1662,7 +1666,7 @@ function MovementDocket({ formId, heading, sign, total, ready, facts, lines, war
             <div className={bigClass}>
                 {sign}
                 {fmt(total)}
-                <span className="inv-docket-unit">units</span>
+                <span className="inv-docket-unit">{unitLabel}</span>
             </div>
             <dl className="inv-docket-dl">
                 {facts.map(([dt, dd, cls]) => (
@@ -1711,7 +1715,7 @@ function MovementDocket({ formId, heading, sign, total, ready, facts, lines, war
             <div className="inv-docket-bar" aria-hidden={ready ? undefined : 'true'}>
                 <span className="inv-docket-bar-total">
                     {sign}
-                    {fmt(total)} <span className="inv-unit">units</span>
+                    {fmt(total)} <span className="inv-unit">{unitLabel}</span>
                 </span>
                 {review && (
                     <button type="button" className="chip chip-tool" onClick={review.onCancel}>
@@ -3189,6 +3193,293 @@ function DispatchView({ inventory, canMove, showRecorded = false, onDone, onGoto
                 fetchMovements={fetchMovements}
                 tick={recentTick}
                 showRecorded={showRecorded}
+            />
+        </div>
+    );
+}
+
+// -- Stock count (admin) -----------------------------------------------------
+//
+// Walk one site's shelves: type what is physically there and the ledger is set
+// to exactly that with adjustment entries (one up or down per material). The
+// difference column is what will be written, against the ledger's own figure.
+
+function countTarget(raw) {
+    const s = String(raw ?? '').trim();
+    if (s === '') return null;
+    const n = Number(s.replace(/,/g, ''));
+    return Number.isFinite(n) && n >= 0 ? Math.floor(n) : NaN;
+}
+
+function CountView({ inventory, onDone }) {
+    const { materials, locations, balances, createMovementsBatch, createMovement, reload, createLocation } = inventory;
+    const activeMaterials = useMemo(() => materials.filter((m) => m.active), [materials]);
+    const activeLocations = useMemo(() => locations.filter((l) => l.active), [locations]);
+    const stores = activeLocations.filter((l) => l.kind === 'store');
+    const sites = activeLocations.filter((l) => l.kind !== 'store');
+
+    const [locationId, setLocationId] = useState('');
+    const [counts, setCounts] = useState({});
+    const [zeroRest, setZeroRest] = useState(false);
+    const [showAll, setShowAll] = useState(false);
+    const [query, setQuery] = useState('');
+    const [occurredOn, setOccurredOn] = useState(todayDateInput);
+    const [note, setNote] = useState('');
+    const [busy, setBusy] = useState(false);
+    const [err, setErr] = useState(null);
+
+    useEffect(() => {
+        if (!locationId && stores.length) setLocationId(stores[0].id);
+    }, [locationId, stores]);
+    useEffect(() => {
+        setCounts({});
+        setZeroRest(false);
+        setErr(null);
+    }, [locationId]);
+
+    // The ledger's own balance (can be below zero), not the floored display.
+    const rawAt = useMemo(() => {
+        const m = new Map();
+        for (const b of balances) if (b.location_id === locationId) m.set(b.material_id, Number(b.on_hand) || 0);
+        return m;
+    }, [balances, locationId]);
+    const site = activeLocations.find((l) => l.id === locationId) || null;
+
+    const rows = useMemo(() => {
+        const q = query.trim().toLowerCase();
+        return activeMaterials
+            .filter((m) => showAll || (rawAt.get(m.id) || 0) !== 0 || counts[m.id] != null)
+            .filter((m) => !q || m.name.toLowerCase().includes(q));
+    }, [activeMaterials, rawAt, showAll, query, counts]);
+
+    // Every adjustment the count implies, typed rows first, then (optionally)
+    // zeroing whatever still shows stock and was not counted.
+    const plan = useMemo(() => {
+        const out = [];
+        for (const m of activeMaterials) {
+            const raw = rawAt.get(m.id) || 0;
+            const typed = countTarget(counts[m.id]);
+            let target = null;
+            if (typed != null) target = typed;
+            else if (zeroRest && raw > 0) target = 0;
+            if (target == null || Number.isNaN(target)) continue;
+            const delta = target - raw;
+            if (delta !== 0) out.push({ m, raw, target, delta, zeroed: typed == null });
+        }
+        return out;
+    }, [activeMaterials, rawAt, counts, zeroRest]);
+    const invalid = Object.entries(counts).some(([, v]) => Number.isNaN(countTarget(v)));
+    const upQty = plan.filter((p) => p.delta > 0).reduce((s, p) => s + p.delta, 0);
+    const downQty = plan.filter((p) => p.delta < 0).reduce((s, p) => s - p.delta, 0);
+    const zeroedCount = plan.filter((p) => p.zeroed).length;
+
+    async function postSide(side, items, header) {
+        if (!items.length) return [];
+        const loc = side === 'up' ? { to_location_id: locationId } : { from_location_id: locationId };
+        try {
+            const r = await createMovementsBatch({
+                kind: 'adjustment',
+                ...loc,
+                ...header,
+                lines: items.map((p) => ({ material_id: p.m.id, qty_base: Math.abs(p.delta) }))
+            });
+            return (r.movements || []).map((x) => x.id);
+        } catch (e) {
+            // An API from before batch adjustments: post them one at a time.
+            if (!/kind must be receipt or dispatch/i.test(String(e.message || ''))) throw e;
+            const ids = [];
+            for (const p of items) {
+                const r = await createMovement({
+                    kind: 'adjustment',
+                    ...loc,
+                    ...header,
+                    material_id: p.m.id,
+                    qty_base: Math.abs(p.delta)
+                });
+                const mv = r && (r.movement || r);
+                if (mv && mv.id) ids.push(mv.id);
+            }
+            return ids;
+        }
+    }
+
+    async function onSubmit(e) {
+        e.preventDefault();
+        setErr(null);
+        if (!site) return setErr('Pick the site you counted.');
+        if (invalid) return setErr('Counts must be whole numbers, 0 or more.');
+        if (!plan.length) return setErr('Nothing to change: every count matches the ledger.');
+        setBusy(true);
+        const header = {
+            reference: `Stock count ${occurredOn}`,
+            note: note.trim() || `${site.name} set to physical count`,
+            occurred_at: dateInputToIso(occurredOn)
+        };
+        try {
+            const ids = [
+                ...(await postSide('up', plan.filter((p) => p.delta > 0), header)),
+                ...(await postSide('down', plan.filter((p) => p.delta < 0), header))
+            ];
+            await reload();
+            onDone(`${site.name}: ${fmt(plan.length)} material${plan.length === 1 ? '' : 's'} set to the count (${fmt(ids.length)} adjustment${ids.length === 1 ? '' : 's'}).`, {
+                undoIds: ids
+            });
+            setCounts({});
+            setZeroRest(false);
+            setNote('');
+        } catch (e2) {
+            setErr(`${String(e2.message || e2)}. Anything saved before the error is in the Ledger under “${header.reference}”.`);
+            await reload();
+        } finally {
+            setBusy(false);
+        }
+    }
+
+    return (
+        <div className="inv-form-layout">
+            <section className="inv-panel inv-count">
+                <SectionHead
+                    title="Stock count"
+                    caption="Type what is physically at the site. Saving sets the ledger to exactly that, as adjustment entries."
+                />
+                <form id="inv-count-form" className="inv-order-form" onSubmit={onSubmit} onKeyDown={submitOnCtrlEnter}>
+                    <div className="inv-count-head">
+                        <label className="inv-field">
+                            <span>Site</span>
+                            <LocationCombobox
+                                value={locationId}
+                                onChange={setLocationId}
+                                locations={activeLocations}
+                                groups={[
+                                    { label: 'Stores & warehouses', items: stores },
+                                    { label: 'Business units & labs', items: sites }
+                                ]}
+                                allowCreate={false}
+                                createLocation={createLocation}
+                            />
+                        </label>
+                        <label className="inv-field">
+                            <span>Counted on</span>
+                            <input type="date" value={occurredOn} max={todayDateInput()} onChange={(e) => setOccurredOn(e.target.value)} />
+                        </label>
+                        <label className="inv-field inv-count-note">
+                            <span>Note</span>
+                            <input value={note} placeholder={site ? `${site.name} set to physical count` : 'Optional'} onChange={(e) => setNote(e.target.value)} />
+                        </label>
+                    </div>
+
+                    <div className="inv-count-tools">
+                        <input
+                            type="search"
+                            className="inv-search"
+                            placeholder="Filter materials…"
+                            value={query}
+                            onChange={(e) => setQuery(e.target.value)}
+                        />
+                        <label className="inv-toggle">
+                            <input type="checkbox" className="inv-toggle-input" checked={showAll} onChange={(e) => setShowAll(e.target.checked)} />
+                            <span className="inv-toggle-track" aria-hidden="true"><span className="inv-toggle-thumb" /></span>
+                            <span className="inv-toggle-label">Show every material</span>
+                        </label>
+                        <label className="inv-toggle">
+                            <input type="checkbox" className="inv-toggle-input" checked={zeroRest} onChange={(e) => setZeroRest(e.target.checked)} />
+                            <span className="inv-toggle-track" aria-hidden="true"><span className="inv-toggle-thumb" /></span>
+                            <span className="inv-toggle-label">Set anything I didn’t count to 0</span>
+                        </label>
+                    </div>
+
+                    <div className="inv-table-wrap">
+                        <table className="inv-table inv-count-table">
+                            <thead>
+                                <tr>
+                                    <th>Material</th>
+                                    <th className="num">On record</th>
+                                    <th className="num">Counted</th>
+                                    <th className="num">Change</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {rows.map((m) => {
+                                    const raw = rawAt.get(m.id) || 0;
+                                    const p = plan.find((x) => x.m.id === m.id);
+                                    const bad = Number.isNaN(countTarget(counts[m.id]));
+                                    return (
+                                        <tr key={m.id} className={p ? 'has-change' : undefined}>
+                                            <td data-label="Material">
+                                                <span className="inv-mat-name">{m.name}</span>
+                                                <span className="inv-unit">{m.base_unit}</span>
+                                            </td>
+                                            <td className="num" data-label="On record">
+                                                {fmt(Math.max(0, raw))}
+                                                {raw < 0 && (
+                                                    <span className="inv-count-neg" title="The ledger is below zero here; saving a count sets it to exactly your figure.">
+                                                        ledger below 0
+                                                    </span>
+                                                )}
+                                            </td>
+                                            <td className="num" data-label="Counted">
+                                                <input
+                                                    className="inv-count-input"
+                                                    inputMode="numeric"
+                                                    aria-label={`Counted ${m.name}`}
+                                                    aria-invalid={bad ? 'true' : undefined}
+                                                    placeholder={p && p.zeroed ? '0' : '—'}
+                                                    value={counts[m.id] ?? ''}
+                                                    onChange={(e) => {
+                                                        const v = e.target.value;
+                                                        setCounts((c) => {
+                                                            const n = { ...c };
+                                                            if (v === '') delete n[m.id];
+                                                            else n[m.id] = v;
+                                                            return n;
+                                                        });
+                                                    }}
+                                                />
+                                            </td>
+                                            <td className={`num inv-count-delta${p ? (p.delta > 0 ? ' is-up' : ' is-down') : ''}`} data-label="Change">
+                                                {p ? `${p.delta > 0 ? '+' : '−'}${fmt(Math.abs(p.delta))}` : '·'}
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
+                                {!rows.length && (
+                                    <tr>
+                                        <td colSpan={4} className="muted inv-nomatch">
+                                            {query ? `No materials match “${query}”.` : 'Nothing on record here. Turn on “Show every material” to count new stock.'}
+                                        </td>
+                                    </tr>
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
+                </form>
+            </section>
+
+            <MovementDocket
+                formId="inv-count-form"
+                heading="Count docket"
+                sign=""
+                unitLabel={plan.length === 1 ? 'change' : 'changes'}
+                total={plan.length}
+                ready={plan.length > 0}
+                warn={zeroedCount > 0}
+                facts={[
+                    ['Site', site ? site.name : '—', 'inv-docket-strong'],
+                    ['Counted on', fmtDateInput(occurredOn)],
+                    ['Up', `+${fmt(upQty)} units`],
+                    ['Down', `−${fmt(downQty)} units`]
+                ]}
+                lines={plan.map((p) => ({
+                    key: p.m.id,
+                    name: `${p.m.name} → ${fmt(p.target)}`,
+                    qty: p.delta,
+                    unit: p.m.base_unit,
+                    warn: p.zeroed
+                }))}
+                note={zeroedCount > 0 ? `${fmt(zeroedCount)} material${zeroedCount === 1 ? '' : 's'} you didn’t count will be set to 0 (marked in amber).` : null}
+                err={err}
+                disabled={busy || !plan.length || invalid}
+                label={busy ? 'Saving count…' : plan.length ? `Record count (${fmt(plan.length)} change${plan.length === 1 ? '' : 's'})` : 'Record count'}
             />
         </div>
     );

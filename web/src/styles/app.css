@@ -6348,3 +6348,110 @@ details[open].inv-stock-card-sites .inv-stock-card-more {
         bottom: calc(var(--inv-tabs-h) + 72px + var(--sp-3));
     }
 }
+
+/* Stock count. */
+.inv-count-head {
+    display: grid;
+    grid-template-columns: minmax(14rem, 1.4fr) minmax(10rem, 0.8fr) minmax(12rem, 1.4fr);
+    gap: var(--sp-4);
+    margin-bottom: var(--sp-4);
+}
+
+.inv-count-tools {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--sp-3) var(--sp-5);
+    margin-bottom: var(--sp-3);
+}
+
+.inv-count-input {
+    width: 7.5rem;
+    min-height: 40px;
+    padding: 0 var(--sp-3);
+    border: 1px solid rgb(var(--nx-rule-strong));
+    border-radius: var(--r-sm);
+    background: rgb(var(--nx-surface));
+    color: rgb(var(--nx-ink));
+    font: 600 var(--fs-sm) / 1 var(--font-sans);
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+.inv-count-input:focus {
+    border-color: rgb(var(--nx-accent) / 0.7);
+}
+
+.inv-count-input[aria-invalid='true'] {
+    border-color: rgb(var(--nx-signal-danger));
+}
+
+.inv-count-table tr.has-change td {
+    background: rgb(var(--nx-surface) / 0.6);
+}
+
+.inv-count-delta {
+    font-weight: 650;
+    color: rgb(var(--nx-ink-3));
+}
+
+.inv-count-delta.is-up {
+    color: rgb(var(--nx-signal-success));
+}
+
+.inv-count-delta.is-down {
+    color: rgb(var(--nx-signal-warning));
+}
+
+.inv-count-neg {
+    display: block;
+    font: 600 var(--fs-3xs) / 1.3 var(--font-mono);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: rgb(var(--nx-signal-warning));
+}
+
+@media (max-width: 1000px) {
+    .inv-count-head {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 640px) {
+    /* One card per material: name, record, count field, change. */
+    .inv-count-table {
+        min-width: 0;
+    }
+
+    .inv-count-table thead {
+        display: none;
+    }
+
+    .inv-count-table,
+    .inv-count-table tbody {
+        display: block;
+    }
+
+    .inv-count-table tbody tr {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: var(--sp-2) var(--sp-3);
+        padding: var(--sp-3) 0;
+        border-bottom: 1px solid rgb(var(--nx-rule-soft));
+    }
+
+    .inv-count-table td {
+        padding: 0;
+        border: 0;
+    }
+
+    .inv-count-table td:first-child {
+        grid-column: 1 / -1;
+    }
+
+    .inv-count-input {
+        width: 100%;
+        min-height: 44px;
+        font-size: 16px;
+    }
+}

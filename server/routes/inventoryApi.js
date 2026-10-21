@@ -807,15 +807,25 @@ router.post('/movements/batch', requireMover, adminWriteLimiter, async (req, res
     try {
         const body = req.body || {};
         const kind = trimStr(body.kind);
-        if (kind !== 'receipt' && kind !== 'dispatch') {
-            return res.status(400).json({ error: 'kind must be receipt or dispatch' });
+        if (kind !== 'receipt' && kind !== 'dispatch' && kind !== 'adjustment') {
+            return res.status(400).json({ error: 'kind must be receipt, dispatch or adjustment' });
         }
 
         const fromLocationId = trimStr(body.from_location_id) || null;
         const toLocationId = trimStr(body.to_location_id) || null;
         const toAllBus = body.to_all_bus === true || body.to_all_bus === 'true';
 
-        if (kind === 'receipt') {
+        if (kind === 'adjustment') {
+            // Stock counts post adjustments in bulk; reconciling the ledger is
+            // an admin job (PRODUCT.md), so movers cannot batch them.
+            const role = req.user && req.user.role;
+            if (role !== 'admin' && role !== 'super_admin') {
+                return res.status(403).json({ error: 'Only admins can record a stock count' });
+            }
+            if (Boolean(fromLocationId) === Boolean(toLocationId) || toAllBus) {
+                return res.status(400).json({ error: 'adjustment requires exactly one of from_location_id or to_location_id' });
+            }
+        } else if (kind === 'receipt') {
             if (!toLocationId) return res.status(400).json({ error: 'receipt requires to_location_id' });
             if (fromLocationId) return res.status(400).json({ error: 'receipt cannot have a from_location_id' });
         } else {
