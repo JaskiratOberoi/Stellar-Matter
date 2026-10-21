@@ -2774,20 +2774,30 @@ table.packages td.envelope-cell {
 }
 
 /* Index nav — a table of contents, underlined rather than pilled. */
+/* One row of tabs, always. Tabs share the row and grow to fill it; when a
+   window is too narrow for all of them the row scrolls sideways rather than
+   wrapping into a second row. */
 .inv-index {
     display: flex;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
     gap: 0;
     margin-bottom: var(--sp-6);
     border-top: 1px solid rgb(var(--nx-rule-soft));
     border-bottom: 1px solid rgb(var(--nx-rule-soft));
 }
 
+.inv-index::-webkit-scrollbar {
+    display: none;
+}
+
 .inv-index-item {
     display: flex;
     align-items: flex-start;
     gap: var(--sp-3);
-    flex: 1 1 170px;
+    flex: 1 0 auto;
     padding: var(--sp-4) var(--sp-5);
     background: none;
     border: 0;
@@ -5999,4 +6009,18 @@ details[open].inv-stock-card-sites .inv-stock-card-more {
 
 .inv-docket-actions .chip {
     align-self: center;
+}
+
+/* Tab row, tighter below 1200px: each tab sizes to its label (captions are
+   already hidden) so all eight still fit one row on a small laptop. */
+@media (max-width: 1200px) and (min-width: 641px) {
+    .inv-index > .inv-index-item {
+        flex-basis: auto;
+        gap: var(--sp-2);
+        padding: var(--sp-3) var(--sp-3);
+    }
+
+    .inv-index > .inv-index-item:first-child {
+        padding-left: 0;
+    }
 }

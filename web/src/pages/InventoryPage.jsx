@@ -468,7 +468,11 @@ export function InventoryPage() {
                                 role="tab"
                                 aria-selected={view === v.id ? 'true' : 'false'}
                                 className={`inv-index-item${view === v.id ? ' active' : ''}`}
-                                onClick={() => setView(v.id)}
+                                onClick={(e) => {
+                                    setView(v.id);
+                                    // The row scrolls when it can't fit; keep the picked tab in view.
+                                    e.currentTarget.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+                                }}
                             >
                                 <span className="inv-index-n">{String(i + 1).padStart(2, '0')}</span>
                                 <span className="inv-index-body">
