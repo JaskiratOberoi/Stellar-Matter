@@ -5,6 +5,14 @@ import { useAuth } from '../contexts/AuthContext.jsx';
 
 const ROLES = ['operator', 'admin', 'viewer'];
 
+// What each role can do, in the app's own terms (see PRODUCT.md).
+const ROLE_HELP = {
+    viewer: 'Reads stock, the ledger and Tracer results. Records nothing.',
+    operator: 'Receives and dispatches stock, logs orders and runs the Tracer.',
+    admin: 'Everything an operator does, plus the catalog, vendors and material requests.',
+    super_admin: 'Everything, plus users, organisations and the audit trail.'
+};
+
 export function AdminUsersPage() {
     const { user: currentUser } = useAuth();
     const [users, setUsers] = useState([]);
@@ -42,9 +50,8 @@ export function AdminUsersPage() {
                     <p className="eyebrow">Admin</p>
                     <h1 className="wordmark">Users</h1>
                     <p className="muted small">
-                        Operators can run jobs (web or SQL).{' '}
-                        <strong>admin</strong> users run SQL-only (no web scrape picker).{' '}
-                        Viewers browse tiles only; they cannot start runs.
+                        <strong>Viewer</strong> reads only · <strong>Operator</strong> moves stock, logs orders and runs the
+                        Tracer · <strong>Admin</strong> also manages the catalog and vendors.
                     </p>
                 </div>
                 <div className="admin-actions">
@@ -171,6 +178,7 @@ function CreateUserForm({ onCreated }) {
                             </option>
                         ))}
                     </select>
+                    <span className="muted small admin-role-help">{ROLE_HELP[role]}</span>
                 </label>
             </div>
             {err && <p className="login-err">{err}</p>}
@@ -208,8 +216,9 @@ function UserRow({ user, isSelf, onChanged, onNotice }) {
         }
     }
 
+    const [confirmDelete, setConfirmDelete] = useState(false);
     async function remove() {
-        if (!window.confirm(`Delete user ${user.username}? This cannot be undone.`)) return;
+        setConfirmDelete(false);
         setBusy(true);
         try {
             const r = await apiFetch(`/api/admin/users/${user.id}`, { method: 'DELETE' });
@@ -232,7 +241,9 @@ function UserRow({ user, isSelf, onChanged, onNotice }) {
                 <td>
                     <span className={`env-chip ${isSuperAdmin ? 'env-big' : 'env-small'}`}>{user.role}</span>
                 </td>
-                <td>{user.active ? '✓' : '—'}</td>
+                <td>
+                    <span className={`admin-status ${user.active ? 'is-on' : 'is-off'}`}>{user.active ? 'Active' : 'Inactive'}</span>
+                </td>
                 <td className="muted small">{new Date(user.created_at).toLocaleString()}</td>
                 <td className="admin-row-actions">
                     <div className="admin-row-actions-inner">
@@ -265,15 +276,27 @@ function UserRow({ user, isSelf, onChanged, onNotice }) {
                                 >
                                     {user.active ? 'Deactivate' : 'Activate'}
                                 </button>
-                                <button
-                                    type="button"
-                                    className="chip chip-tool"
-                                    disabled={busy || isSelf}
-                                    title={isSelf ? 'You cannot delete your own account.' : undefined}
-                                    onClick={remove}
-                                >
-                                    Delete
-                                </button>
+                                {confirmDelete ? (
+                                    <span className="admin-confirm" role="alert">
+                                        <span>Delete {user.username} for good? Deactivate keeps their history.</span>
+                                        <button type="button" className="chip chip-tool chip-danger" disabled={busy} onClick={remove}>
+                                            Delete
+                                        </button>
+                                        <button type="button" className="chip chip-tool" onClick={() => setConfirmDelete(false)}>
+                                            Keep
+                                        </button>
+                                    </span>
+                                ) : (
+                                    <button
+                                        type="button"
+                                        className="chip chip-tool chip-danger"
+                                        disabled={busy || isSelf}
+                                        title={isSelf ? 'You cannot delete your own account.' : undefined}
+                                        onClick={() => setConfirmDelete(true)}
+                                    >
+                                        Delete
+                                    </button>
+                                )}
                             </>
                         )}
                     </div>
@@ -376,6 +399,7 @@ function EditUserForm({ user, isSelf, isSuperAdmin, busy, onSubmitPatch, onNotic
                                 </option>
                             ))}
                     </select>
+                    <span className="muted small admin-role-help">{ROLE_HELP[role]}</span>
                 </label>
                 <label>
                     Status

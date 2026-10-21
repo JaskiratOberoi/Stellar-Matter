@@ -6143,3 +6143,35 @@ details[open].inv-stock-card-sites .inv-stock-card-more {
     background: rgb(var(--nx-signal-info) / 0.08);
     font-size: var(--fs-sm);
 }
+
+/* Users admin: role meaning under the field, status in words, inline confirm. */
+.admin-role-help {
+    display: block;
+    margin-top: var(--sp-1);
+    font-weight: 400;
+    text-transform: none;
+    letter-spacing: 0;
+}
+
+.admin-status {
+    font: 600 var(--fs-3xs) / 1 var(--font-mono);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.admin-status.is-on {
+    color: rgb(var(--nx-signal-success));
+}
+
+.admin-status.is-off {
+    color: rgb(var(--nx-ink-3));
+}
+
+.admin-confirm {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--sp-2);
+    font-size: var(--fs-xs);
+    color: rgb(var(--nx-signal-warning));
+}
