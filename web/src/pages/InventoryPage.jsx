@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { apiUrl } from '../apiClient.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { useBuOptions } from '../hooks/useBuOptions.js';
@@ -198,7 +199,14 @@ function LocationCombobox({
         return source
             .map((g) => ({
                 label: g.label,
-                items: (g.items || []).filter((l) => !q || l.name.toLowerCase().includes(q))
+                // Codes match too: operators know sites as AGRA or Dl0298.
+                items: (g.items || []).filter(
+                    (l) =>
+                        !q ||
+                        l.name.toLowerCase().includes(q) ||
+                        String(l.bu_code || '').toLowerCase().includes(q) ||
+                        String(l.client_code || '').toLowerCase().includes(q)
+                )
             }))
             .filter((g) => g.items.length > 0);
     }, [groups, locations, q]);
@@ -264,6 +272,20 @@ function LocationCombobox({
     }
 
     const showEmpty = filteredSpecial.length === 0 && flatMatches.length === 0 && !canAdd;
+    const keyOptions = [...filteredSpecial.map((o) => ({ value: o.value })), ...flatMatches.map((l) => ({ value: l.id }))];
+    const keys = useComboKeys(
+        keyOptions,
+        (o) => pick(o.value),
+        () => {
+            setOpen(false);
+            setQuery('');
+        }
+    );
+    let optIdx = -1;
+    const hl = () => {
+        optIdx += 1;
+        return optIdx === keys.active ? ' is-hl' : '';
+    };
 
     return (
         <div className={`inv-combo${open ? ' is-open' : ''}${disabled ? ' is-disabled' : ''}`} ref={rootRef}>
@@ -273,15 +295,9 @@ function LocationCombobox({
                     className="inv-combo-input"
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
-                    onKeyDown={(e) => {
-                        if (e.key === 'Escape') {
-                            setOpen(false);
-                            setQuery('');
-                        } else if (e.key === 'Enter' && canAdd && flatMatches.length === 0 && filteredSpecial.length === 0) {
-                            e.preventDefault();
-                            onAddNew();
-                        }
-                    }}
+                    // Enter picks the highlighted match. Adding a new location
+                    // is only ever an explicit click on "+ Add new".
+                    onKeyDown={keys.onKeyDown}
                     placeholder={displayLabel || 'Type to search…'}
                     disabled={disabled || creating}
                     aria-autocomplete="list"
@@ -318,7 +334,7 @@ function LocationCombobox({
                         <button
                             key={o.value}
                             type="button"
-                            className={`inv-combo-option${o.value === value ? ' is-active' : ''}`}
+                            className={`inv-combo-option${o.value === value ? ' is-active' : ''}${hl()}`}
                             role="option"
                             aria-selected={o.value === value}
                             onClick={() => pick(o.value)}
@@ -333,12 +349,15 @@ function LocationCombobox({
                                 <button
                                     key={l.id}
                                     type="button"
-                                    className={`inv-combo-option${l.id === value ? ' is-active' : ''}`}
+                                    className={`inv-combo-option${l.id === value ? ' is-active' : ''}${hl()}`}
                                     role="option"
                                     aria-selected={l.id === value}
                                     onClick={() => pick(l.id)}
                                 >
                                     <span>{l.name}</span>
+                                    {l.bu_code && l.bu_code.toLowerCase() !== l.name.toLowerCase() && (
+                                        <span className="inv-combo-kind">{l.bu_code}</span>
+                                    )}
                                     {l.kind === 'lab' && <span className="inv-combo-kind">lab</span>}
                                 </button>
                             ))}
@@ -368,7 +387,17 @@ function LocationCombobox({
 export function InventoryPage() {
     const { user, authRequired } = useAuth();
     const inventory = useInventory();
-    const [view, setView] = useState('stock');
+    // The open tab lives in the URL (?tab=ledger): a refresh or a PWA relaunch
+    // keeps the place, and Back steps through tabs instead of leaving the app.
+    const [searchParams, setSearchParams] = useSearchParams();
+    const tabParam = searchParams.get('tab');
+    const setView = useCallback(
+        (v) => {
+            if (v === (searchParams.get('tab') || 'stock')) return;
+            setSearchParams(v === 'stock' ? {} : { tab: v });
+        },
+        [searchParams, setSearchParams]
+    );
     const [flash, setFlash] = useState(null);
     const [seeding, setSeeding] = useState(false);
 
@@ -377,11 +406,31 @@ export function InventoryPage() {
     const canMove = !authRequired || (role && MOVER_ROLES.has(role));
     const isSuperAdmin = role === 'super_admin';
 
-    const showFlash = useCallback((msg) => {
-        setFlash(msg);
+    // Saves report in a toast by the action, not a banner at the top of the
+    // page. A save that wrote a few ledger rows can be undone from it (each
+    // row is voided); bigger batches point to the Ledger instead.
+    const showFlash = useCallback((msg, opts = {}) => {
+        const ids = Array.isArray(opts.undoIds) ? opts.undoIds.filter(Boolean) : [];
+        const undoIds = ids.length > 0 && ids.length <= UNDO_MAX_ROWS ? ids : null;
+        setFlash({ text: msg, undoIds, n: Date.now() });
         window.clearTimeout(showFlash._t);
-        showFlash._t = window.setTimeout(() => setFlash(null), 4500);
+        showFlash._t = window.setTimeout(() => setFlash(null), undoIds ? 10000 : 5000);
     }, []);
+    const [undoing, setUndoing] = useState(false);
+    const undoFlash = useCallback(async () => {
+        if (!flash || !flash.undoIds) return;
+        window.clearTimeout(showFlash._t);
+        setUndoing(true);
+        try {
+            for (const id of flash.undoIds) await inventory.voidMovement(id);
+            await inventory.reload();
+            showFlash(`Undone: ${fmt(flash.undoIds.length)} entr${flash.undoIds.length === 1 ? 'y' : 'ies'} voided.`);
+        } catch (e) {
+            showFlash(`Couldn’t undo: ${e.message || e}. Void it from the Ledger instead.`);
+        } finally {
+            setUndoing(false);
+        }
+    }, [flash, inventory, showFlash]);
 
     const activeMaterials = inventory.materials.filter((m) => m.active);
     const activeLocations = inventory.locations.filter((l) => l.active);
@@ -407,14 +456,21 @@ export function InventoryPage() {
     const visibleViews = VIEWS.filter(
         (v) => (!v.adminOnly || canManageCatalog) && (!v.superOnly || isSuperAdmin)
     );
+    // An unknown or not-permitted tab in the URL falls back to Stock.
+    const view = visibleViews.some((v) => v.id === tabParam) ? tabParam : 'stock';
 
     // A purchase order handed to the Receive view pre-fills it; cleared once
     // the receipt is recorded or the operator abandons it.
     const [receiveOrder, setReceiveOrder] = useState(null);
+    // A figure can open a view pre-filtered; the preset remounts that view
+    // (via its key) so the filter applies once and stays editable after.
+    const [preset, setPreset] = useState(null);
     const goto = useCallback((v, opts) => {
         if (v === 'receive' && opts && opts.order) setReceiveOrder(opts.order);
+        setPreset(opts && opts.preset ? { view: v, n: Date.now(), ...opts.preset } : null);
         setView(v);
-    }, []);
+    }, [setView]);
+    const presetFor = (v) => (preset && preset.view === v ? preset : null);
 
     return (
         <main className="inv-shell">
@@ -435,7 +491,19 @@ export function InventoryPage() {
             </header>
 
             <div className={`inv-refresh-bar${inventory.refreshing ? ' is-active' : ''}`} aria-hidden="true" />
-            {flash && <div className="inv-flash" role="status">{flash}</div>}
+            {flash && (
+                <div className="inv-toast" role="status" key={flash.n}>
+                    <span>{flash.text}</span>
+                    {flash.undoIds && (
+                        <button type="button" className="inv-toast-btn" onClick={undoFlash} disabled={undoing}>
+                            {undoing ? 'Undoing…' : 'Undo'}
+                        </button>
+                    )}
+                    <button type="button" className="inv-toast-x" aria-label="Dismiss" onClick={() => setFlash(null)}>
+                        ×
+                    </button>
+                </div>
+            )}
             {inventory.error && <div className="results-error nexus-card">{inventory.error}</div>}
 
             {inventory.loading ? (
@@ -455,8 +523,16 @@ export function InventoryPage() {
                     {view === 'stock' && (
                         <FiguresStrip
                             summary={inventory.summary}
+                            materials={inventory.materials}
                             locations={inventory.locations}
-                            onLowStock={() => goto('stock')}
+                            balances={inventory.balances}
+                            fetchMovements={inventory.fetchMovements}
+                            fetchOrders={inventory.fetchOrders}
+                            onLowStock={() => goto('stock', { preset: { lowOnly: true } })}
+                            onToday={() =>
+                                goto('ledger', { preset: { from: todayDateInput(), to: todayDateInput(), hideVoided: true } })
+                            }
+                            onOrders={() => goto('orders')}
                         />
                     )}
 
@@ -504,7 +580,15 @@ export function InventoryPage() {
                     )}
 
                     <div className="inv-view">
-                        {view === 'stock' && <StockView inventory={inventory} showRecorded={isSuperAdmin} onGoto={goto} />}
+                        {view === 'stock' && (
+                            <StockView
+                                key={presetFor('stock') ? presetFor('stock').n : 'stock'}
+                                inventory={inventory}
+                                showRecorded={isSuperAdmin}
+                                onGoto={goto}
+                                initialLowOnly={!!(presetFor('stock') && presetFor('stock').lowOnly)}
+                            />
+                        )}
                         {view === 'orders' && (
                             <OrdersView
                                 inventory={inventory}
@@ -536,6 +620,16 @@ export function InventoryPage() {
                         )}
                         {view === 'ledger' && (
                             <LedgerView
+                                key={presetFor('ledger') ? presetFor('ledger').n : 'ledger'}
+                                initialFilters={
+                                    presetFor('ledger')
+                                        ? {
+                                              from: presetFor('ledger').from || '',
+                                              to: presetFor('ledger').to || '',
+                                              hideVoided: !!presetFor('ledger').hideVoided
+                                          }
+                                        : null
+                                }
                                 inventory={inventory}
                                 canMove={canMove}
                                 showRecorded={role === 'super_admin'}
@@ -611,56 +705,108 @@ function OnboardingBoard({ canManageCatalog, seeding, onSeed, onManual }) {
 
 // -- Figures ---------------------------------------------------------------
 
-function FiguresStrip({ summary, locations, onLowStock }) {
+// The glance strip answers "what needs me" first: what is low, what moved
+// today, what is due in. Each figure opens the view it summarises, already
+// filtered. Catalog counts stay as quieter context at the end.
+function FiguresStrip({ summary, materials, locations, balances, fetchMovements, fetchOrders, onLowStock, onToday, onOrders }) {
+    const [today, setToday] = useState(null);
+    const [orders, setOrders] = useState(null);
+
+    // Refetch when balances change (every save reloads them).
+    useEffect(() => {
+        let alive = true;
+        fetchMovements({ from: dateInputToIsoDayStart(todayDateInput()), voided: 'exclude', limit: 200 })
+            .then((j) => {
+                if (!alive) return;
+                const rows = j.movements || [];
+                const sum = (k) => rows.filter((r) => r.kind === k).reduce((a, r) => a + (Number(r.qty_base) || 0), 0);
+                setToday({ count: Number(j.total) || rows.length, inQty: sum('receipt'), outQty: sum('dispatch') });
+            })
+            .catch(() => alive && setToday(null));
+        fetchOrders({ status: 'placed' })
+            .then((j) => {
+                if (!alive) return;
+                const list = j.orders || [];
+                const t = todayDateInput();
+                const week = shiftDateInput(7);
+                setOrders({
+                    open: list.length,
+                    overdue: list.filter((o) => o.expected_on && o.expected_on < t).length,
+                    dueSoon: list.filter((o) => o.expected_on && o.expected_on >= t && o.expected_on <= week).length
+                });
+            })
+            .catch(() => alive && setOrders(null));
+        return () => {
+            alive = false;
+        };
+    }, [fetchMovements, fetchOrders, balances]);
+
     if (!summary) return null;
     const low = summary.low_stock ? summary.low_stock.length : 0;
+    const activeMats = (materials || []).filter((m) => m.active);
+    const withLevel = activeMats.filter((m) => m.reorder_level > 0).length;
     const activeLocs = Array.isArray(locations) ? locations.filter((l) => l.active) : [];
-    const storeCount = activeLocs.filter((l) => l.kind === 'store').length;
-    const locationCap =
-        activeLocs.length > 0
-            ? `${fmt(storeCount)} ${storeCount === 1 ? 'store' : 'stores'}, ${fmt(activeLocs.length - storeCount)} BUs and labs`
-            : 'stores, BUs and labs';
     const voided = typeof summary.movements_voided === 'number' ? summary.movements_voided : null;
-    const ledgerCap =
-        voided === null
-            ? 'receipts and dispatches'
-            : voided === 0
-              ? 'none voided'
-              : `${fmt(voided)} voided, excluded from stock`;
+
+    const lowCap = low
+        ? 'tap to see them'
+        : withLevel === 0
+          ? 'no reorder levels set yet'
+          : `${fmt(withLevel)} of ${fmt(activeMats.length)} have a level set`;
+    const ordersAlert = !!(orders && orders.overdue > 0);
+    let ordersCap = 'placed with vendors';
+    if (orders) {
+        if (orders.overdue > 0) {
+            ordersCap = `${fmt(orders.overdue)} overdue${orders.dueSoon ? ` · ${fmt(orders.dueSoon)} due this week` : ''}`;
+        } else if (orders.dueSoon > 0) {
+            ordersCap = `${fmt(orders.dueSoon)} due this week`;
+        } else {
+            ordersCap = orders.open ? 'none due this week' : 'nothing on order';
+        }
+    }
+    let todayCap = 'ledger entries today';
+    if (today) todayCap = today.count ? `+${fmt(today.inQty)} in · −${fmt(today.outQty)} out` : 'no entries yet today';
+
     return (
         <section className="inv-figures" aria-label="Inventory at a glance">
-            <div className="inv-figure">
-                <span className="inv-figure-num">{fmt(summary.materials)}</span>
-                <span className="inv-figure-label">Active materials</span>
-                <span className="inv-figure-cap">tracked in the catalog</span>
-            </div>
-            <div className="inv-figure">
-                <span className="inv-figure-num">{fmt(summary.locations)}</span>
-                <span className="inv-figure-label">Locations</span>
-                <span className="inv-figure-cap">{locationCap}</span>
-            </div>
-            <div className="inv-figure">
-                <span className="inv-figure-num">{fmt(summary.vendors)}</span>
-                <span className="inv-figure-label">Vendors</span>
-                <span className="inv-figure-cap">onboarded suppliers</span>
-            </div>
-            <div className="inv-figure">
-                <span className="inv-figure-num">{fmt(summary.movements)}</span>
-                <span className="inv-figure-label">Ledger entries</span>
-                <span className="inv-figure-cap">{ledgerCap}</span>
-            </div>
             <button
                 type="button"
                 className={`inv-figure inv-figure-btn${low ? ' is-alert' : ''}`}
                 onClick={low ? onLowStock : undefined}
-                title={low ? 'View stock' : 'All materials above reorder level'}
+                disabled={!low}
             >
                 <span className="inv-figure-num">{fmt(low)}</span>
                 <span className="inv-figure-label">Below reorder</span>
-                <span className="inv-figure-cap">
-                    {low ? 'needs restocking' : 'all above reorder level'}
-                </span>
+                <span className="inv-figure-cap">{lowCap}</span>
             </button>
+            <button type="button" className="inv-figure inv-figure-btn" onClick={onToday}>
+                <span className="inv-figure-num">{today ? fmt(today.count) : '—'}</span>
+                <span className="inv-figure-label">Moved today</span>
+                <span className="inv-figure-cap">{todayCap}</span>
+            </button>
+            <button
+                type="button"
+                className={`inv-figure inv-figure-btn${ordersAlert ? ' is-alert' : ''}`}
+                onClick={onOrders}
+            >
+                <span className="inv-figure-num">{orders ? fmt(orders.open) : '—'}</span>
+                <span className="inv-figure-label">Open orders</span>
+                <span className="inv-figure-cap">{ordersCap}</span>
+            </button>
+            <div className="inv-figure">
+                <span className="inv-figure-num">{fmt(summary.materials)}</span>
+                <span className="inv-figure-label">Materials</span>
+                <span className="inv-figure-cap">
+                    {fmt(activeLocs.length || summary.locations)} locations · {fmt(summary.vendors)} vendors
+                </span>
+            </div>
+            <div className="inv-figure">
+                <span className="inv-figure-num">{fmt(summary.movements)}</span>
+                <span className="inv-figure-label">Ledger entries</span>
+                <span className="inv-figure-cap">
+                    {voided ? `${fmt(voided)} voided, excluded from stock` : 'none voided'}
+                </span>
+            </div>
         </section>
     );
 }
@@ -685,7 +831,7 @@ function EmptyState({ icon = 'box', title, children, action }) {
 // showRecorded (super admin only): every cell's tooltip carries when that
 // balance last changed and by whom, and a trailing column shows the same for
 // the material's most recent change anywhere.
-function StockView({ inventory, showRecorded = false, onGoto }) {
+function StockView({ inventory, showRecorded = false, onGoto, initialLowOnly = false }) {
     const { materials, locations, balances } = inventory;
     const activeMaterials = materials.filter((m) => m.active);
     const activeLocations = locations.filter((l) => l.active);
@@ -706,6 +852,8 @@ function StockView({ inventory, showRecorded = false, onGoto }) {
     const [query, setQuery] = useState('');
     const [hideEmpty, setHideEmpty] = useState(false);
     const [showAllLocations, setShowAllLocations] = useState(false);
+    // Same rule as the summary: stock across all stores under the reorder level.
+    const [lowOnly, setLowOnly] = useState(initialLowOnly);
 
     const storeIds = useMemo(
         () => new Set(activeLocations.filter((l) => l.kind === 'store').map((l) => l.id)),
@@ -742,9 +890,14 @@ function StockView({ inventory, showRecorded = false, onGoto }) {
         return activeMaterials.filter((m) => {
             if (q && !m.name.toLowerCase().includes(q)) return false;
             if (hideEmpty && totalFor(m.id) === 0) return false;
+            if (lowOnly) {
+                if (!(m.reorder_level > 0)) return false;
+                const storeTotal = [...storeIds].reduce((a, id) => a + (balMap.get(balanceKey(m.id, id)) || 0), 0);
+                if (storeTotal >= m.reorder_level) return false;
+            }
             return true;
         });
-    }, [activeMaterials, query, hideEmpty, totalFor]);
+    }, [activeMaterials, query, hideEmpty, totalFor, lowOnly, storeIds, balMap]);
 
     if (!activeMaterials.length || !activeLocations.length) {
         return (
@@ -793,6 +946,11 @@ function StockView({ inventory, showRecorded = false, onGoto }) {
                     </span>
                     <span className="inv-toggle-label">Hide zero rows</span>
                 </label>
+                {lowOnly && (
+                    <button type="button" className="chip chip-tool active" onClick={() => setLowOnly(false)}>
+                        Below reorder only ✕
+                    </button>
+                )}
                 {(hiddenLocationCount > 0 || showAllLocations) && (
                     <button
                         type="button"
@@ -1019,6 +1177,73 @@ function makeLine(extra = {}) {
     return { key: `ln-${_lineSeq}`, materialId: '', packSize: '', packQty: '', photoUrl: '', uploading: false, ...extra };
 }
 
+// Unsaved Receive / Dispatch entries are kept on the device, so a reload (an
+// Android camera handoff often kills the page) or a PWA relaunch resumes the
+// form. Drafts expire after a day; a successful save clears them.
+const DRAFT_TTL_MS = 24 * 60 * 60 * 1000;
+
+function useFormDraft(key, { snapshot, isDirty, restore, enabled = true }) {
+    const [restoredAt, setRestoredAt] = useState(null);
+    const restoreRef = useRef(restore);
+    restoreRef.current = restore;
+    // True from restoring a draft until the restored values reach the form;
+    // until then the form still looks empty and must not overwrite the draft.
+    const restoringRef = useRef(false);
+
+    useEffect(() => {
+        if (!enabled) return;
+        try {
+            const d = JSON.parse(localStorage.getItem(key) || 'null');
+            if (d && d.at && Date.now() - d.at < DRAFT_TTL_MS && d.data) {
+                restoringRef.current = true;
+                restoreRef.current(d.data);
+                setRestoredAt(new Date(d.at));
+            } else if (d) {
+                localStorage.removeItem(key);
+            }
+        } catch {
+            /* unreadable draft: ignore */
+        }
+    }, [key, enabled]);
+
+    const json = JSON.stringify(snapshot);
+    useEffect(() => {
+        if (!enabled) return;
+        if (restoringRef.current) {
+            if (!isDirty) return;
+            restoringRef.current = false;
+        }
+        try {
+            if (isDirty) localStorage.setItem(key, JSON.stringify({ at: Date.now(), data: JSON.parse(json) }));
+            else {
+                localStorage.removeItem(key);
+                setRestoredAt(null);
+            }
+        } catch {
+            /* storage full or blocked */
+        }
+    }, [key, json, isDirty, enabled]);
+
+    return { restoredAt };
+}
+
+function DraftNote({ restoredAt, onDiscard }) {
+    if (!restoredAt) return null;
+    return (
+        <p className="inv-draft-note" role="status">
+            Restored your unsaved entry from{' '}
+            {restoredAt.toLocaleString(undefined, { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}.{' '}
+            <button type="button" className="inv-linkbtn" onClick={onDiscard}>
+                Discard it
+            </button>
+        </p>
+    );
+}
+
+const draftLines = (lines) =>
+    lines.map(({ materialId, packSize, packQty, photoUrl }) => ({ materialId, packSize, packQty, photoUrl }));
+const linesDirty = (lines) => lines.some((l) => l.materialId || l.packQty);
+
 // A running list of material lines for an order, with add/remove/patch helpers.
 function useOrderLines() {
     const [lines, setLines] = useState(() => [makeLine()]);
@@ -1077,39 +1302,193 @@ function LinePhoto({ url, uploading, onPick, onClear }) {
     );
 }
 
-// A material <select>; when a vendor is chosen its supplied items lead in their
-// own optgroup, the rest follow. Reused by both order forms (dispatch passes no
-// vendor, so it just lists everything).
+// Undo from the save toast voids each row one request at a time, which the
+// write rate limit (30/min) caps; anything larger is corrected in the Ledger.
+const UNDO_MAX_ROWS = 10;
+
+// Ctrl/Cmd+Enter records the form from any field, so a keyboard user never
+// has to reach for the docket button.
+function submitOnCtrlEnter(e) {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        e.currentTarget.requestSubmit();
+    }
+}
+
+// Materials picked recently on this device lead the material picker, so the
+// repeat dispatch ("same five things to KARNAL") is a tap, not a scroll.
+const LS_RECENT_MATERIALS = 'stellar-matter.inventory.recentMaterials';
+const RECENT_MATERIALS_MAX = 5;
+
+function readRecentMaterials() {
+    try {
+        const v = JSON.parse(localStorage.getItem(LS_RECENT_MATERIALS) || '[]');
+        return Array.isArray(v) ? v.map(String) : [];
+    } catch {
+        return [];
+    }
+}
+
+function rememberMaterial(id) {
+    if (!id) return;
+    try {
+        const next = [id, ...readRecentMaterials().filter((x) => x !== id)].slice(0, RECENT_MATERIALS_MAX);
+        localStorage.setItem(LS_RECENT_MATERIALS, JSON.stringify(next));
+    } catch {
+        /* storage blocked: no recents */
+    }
+}
+
+// Keyboard for the comboboxes: ↑/↓ move through the visible options, Enter
+// picks the highlighted one (the first match by default), Escape closes.
+function useComboKeys(options, onPick, onClose) {
+    const [active, setActive] = useState(0);
+    useEffect(() => {
+        setActive(0);
+    }, [options.length]);
+    function onKeyDown(e) {
+        if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            setActive((i) => Math.min(i + 1, Math.max(options.length - 1, 0)));
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            setActive((i) => Math.max(i - 1, 0));
+        } else if (e.key === 'Enter') {
+            e.preventDefault();
+            if (options[active]) onPick(options[active]);
+        } else if (e.key === 'Escape') {
+            onClose();
+        }
+    }
+    return { active, setActive, onKeyDown };
+}
+
+// A searchable material picker: recents first, then (when a vendor is chosen)
+// the materials it supplies, then everything else. Replaces a 55-item <select>.
 function MaterialSelect({ value, onChange, materials, vendor }) {
-    const suppliedIds = vendor ? new Set(vendor.material_ids || []) : null;
-    const supplied = suppliedIds ? materials.filter((m) => suppliedIds.has(m.id)) : [];
-    const rest = suppliedIds ? materials.filter((m) => !suppliedIds.has(m.id)) : materials;
+    const rootRef = useRef(null);
+    const inputRef = useRef(null);
+    const [open, setOpen] = useState(false);
+    const [query, setQuery] = useState('');
+    const selected = materials.find((m) => m.id === value) || null;
+    const q = query.trim().toLowerCase();
+
+    const groups = useMemo(() => {
+        if (!open) return [];
+        const match = (m) => !q || m.name.toLowerCase().includes(q);
+        const byId = new Map(materials.map((m) => [m.id, m]));
+        const used = new Set();
+        const take = (list) => {
+            const out = list.filter((m) => m && match(m) && !used.has(m.id));
+            out.forEach((m) => used.add(m.id));
+            return out;
+        };
+        const out = [];
+        const recent = take(readRecentMaterials().map((id) => byId.get(id)));
+        if (recent.length) out.push({ label: 'Recently used', items: recent });
+        if (vendor) {
+            const ids = new Set(vendor.material_ids || []);
+            const supplied = take(materials.filter((m) => ids.has(m.id)));
+            if (supplied.length) out.push({ label: `Supplied by ${vendor.name}`, items: supplied });
+        }
+        const rest = take(materials);
+        if (rest.length) out.push({ label: out.length ? 'All materials' : null, items: rest });
+        return out;
+    }, [open, q, materials, vendor]);
+    const flat = groups.flatMap((g) => g.items);
+
+    function close() {
+        setOpen(false);
+        setQuery('');
+    }
+    function pick(m) {
+        rememberMaterial(m.id);
+        onChange(m.id);
+        close();
+    }
+    const keys = useComboKeys(flat, pick, close);
+
+    useEffect(() => {
+        if (!open) return undefined;
+        function onDoc(e) {
+            if (rootRef.current && !rootRef.current.contains(e.target)) close();
+        }
+        document.addEventListener('mousedown', onDoc);
+        return () => document.removeEventListener('mousedown', onDoc);
+    }, [open]);
+
+    let idx = -1;
     return (
-        <select value={value} onChange={(e) => onChange(e.target.value)} required>
-            <option value="">— select —</option>
-            {suppliedIds ? (
-                <>
-                    {supplied.length > 0 && (
-                        <optgroup label={`Supplied by ${vendor.name}`}>
-                            {supplied.map((m) => (
-                                <option key={m.id} value={m.id}>{m.name}</option>
-                            ))}
-                        </optgroup>
-                    )}
-                    {rest.length > 0 && (
-                        <optgroup label="Other materials">
-                            {rest.map((m) => (
-                                <option key={m.id} value={m.id}>{m.name}</option>
-                            ))}
-                        </optgroup>
-                    )}
-                </>
+        <div className={`inv-combo inv-mat-combo${open ? ' is-open' : ''}`} ref={rootRef}>
+            {open ? (
+                <input
+                    ref={inputRef}
+                    className="inv-combo-input"
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    onKeyDown={keys.onKeyDown}
+                    placeholder={selected ? selected.name : 'Type to search…'}
+                    aria-autocomplete="list"
+                    aria-expanded="true"
+                    role="combobox"
+                    autoComplete="off"
+                    autoFocus
+                />
             ) : (
-                materials.map((m) => (
-                    <option key={m.id} value={m.id}>{m.name}</option>
-                ))
+                <button
+                    type="button"
+                    className={`inv-combo-trigger${value ? '' : ' is-placeholder'}`}
+                    onClick={() => setOpen(true)}
+                    onKeyDown={(e) => {
+                        if (e.key === 'ArrowDown' || (e.key.length === 1 && /\S/.test(e.key))) {
+                            e.preventDefault();
+                            setOpen(true);
+                            if (e.key.length === 1) setQuery(e.key);
+                        }
+                    }}
+                    aria-haspopup="listbox"
+                    aria-expanded="false"
+                >
+                    {selected ? selected.name : '— select material —'}
+                </button>
             )}
-        </select>
+            <input
+                className="inv-combo-required"
+                tabIndex={-1}
+                value={value || ''}
+                onChange={() => {}}
+                required
+                aria-hidden="true"
+            />
+            {open && (
+                <div className="inv-combo-menu" role="listbox">
+                    {groups.map((g) => (
+                        <div key={g.label || '_all'} className="inv-combo-group">
+                            {g.label && <div className="inv-combo-group-label">{g.label}</div>}
+                            {g.items.map((m) => {
+                                idx += 1;
+                                const i = idx;
+                                return (
+                                    <button
+                                        key={m.id}
+                                        type="button"
+                                        className={`inv-combo-option${m.id === value ? ' is-active' : ''}${i === keys.active ? ' is-hl' : ''}`}
+                                        role="option"
+                                        aria-selected={m.id === value}
+                                        onMouseEnter={() => keys.setActive(i)}
+                                        onClick={() => pick(m)}
+                                    >
+                                        <span>{m.name}</span>
+                                        <span className="inv-combo-kind">{m.base_unit}</span>
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    ))}
+                    {flat.length === 0 && <div className="inv-combo-empty">No materials match</div>}
+                </div>
+            )}
+        </div>
     );
 }
 
@@ -1449,7 +1828,7 @@ function OrderForm({ inventory, onDone }) {
     return (
         <div className="inv-form-layout inv-order-form-layout">
             <section className="inv-panel">
-                <form id="inv-order-form" className="inv-order-form" onSubmit={onSubmit}>
+                <form id="inv-order-form" className="inv-order-form" onSubmit={onSubmit} onKeyDown={submitOnCtrlEnter}>
                     <FormStep n="01" title="Vendor & delivery" hint="Applies to every line below">
                         <label className="inv-field">
                             <span>Vendor</span>
@@ -1649,7 +2028,7 @@ function OrdersView({ inventory, canMove, showRecorded = false, onDone, onGoto }
             onDone(`${verb === 'Cancel' ? 'Cancelled' : verb === 'Reopen' ? 'Reopened' : 'Closed'} order${o.reference ? ` ${o.reference}` : ''}.`);
             load();
         } catch (e) {
-            window.alert(String(e.message || e));
+            onDone(String(e.message || e));
         }
     }
 
@@ -1661,7 +2040,7 @@ function OrdersView({ inventory, canMove, showRecorded = false, onDone, onGoto }
             onDone(`Attached PI to order${o.reference ? ` ${o.reference}` : ''}.`);
             load();
         } catch (e) {
-            window.alert(String(e.message || e));
+            onDone(String(e.message || e));
         } finally {
             setPiBusyId(null);
         }
@@ -1863,6 +2242,26 @@ function ReceiveView({ inventory, canMove, showRecorded = false, onDone, onGoto,
     const [busy, setBusy] = useState(false);
     const [err, setErr] = useState(null);
     const { lines, addLine, removeLine, updateLine, resetLines, replaceLines } = useOrderLines();
+    const draft = useFormDraft('stellar-matter.draft.receive', {
+        // Receiving a purchase order pre-fills the form; the order wins.
+        enabled: !order,
+        snapshot: { vendorId, toLocationId, reference, note, occurredOn, lines: draftLines(lines) },
+        isDirty: linesDirty(lines) || Boolean(reference || note),
+        restore: (d) => {
+            if (d.vendorId) setVendorId(d.vendorId);
+            if (d.toLocationId) setToLocationId(d.toLocationId);
+            setReference(d.reference || '');
+            setNote(d.note || '');
+            if (d.occurredOn) setOccurredOn(d.occurredOn);
+            if (Array.isArray(d.lines) && d.lines.length) replaceLines(d.lines);
+        }
+    });
+    const discardDraft = () => {
+        resetLines();
+        setReference('');
+        setNote('');
+        setOccurredOn(todayDateInput());
+    };
     // Set when this receipt fulfils a purchase order; sent as order_id so the
     // server links the movements and closes the order in one transaction.
     const [orderId, setOrderId] = useState(null);
@@ -1920,7 +2319,7 @@ function ReceiveView({ inventory, canMove, showRecorded = false, onDone, onGoto,
             updateLine(key, { photoUrl: url, uploading: false });
         } catch (e) {
             updateLine(key, { uploading: false });
-            window.alert(`Photo upload failed: ${e.message || e}`);
+            setErr(`Photo upload failed: ${e.message || e}`);
         }
     }
 
@@ -1954,7 +2353,10 @@ function ReceiveView({ inventory, canMove, showRecorded = false, onDone, onGoto,
             const n = (result.movements && result.movements.length) || validLines.length;
             rememberLocation(LS_RECEIVE_DEST, toLocationId);
             onDone(
-                `Received ${fmt(totalUnits)} units across ${fmt(n)} material${n === 1 ? '' : 's'}${orderId ? ` — order ${orderLabel} closed` : ''}.`
+                `Received ${fmt(totalUnits)} units across ${fmt(n)} material${n === 1 ? '' : 's'}${orderId ? ` — order ${orderLabel} closed` : ''}.`,
+                // Undoing would void the stock but leave the order closed, so
+                // order receipts are corrected from the Ledger.
+                orderId ? undefined : { undoIds: (result.movements || []).map((m) => m.id) }
             );
             if (orderId) dropOrder();
             resetLines();
@@ -2017,7 +2419,8 @@ function ReceiveView({ inventory, canMove, showRecorded = false, onDone, onGoto,
                         </button>
                     )}
                 </SectionHead>
-                <form id="inv-receive-form" className="inv-order-form" onSubmit={onSubmit}>
+                <form id="inv-receive-form" className="inv-order-form" onSubmit={onSubmit} onKeyDown={submitOnCtrlEnter}>
+                    <DraftNote restoredAt={draft.restoredAt} onDiscard={discardDraft} />
                     <FormStep n="01" title="From whom & where" hint="Applies to every line below">
                         <label className="inv-field">
                             <span>Vendor</span>
@@ -2298,7 +2701,26 @@ function DispatchView({ inventory, canMove, showRecorded = false, onDone, onGoto
     const [note, setNote] = useState('');
     const [busy, setBusy] = useState(false);
     const [err, setErr] = useState(null);
-    const { lines, addLine, removeLine, updateLine, resetLines } = useOrderLines();
+    const { lines, addLine, removeLine, updateLine, resetLines, replaceLines } = useOrderLines();
+    const draft = useFormDraft('stellar-matter.draft.dispatch', {
+        snapshot: { fromLocationId, toLocationId, reference, note, occurredOn, lines: draftLines(lines) },
+        isDirty: linesDirty(lines) || Boolean(reference || note),
+        restore: (d) => {
+            if (d.fromLocationId) setFromLocationId(d.fromLocationId);
+            if (d.toLocationId) setToLocationId(d.toLocationId);
+            setReference(d.reference || '');
+            setNote(d.note || '');
+            if (d.occurredOn) setOccurredOn(d.occurredOn);
+            if (Array.isArray(d.lines) && d.lines.length) replaceLines(d.lines);
+        }
+    });
+    const discardDraft = () => {
+        resetLines();
+        setToLocationId('');
+        setReference('');
+        setNote('');
+        setOccurredOn(todayDateInput());
+    };
 
     useEffect(() => {
         if (!buOptions.options.length) return;
@@ -2372,7 +2794,7 @@ function DispatchView({ inventory, canMove, showRecorded = false, onDone, onGoto
             updateLine(key, { photoUrl: url, uploading: false });
         } catch (e) {
             updateLine(key, { uploading: false });
-            window.alert(`Photo upload failed: ${e.message || e}`);
+            setErr(`Photo upload failed: ${e.message || e}`);
         }
     }
 
@@ -2433,7 +2855,10 @@ function DispatchView({ inventory, canMove, showRecorded = false, onDone, onGoto
                 const nDest = (result.destination_names && result.destination_names.length) || destCount;
                 onDone(`Dispatched ${fmt(validLines.length)} material${validLines.length === 1 ? '' : 's'} to ${fmt(nDest)} BUs/labs (${fmt(moved)} movements).`);
             } else {
-                onDone(`Dispatched ${fmt(validLines.length)} material${validLines.length === 1 ? '' : 's'} (${fmt(totalOut)} units) to ${dest ? dest.name : ''}.`);
+                onDone(
+                    `Dispatched ${fmt(validLines.length)} material${validLines.length === 1 ? '' : 's'} (${fmt(totalOut)} units) to ${dest ? dest.name : ''}.`,
+                    { undoIds: (result.movements || []).map((m) => m.id) }
+                );
             }
             resetLines();
             setReference('');
@@ -2486,7 +2911,8 @@ function DispatchView({ inventory, canMove, showRecorded = false, onDone, onGoto
                     title="Dispatch or transfer stock"
                     caption="Pick where it goes, then list every material in the shipment"
                 />
-                <form id="inv-dispatch-form" className="inv-order-form" onSubmit={onSubmit}>
+                <form id="inv-dispatch-form" className="inv-order-form" onSubmit={onSubmit} onKeyDown={submitOnCtrlEnter}>
+                    <DraftNote restoredAt={draft.restoredAt} onDiscard={discardDraft} />
                     <FormStep n="01" title="Route & paperwork" hint="Applies to every line below">
                         <label className="inv-field">
                             <span>From</span>
@@ -3161,7 +3587,7 @@ const LEDGER_PAGE = 50;
 // showRecorded (super admin only): under the movement's own date, also print
 // when the row was actually keyed in and by whom, so a back-dated entry is
 // visible as such.
-function LedgerView({ inventory, canMove, showRecorded = false, onDone }) {
+function LedgerView({ inventory, canMove, showRecorded = false, onDone, initialFilters = null }) {
     const { materials, locations, vendors, fetchMovements, fetchMovementUsers, voidMovement, reload } = inventory;
     const [rows, setRows] = useState([]);
     // Authors of past movements, for the "recorded by" filter. Only fetched
@@ -3174,7 +3600,7 @@ function LedgerView({ inventory, canMove, showRecorded = false, onDone }) {
     // must not flash "No movements yet" before it lands.
     const [loading, setLoading] = useState(true);
     const [err, setErr] = useState(null);
-    const [filters, setFilters] = useState(LEDGER_EMPTY_FILTERS);
+    const [filters, setFilters] = useState(() => ({ ...LEDGER_EMPTY_FILTERS, ...(initialFilters || {}) }));
     // The search box updates on every keystroke; the query we actually send
     // trails it so a fast typist doesn't fire a request per character.
     const [search, setSearch] = useState('');
@@ -3264,30 +3690,24 @@ function LedgerView({ inventory, canMove, showRecorded = false, onDone }) {
         [locations]
     );
 
-    async function onVoid(row) {
-        if (!window.confirm(`Void this ${row.kind}? It stays in history but stops affecting balances.`)) return;
+    // Voiding asks inside the row: confirm, then (only if the server says it
+    // would overdraw a location) an explicit force step. No browser dialogs.
+    const [voidState, setVoidState] = useState(null);
+    async function doVoid(row, force = false) {
+        setVoidState({ id: row.id, stage: 'busy' });
         try {
-            await voidMovement(row.id);
+            await voidMovement(row.id, force ? { allow_negative: true } : {});
+            setVoidState(null);
             await reload();
             await load(true);
-            onDone('Movement voided.');
+            onDone(force ? 'Movement voided (forced).' : 'Movement voided.');
         } catch (e) {
-            if (String(e.message || '').toLowerCase().includes('on hand')) {
-                if (window.confirm(`${e.message}\n\nForce the void anyway (may drive a location negative)?`)) {
-                    try {
-                        await voidMovement(row.id, { allow_negative: true });
-                        await reload();
-                        await load(true);
-                        onDone('Movement voided (forced).');
-                        return;
-                    } catch (e2) {
-                        window.alert(String(e2.message || e2));
-                        return;
-                    }
-                }
-                return;
-            }
-            window.alert(String(e.message || e));
+            const msg = String(e.message || e);
+            setVoidState(
+                !force && msg.toLowerCase().includes('on hand')
+                    ? { id: row.id, stage: 'force', msg }
+                    : { id: row.id, stage: 'error', msg }
+            );
         }
     }
 
@@ -3518,10 +3938,44 @@ function LedgerView({ inventory, canMove, showRecorded = false, onDone }) {
                                     </td>
                                     {canMove && (
                                         <td className="inv-row-actions">
-                                            {!r.voided_at && (
-                                                <button type="button" className="chip chip-tool" onClick={() => onVoid(r)}>
+                                            {!r.voided_at && (!voidState || voidState.id !== r.id) && (
+                                                <button
+                                                    type="button"
+                                                    className="chip chip-tool"
+                                                    onClick={() => setVoidState({ id: r.id, stage: 'confirm' })}
+                                                >
                                                     Void
                                                 </button>
+                                            )}
+                                            {!r.voided_at && voidState && voidState.id === r.id && (
+                                                <span className="inv-void-ask" role="alert">
+                                                    {voidState.stage === 'confirm' && (
+                                                        <span>Void this {r.kind}? It stays in history but stops counting.</span>
+                                                    )}
+                                                    {voidState.stage === 'busy' && <span>Voiding…</span>}
+                                                    {(voidState.stage === 'force' || voidState.stage === 'error') && (
+                                                        <span className="inv-void-msg">{voidState.msg}</span>
+                                                    )}
+                                                    {voidState.stage === 'confirm' && (
+                                                        <button type="button" className="chip chip-tool chip-danger" onClick={() => doVoid(r)}>
+                                                            Void
+                                                        </button>
+                                                    )}
+                                                    {voidState.stage === 'force' && (
+                                                        <button
+                                                            type="button"
+                                                            className="chip chip-tool chip-danger"
+                                                            onClick={() => doVoid(r, true)}
+                                                        >
+                                                            Force void
+                                                        </button>
+                                                    )}
+                                                    {voidState.stage !== 'busy' && (
+                                                        <button type="button" className="chip chip-tool" onClick={() => setVoidState(null)}>
+                                                            Keep
+                                                        </button>
+                                                    )}
+                                                </span>
                                             )}
                                         </td>
                                     )}
@@ -3720,7 +4174,7 @@ function VendorsView({ inventory, canManageCatalog, onDone }) {
             await updateVendor(v.id, { active: !v.active });
             await reload();
         } catch (e) {
-            window.alert(String(e.message || e));
+            onDone(String(e.message || e));
         }
     }
 
@@ -3939,7 +4393,7 @@ function MaterialsPanel({ inventory, onDone }) {
             await updateMaterial(m.id, { active: !m.active });
             await reload();
         } catch (e) {
-            window.alert(String(e.message || e));
+            onDone(String(e.message || e));
         }
     }
 
@@ -4167,7 +4621,7 @@ function LocationsPanel({ inventory, onDone }) {
             await updateLocation(l.id, { active: !l.active });
             await reload();
         } catch (e) {
-            window.alert(String(e.message || e));
+            onDone(String(e.message || e));
         }
     }
 

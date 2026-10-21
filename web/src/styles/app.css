@@ -3623,8 +3623,9 @@ td.inv-low {
 }
 
 .inv-combo-option:hover,
-.inv-combo-option.is-active {
-    background: rgba(var(--nx-accent), 0.12);
+.inv-combo-option.is-active,
+.inv-combo-option.is-hl {
+    background: rgb(var(--nx-accent) / 0.12);
 }
 
 .inv-combo-kind {
@@ -6023,4 +6024,120 @@ details[open].inv-stock-card-sites .inv-stock-card-more {
     .inv-index > .inv-index-item:first-child {
         padding-left: 0;
     }
+}
+
+/* Glance strip: figures that open a filtered view read as links. */
+.inv-figures > .inv-figure-btn:not(:disabled) {
+    cursor: pointer;
+    transition: background var(--dur-fast) var(--ease);
+}
+
+.inv-figures > .inv-figure-btn:not(:disabled):hover {
+    background: rgb(var(--nx-surface) / 0.7);
+}
+
+.inv-figures > .inv-figure-btn:not(:disabled) .inv-figure-label::after {
+    content: ' →';
+    color: rgb(var(--nx-ink-3));
+}
+
+.inv-figures > .inv-figure-btn:focus-visible {
+    outline: 2px solid rgb(var(--nx-accent));
+    outline-offset: 2px;
+}
+
+/* Save toast: by the action (bottom), with Undo for small batches. Sits above
+   the phone action bar. */
+.inv-toast {
+    position: fixed;
+    left: 50%;
+    bottom: var(--sp-5);
+    transform: translateX(-50%);
+    z-index: 1260;
+    display: flex;
+    align-items: center;
+    gap: var(--sp-3);
+    width: max-content;
+    max-width: calc(100vw - 2rem);
+    padding: var(--sp-2) var(--sp-2) var(--sp-2) var(--sp-4);
+    border: 1px solid rgb(var(--nx-signal-success) / 0.5);
+    border-radius: var(--r-md);
+    background: rgb(var(--nx-surface-2));
+    box-shadow: 0 18px 44px -12px rgb(0 0 0 / 0.7);
+    color: rgb(var(--nx-ink));
+    font-size: var(--fs-sm);
+    animation: inv-toast-in 0.18s var(--ease, ease-out);
+}
+
+@keyframes inv-toast-in {
+    from { opacity: 0; transform: translate(-50%, 8px); }
+    to { opacity: 1; transform: translate(-50%, 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .inv-toast { animation: none; }
+}
+
+.inv-toast-btn {
+    min-height: 36px;
+    padding: 0 var(--sp-3);
+    border: 1px solid rgb(var(--nx-accent) / 0.55);
+    border-radius: var(--r-sm);
+    background: rgb(var(--nx-accent) / 0.14);
+    color: rgb(var(--nx-accent));
+    font: 600 var(--fs-sm) / 1 var(--font-sans);
+    cursor: pointer;
+}
+
+.inv-toast-x {
+    min-width: 36px;
+    min-height: 36px;
+    background: none;
+    border: 0;
+    color: rgb(var(--nx-ink-3));
+    font-size: 1.1rem;
+    cursor: pointer;
+}
+
+@media (max-width: 640px) {
+    .inv-toast {
+        bottom: calc(72px + var(--sp-3) + env(safe-area-inset-bottom, 0px));
+    }
+
+    .inv-toast-btn,
+    .inv-toast-x {
+        min-height: 44px;
+        min-width: 44px;
+    }
+}
+
+/* Ledger: void asks inside its own row. */
+.inv-void-ask {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: var(--sp-2);
+    font-size: var(--fs-xs);
+    color: rgb(var(--nx-ink-2));
+}
+
+.inv-void-msg {
+    color: rgb(var(--nx-signal-warning));
+    max-width: 22rem;
+}
+
+.chip.chip-danger {
+    color: rgb(var(--nx-signal-danger));
+    border-color: rgb(var(--nx-signal-danger) / 0.55);
+}
+
+/* Restored draft note at the top of Receive / Dispatch. */
+.inv-draft-note {
+    margin: 0 0 var(--sp-4);
+    padding: var(--sp-2) var(--sp-3);
+    border: 1px solid rgb(var(--nx-signal-info) / 0.45);
+    border-radius: var(--r-sm);
+    background: rgb(var(--nx-signal-info) / 0.08);
+    font-size: var(--fs-sm);
 }
