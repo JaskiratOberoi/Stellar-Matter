@@ -6455,3 +6455,310 @@ details[open].inv-stock-card-sites .inv-stock-card-more {
         font-size: 16px;
     }
 }
+
+/* -- Topbar (redesign) --------------------------------------------------------
+   Brand · primary nav (Inventory | Tracer) on the left; run status, org,
+   Admin menu and account menu on the right. Quiet controls, one lime mark for
+   where you are. */
+
+.topbar-bar {
+    gap: var(--sp-5);
+    padding: 0 var(--sp-5) 0 var(--sp-4);
+}
+
+.topbar-left {
+    gap: var(--sp-6);
+}
+
+a.topbar-brand {
+    gap: var(--sp-3);
+    color: inherit;
+    text-decoration: none;
+    border-radius: var(--r-sm);
+}
+
+.topbar-brand-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.topbar-brand .wordmark {
+    margin: 0;
+    font-size: var(--fs-xs);
+    letter-spacing: 0.14em;
+    color: rgb(var(--nx-ink));
+    line-height: 1.1;
+}
+
+.topbar-tagline {
+    margin: 0;
+    font-size: var(--fs-3xs);
+}
+
+/* Primary nav: text tabs sitting on the bar's bottom edge. */
+.topbar-nav {
+    display: flex;
+    align-self: stretch;
+    gap: var(--sp-1);
+}
+
+.topbar-nav-link {
+    display: inline-flex;
+    align-items: center;
+    padding: 0 var(--sp-3);
+    border-bottom: 2px solid transparent;
+    color: rgb(var(--nx-ink-3));
+    font-size: var(--fs-sm);
+    font-weight: 600;
+    text-decoration: none;
+    transition: color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
+}
+
+.topbar-nav-link:hover {
+    color: rgb(var(--nx-ink));
+}
+
+.topbar-nav-link.is-active {
+    color: rgb(var(--nx-ink));
+    border-bottom-color: rgb(var(--nx-accent));
+}
+
+/* Right side. */
+.topbar-right {
+    gap: var(--sp-4);
+}
+
+.topbar-run {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--sp-2);
+    padding-right: var(--sp-4);
+    border-right: 1px solid rgb(var(--nx-rule-soft));
+}
+
+.topbar-desktop-user {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--sp-1);
+}
+
+.topbar-org,
+.topbar-menu-trigger,
+.topbar-account-trigger {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--sp-2);
+    min-height: 34px;
+    padding: 0 var(--sp-3);
+    background: none;
+    border: 1px solid transparent;
+    border-radius: var(--r-sm);
+    color: rgb(var(--nx-ink-2));
+    font: 600 var(--fs-sm) / 1 var(--font-sans);
+    cursor: pointer;
+    transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+
+.topbar-org:hover,
+.topbar-menu-trigger:hover,
+.topbar-account-trigger:hover,
+.topbar-org[aria-expanded='true'],
+.topbar-menu-trigger[aria-expanded='true'],
+.topbar-account-trigger[aria-expanded='true'] {
+    background: rgb(var(--nx-surface-2));
+    color: rgb(var(--nx-ink));
+}
+
+.topbar-org.org-chip-static {
+    cursor: default;
+}
+
+.topbar-org.org-chip-static:hover {
+    background: none;
+}
+
+.topbar-org-label {
+    font: 600 var(--fs-3xs) / 1 var(--font-mono);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: rgb(var(--nx-ink-3));
+}
+
+.topbar-org-name {
+    max-width: 26ch;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* The page you are on is inside Admin: mark the trigger. */
+.topbar-menu-trigger.is-here {
+    color: rgb(var(--nx-ink));
+    box-shadow: inset 0 -2px 0 rgb(var(--nx-accent));
+}
+
+.topbar-caret {
+    flex: none;
+    color: rgb(var(--nx-ink-3));
+    transition: transform var(--dur-fast) var(--ease);
+}
+
+.topbar-caret.is-open {
+    transform: rotate(180deg);
+}
+
+.topbar-account-trigger {
+    padding-left: var(--sp-1);
+}
+
+.topbar-avatar {
+    display: inline-grid;
+    place-items: center;
+    width: 26px;
+    height: 26px;
+    border-radius: 999px;
+    background: rgb(var(--nx-accent) / 0.16);
+    color: rgb(var(--nx-accent));
+    font: 700 var(--fs-3xs) / 1 var(--font-mono);
+    letter-spacing: 0.04em;
+}
+
+.topbar-account-name {
+    max-width: 16ch;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Popovers (Admin, account) share the org switcher's surface. */
+.topbar-menu {
+    position: relative;
+    display: inline-flex;
+}
+
+.topbar-popover {
+    position: absolute;
+    right: 0;
+    top: calc(100% + 8px);
+    z-index: 60;
+    display: flex;
+    flex-direction: column;
+    min-width: 260px;
+    padding: var(--sp-1);
+    background: rgb(var(--nx-surface-2));
+    border: 1px solid rgb(var(--nx-rule-strong));
+    border-radius: var(--r-md);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+}
+
+.topbar-popover-head {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: var(--sp-2) var(--sp-3) var(--sp-3);
+    margin-bottom: var(--sp-1);
+    border-bottom: 1px solid rgb(var(--nx-rule-soft));
+}
+
+.topbar-popover-item {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: var(--sp-2) var(--sp-3);
+    background: none;
+    border: 0;
+    border-radius: var(--r-sm);
+    color: rgb(var(--nx-ink));
+    text-align: left;
+    text-decoration: none;
+    font: inherit;
+    cursor: pointer;
+}
+
+.topbar-popover-item:hover {
+    background: rgb(var(--nx-ink) / 0.07);
+}
+
+.topbar-popover-item.is-current {
+    background: rgb(var(--nx-accent) / 0.12);
+}
+
+.topbar-popover-item.is-current .topbar-popover-label {
+    color: rgb(var(--nx-accent));
+}
+
+.topbar-popover-item.is-danger .topbar-popover-label {
+    color: rgb(var(--nx-signal-danger));
+}
+
+.topbar-popover-label {
+    font-size: var(--fs-sm);
+    font-weight: 600;
+}
+
+.topbar-popover-cap {
+    font-size: var(--fs-xs);
+    color: rgb(var(--nx-ink-3));
+}
+
+/* Narrower desktops shed text before controls collide. */
+@media (max-width: 1200px) {
+    .topbar-org-label {
+        display: none;
+    }
+}
+
+@media (max-width: 1100px) {
+    .topbar-account-name {
+        display: none;
+    }
+
+    .topbar-run {
+        padding-right: 0;
+        border-right: 0;
+    }
+}
+
+@media (max-width: 860px) {
+    .topbar-org-name {
+        max-width: 12ch;
+    }
+
+    .topbar-left {
+        gap: var(--sp-3);
+    }
+}
+
+/* Phone drawer: both destinations as rows, the current one marked. */
+.topbar-drawer-nav .topbar-nav-link {
+    min-height: 44px;
+    padding: 0 var(--sp-3);
+    border-bottom: 0;
+    border-left: 2px solid transparent;
+    border-radius: var(--r-sm);
+    background: rgb(var(--nx-surface-2));
+}
+
+.topbar-drawer-nav .topbar-nav-link.is-active {
+    border-left-color: rgb(var(--nx-accent));
+    color: rgb(var(--nx-ink));
+}
+
+/* The old chip rule capped the org trigger at 22ch and boxed it. */
+.topbar-org.org-chip-trigger,
+.topbar-org.org-chip-static {
+    max-width: none;
+    overflow: visible;
+    background: none;
+    border-color: transparent;
+}
+
+.topbar-org.org-chip-trigger:hover,
+.topbar-org.org-chip-trigger[aria-expanded='true'] {
+    background: rgb(var(--nx-surface-2));
+}
+
+.topbar-drawer-section .topbar-org-name {
+    max-width: none;
+}

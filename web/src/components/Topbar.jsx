@@ -1,14 +1,156 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, NavLink, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { BrandMark } from './BrandMark.jsx';
 import { usePwaInstall } from '../hooks/usePwaInstall.js';
 
+const ROLE_LABEL = { super_admin: 'Super admin', admin: 'Admin', operator: 'Operator', viewer: 'Viewer' };
+
+// Admin destinations, each gated by role. The topbar shows them in one menu
+// instead of a row of chips.
+const ADMIN_LINKS = [
+    { to: '/admin/users', label: 'Users', caption: 'Accounts and roles', roles: ['super_admin'] },
+    { to: '/admin/orgs', label: 'Orgs', caption: 'Organisations and members', roles: ['super_admin'] },
+    { to: '/admin/audit-log', label: 'Audit trail', caption: 'Who changed what, when', roles: ['super_admin'] }
+];
+
+function initialsOf(name) {
+    const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
+    if (!parts.length) return '?';
+    return (parts[0][0] + (parts.length > 1 ? parts[parts.length - 1][0] : '')).toUpperCase();
+}
+
+/** Close a popover on outside pointer or Escape. */
+function useDismiss(ref, open, setOpen) {
+    useEffect(() => {
+        if (!open) return undefined;
+        const onPointerDown = (e) => {
+            if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+        };
+        const onKeyDown = (e) => {
+            if (e.key === 'Escape') setOpen(false);
+        };
+        document.addEventListener('pointerdown', onPointerDown);
+        document.addEventListener('keydown', onKeyDown);
+        return () => {
+            document.removeEventListener('pointerdown', onPointerDown);
+            document.removeEventListener('keydown', onKeyDown);
+        };
+    }, [open, ref, setOpen]);
+}
+
+function Caret({ open }) {
+    return (
+        <svg className={`topbar-caret${open ? ' is-open' : ''}`} width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
+            <path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+    );
+}
+
+function AdminMenu({ role }) {
+    const [open, setOpen] = useState(false);
+    const ref = useRef(null);
+    const location = useLocation();
+    useDismiss(ref, open, setOpen);
+    useEffect(() => setOpen(false), [location.pathname]);
+    const links = ADMIN_LINKS.filter((l) => l.roles.includes(role));
+    if (!links.length) return null;
+    const here = location.pathname.startsWith('/admin');
+    return (
+        <span className="topbar-menu" ref={ref}>
+            <button
+                type="button"
+                className={`topbar-menu-trigger${here ? ' is-here' : ''}`}
+                aria-haspopup="menu"
+                aria-expanded={open ? 'true' : 'false'}
+                onClick={() => setOpen((v) => !v)}
+            >
+                Admin
+                <Caret open={open} />
+            </button>
+            {open && (
+                <div className="topbar-popover" role="menu">
+                    {links.map((l) => (
+                        <Link
+                            key={l.to}
+                            to={l.to}
+                            role="menuitem"
+                            className={`topbar-popover-item${location.pathname === l.to ? ' is-current' : ''}`}
+                            aria-current={location.pathname === l.to ? 'page' : undefined}
+                        >
+                            <span className="topbar-popover-label">{l.label}</span>
+                            <span className="topbar-popover-cap">{l.caption}</span>
+                        </Link>
+                    ))}
+                </div>
+            )}
+        </span>
+    );
+}
+
+function AccountMenu({ user, onLogout }) {
+    const [open, setOpen] = useState(false);
+    const ref = useRef(null);
+    const { installMode, triggerNativeInstall } = usePwaInstall();
+    useDismiss(ref, open, setOpen);
+    const name = user.display_name || user.username;
+    return (
+        <span className="topbar-menu" ref={ref}>
+            <button
+                type="button"
+                className="topbar-account-trigger"
+                aria-haspopup="menu"
+                aria-expanded={open ? 'true' : 'false'}
+                aria-label={`Account: ${name}`}
+                onClick={() => setOpen((v) => !v)}
+            >
+                <span className="topbar-avatar" aria-hidden="true">{initialsOf(name)}</span>
+                <span className="topbar-account-name">{name}</span>
+                <Caret open={open} />
+            </button>
+            {open && (
+                <div className="topbar-popover topbar-popover--account" role="menu">
+                    <div className="topbar-popover-head">
+                        <span className="topbar-popover-label">{name}</span>
+                        <span className="topbar-popover-cap">
+                            {user.username} · {ROLE_LABEL[user.role] || user.role}
+                        </span>
+                    </div>
+                    {installMode === 'native' && (
+                        <button
+                            type="button"
+                            role="menuitem"
+                            className="topbar-popover-item"
+                            onClick={async () => {
+                                setOpen(false);
+                                await triggerNativeInstall();
+                            }}
+                        >
+                            <span className="topbar-popover-label">Install app</span>
+                            <span className="topbar-popover-cap">Open Stellar Matter from your dock or home screen</span>
+                        </button>
+                    )}
+                    <button
+                        type="button"
+                        role="menuitem"
+                        className="topbar-popover-item is-danger"
+                        onClick={() => {
+                            setOpen(false);
+                            onLogout();
+                        }}
+                    >
+                        <span className="topbar-popover-label">Log out</span>
+                    </button>
+                </div>
+            )}
+        </span>
+    );
+}
+
 export function Topbar({ statusPill, lastUpdated, onOrgSwitched }) {
     const { user, orgs, authRequired, logout, switchOrg } = useAuth();
     const location = useLocation();
-    const isTracer = location.pathname.startsWith('/tracer');
     const [menuOpen, setMenuOpen] = useState(false);
     const [installHintOpen, setInstallHintOpen] = useState(false);
     const drawerRef = useRef(null);
@@ -39,66 +181,57 @@ export function Topbar({ statusPill, lastUpdated, onOrgSwitched }) {
         else if (!r.ok) window.alert(r.error || 'Org switch failed');
     };
 
-    // Inventory is home; Tracer is the secondary tool reached from it.
-    const navLink = isTracer ? (
-        <Link to="/" className="chip chip-tool tracer-ui-link" title="Return to Inventory">
-            ← Inventory
-        </Link>
-    ) : (
-        <Link to="/tracer" className="chip chip-tool tracer-ui-link" title="Open the Tracer">
-            Tracer
-        </Link>
-    );
+    // Inventory is home; Tracer is the second tool. Both are always one click
+    // away, and the current one is marked.
+    const navItems = [
+        { to: '/', label: 'Inventory', end: true },
+        { to: '/tracer', label: 'Tracer' }
+    ];
+    const navLinks = (onPick) =>
+        navItems.map((n) => (
+            <NavLink
+                key={n.to}
+                to={n.to}
+                end={n.end}
+                onClick={onPick}
+                className={({ isActive }) => `topbar-nav-link${isActive ? ' is-active' : ''}`}
+            >
+                {n.label}
+            </NavLink>
+        ));
 
     return (
         <header className={`topbar${menuOpen ? ' topbar--menu-open' : ''}`} role="banner">
             <div className="topbar-bar">
                 <div className="topbar-left">
-                    <div className="topbar-brand">
-                        <BrandMark size={34} className="topbar-brand-mark" />
-                        <div className="topbar-brand-text">
-                            <h1 className="wordmark">Stellar Matter</h1>
-                            <p className="topbar-tagline">Official tally for materials in Genomics</p>
-                        </div>
-                        <span className="topbar-desktop-nav">{navLink}</span>
-                    </div>
+                    <Link to="/" className="topbar-brand" aria-label="Stellar Matter, Inventory home">
+                        <BrandMark size={30} className="topbar-brand-mark" />
+                        <span className="topbar-brand-text">
+                            <span className="wordmark">Stellar Matter</span>
+                            <span className="topbar-tagline">Official tally for materials in Genomics</span>
+                        </span>
+                    </Link>
+                    <nav className="topbar-nav topbar-desktop-nav" aria-label="Main">
+                        {navLinks()}
+                    </nav>
                 </div>
                 <div className="topbar-right">
-                    {statusPill && <span className={`status-pill ${statusPill.kind}`}>{statusPill.text}</span>}
-                    {lastUpdated && (
-                        <span className="last-updated" aria-live="polite">
-                            Updated{' '}
-                            {lastUpdated.toLocaleTimeString(undefined, {
-                                hour: '2-digit',
-                                minute: '2-digit',
-                                second: '2-digit'
-                            })}
+                    {(statusPill || lastUpdated) && (
+                        <span className="topbar-run">
+                            {statusPill && <span className={`status-pill ${statusPill.kind}`}>{statusPill.text}</span>}
+                            {lastUpdated && (
+                                <span className="last-updated" aria-live="polite">
+                                    Updated{' '}
+                                    {lastUpdated.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}
+                                </span>
+                            )}
                         </span>
                     )}
                     {authRequired && user && (
-                        <span className="user-chip topbar-desktop-user">
+                        <span className="topbar-desktop-user">
                             <OrgSwitcher user={user} orgs={orgs} onSwitch={switchOrgHandler} />
-                            {user.role === 'super_admin' && (
-                                <>
-                                    <Link to="/admin/users" className="chip chip-tool admin-nav-link">
-                                        Users
-                                    </Link>
-                                    <Link to="/admin/orgs" className="chip chip-tool admin-nav-link">
-                                        Orgs
-                                    </Link>
-                                    <Link to="/admin/audit-log" className="chip chip-tool admin-nav-link">
-                                        Audit trail
-                                    </Link>
-                                </>
-                            )}
-                            <span className="topbar-user-name">
-                                {user.display_name || user.username}
-                                {user.role === 'super_admin' && ' \u00b7 super admin'}
-                                {user.role === 'admin' && ' \u00b7 admin'}
-                            </span>
-                            <button type="button" className="chip chip-tool user-logout" onClick={logout}>
-                                Log out
-                            </button>
+                            <AdminMenu role={user.role} />
+                            <AccountMenu user={user} onLogout={logout} />
                         </span>
                     )}
                     {authRequired && user && (
@@ -131,9 +264,9 @@ export function Topbar({ statusPill, lastUpdated, onOrgSwitched }) {
                             ref={drawerRef}
                             aria-label="App menu"
                         >
-                            <div className="topbar-drawer-section">
+                            <div className="topbar-drawer-section topbar-drawer-nav">
                                 <p className="eyebrow">Navigate</p>
-                                {navLink}
+                                {navLinks(() => setMenuOpen(false))}
                             </div>
                             {installMode !== 'installed' && (
                                 <div className="topbar-drawer-section">
@@ -185,9 +318,7 @@ export function Topbar({ statusPill, lastUpdated, onOrgSwitched }) {
                                     <div className="topbar-drawer-section">
                                         <p className="eyebrow">Account</p>
                                         <p className="topbar-drawer-user">
-                                            {user.display_name || user.username}
-                                            {user.role === 'super_admin' && ' · super admin'}
-                                            {user.role === 'admin' && ' · admin'}
+                                            {user.display_name || user.username} · {ROLE_LABEL[user.role] || user.role}
                                         </p>
                                         <OrgSwitcher user={user} orgs={orgs} onSwitch={switchOrgHandler} />
                                     </div>
@@ -265,8 +396,9 @@ function OrgSwitcher({ user, orgs, onSwitch }) {
     const canSwitch = orgs.length > 1 || user.role === 'super_admin';
     if (!canSwitch) {
         return (
-            <span className="chip chip-tool org-chip-static" title={`Active org: ${activeLabel}`}>
-                Org · {activeLabel}
+            <span className="topbar-org org-chip-static" title={`Active org: ${activeLabel}`}>
+                <span className="topbar-org-label">Org</span>
+                <span className="topbar-org-name">{activeLabel}</span>
             </span>
         );
     }
@@ -274,13 +406,15 @@ function OrgSwitcher({ user, orgs, onSwitch }) {
         <span className="org-switcher" ref={wrapRef}>
             <button
                 type="button"
-                className="chip chip-tool org-chip-trigger"
+                className="topbar-org org-chip-trigger"
                 aria-haspopup="listbox"
                 aria-expanded={open ? 'true' : 'false'}
                 onClick={() => setOpen((v) => !v)}
                 title={`Active org: ${activeLabel}`}
             >
-                Org · {activeLabel} {open ? '▲' : '▼'}
+                <span className="topbar-org-label">Org</span>
+                <span className="topbar-org-name">{activeLabel}</span>
+                <Caret open={open} />
             </button>
             {open && (
                 <div className="org-switcher-menu" role="listbox">
