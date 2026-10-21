@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { apiFetch } from '../apiClient.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { useSalesMarketingUsers } from '../hooks/useSalesMarketingUsers.js';
@@ -13,6 +14,9 @@ import {
 import { TracerBanner } from '../components/TracerBanner.jsx';
 import { TracerTable } from '../components/TracerTable.jsx';
 import { clientCodeScope } from '../lib/clientCodeScope.js';
+import { dispatchLinesForDemand, locationForUnit, storeCoverByColumn } from '../lib/demandMap.js';
+
+const LS_DISPATCH_DRAFT = 'stellar-matter.draft.dispatch';
 import '../styles/tracer.css';
 import { TracerForm } from '../components/TracerForm.jsx';
 import { RunModal } from '../components/RunModal.jsx';
@@ -134,6 +138,11 @@ export function TracerPage({
         )
     );
     const [localError, setLocalError] = useState( /** @type {string | null} */ (null));
+    const navigate = useNavigate();
+    // Stock snapshot for the cover rows and dispatch planning; loaded once
+    // there are results to compare.
+    const [stock, setStock] = useState(null);
+    const [planConflict, setPlanConflict] = useState(null);
     const [tracerBusy, setTracerBusy] = useState(false);
     const [openTile, setOpenTile] = useState( /** @type {object | null} */ (null));
     const [openTileKind, setOpenTileKind] = useState('letterheads');
@@ -393,6 +402,60 @@ export function TracerPage({
     const hasResults = Boolean(collatedBannerRow) || buCount > 0 || regCount > 0;
     const resultsCaption = printSummaryParts.join(' · ');
 
+    useEffect(() => {
+        if (stock || !(collatedBannerRow || bannerRows.length || regionBannerRows.length)) return;
+        const get = (url, key) =>
+            apiFetch(url)
+                .then((r) => (r.ok ? r.json() : {}))
+                .then((j) => (Array.isArray(j[key]) ? j[key] : []))
+                .catch(() => []);
+        Promise.all([
+            get('/api/inventory/materials', 'materials'),
+            get('/api/inventory/locations', 'locations'),
+            get('/api/inventory/balances', 'balances')
+        ]).then(([materials, locations, balances]) => setStock({ materials, locations, balances }));
+    }, [stock, collatedBannerRow, bannerRows.length, regionBannerRows.length]);
+
+    const canMoveStock = !viewerDisabled && (!user || ['super_admin', 'admin', 'operator'].includes(user.role));
+    const cover = stock ? storeCoverByColumn(stock) : null;
+    const canPlanRow = (row) =>
+        Boolean(canMoveStock && stock && !row.group && locationForUnit(row.label, stock.locations));
+
+    // Turn one unit's demand into a Dispatch draft and open it. Nothing is
+    // recorded until the operator presses Record dispatch.
+    const writePlan = (row, vals) => {
+        const loc = locationForUnit(row.label, stock.locations);
+        const { lines, mixed } = dispatchLinesForDemand(vals, stock.materials);
+        const range = fmtDateRange(row.fromDate, row.toDate);
+        const data = {
+            fromLocationId: '',
+            toLocationId: loc.id,
+            reference: '',
+            note: `Tracer demand ${range}`,
+            occurredOn: '',
+            lines,
+            source: { unit: row.label, window: range, mixed }
+        };
+        try {
+            localStorage.setItem(LS_DISPATCH_DRAFT, JSON.stringify({ at: Date.now(), data }));
+        } catch {
+            setLocalError('Could not save the planned dispatch on this device.');
+            return;
+        }
+        setPlanConflict(null);
+        navigate('/?tab=dispatch');
+    };
+    const planDispatch = (row, vals) => {
+        let existing = null;
+        try {
+            existing = localStorage.getItem(LS_DISPATCH_DRAFT);
+        } catch {
+            existing = null;
+        }
+        if (existing) setPlanConflict({ row, vals });
+        else writePlan(row, vals);
+    };
+
     // Scopes the last run reported as failed, keyed like banner rows.
     const failedKeys = new Set(((runOutcome && runOutcome.failed) || []).map((l) => tracerBuKey(l)));
     // Table rows in wall order: collated, then units, then other scopes.
@@ -526,9 +589,33 @@ export function TracerPage({
 
                 {tableRows.length > 0 && (
                     <div className={`tracer-results-table${resultsView === 'table' ? ' is-active' : ''}`}>
+                        {planConflict && (
+                            <div className="tracer-plan-conflict" role="alert">
+                                <span>
+                                    You have an unsaved dispatch on this device. Replace it with {planConflict.row.label}
+                                    ’s plan?
+                                </span>
+                                <button
+                                    type="button"
+                                    className="chip chip-tool chip-danger"
+                                    onClick={() => writePlan(planConflict.row, planConflict.vals)}
+                                >
+                                    Replace it
+                                </button>
+                                <button type="button" className="chip chip-tool" onClick={() => navigate('/?tab=dispatch')}>
+                                    Open my draft
+                                </button>
+                                <button type="button" className="chip chip-tool" onClick={() => setPlanConflict(null)}>
+                                    Keep both as they are
+                                </button>
+                            </div>
+                        )}
                         <TracerTable
                             rows={tableRows}
                             clientPagesByNorm={clientPagesByNorm}
+                            cover={cover}
+                            canPlan={canPlanRow}
+                            onPlan={planDispatch}
                             onOpenDetail={(tile, kind) => {
                                 if (!tile) return;
                                 setOpenTile(tile);

@@ -44,9 +44,12 @@ const COLUMNS = [
  *   rows: { key: string, label: string, group?: string, failed?: boolean, fromDate: string, toDate: string, [tile: string]: any }[],
  *   clientPagesByNorm: Record<string, number>,
  *   onOpenDetail: (tile: object, kind: string) => void,
+ *   cover?: Record<string, number | null> | null,
+ *   canPlan?: (row: object) => boolean,
+ *   onPlan?: (row: object, vals: Record<string, number | null>) => void,
  * }} props
  */
-export function TracerTable({ rows, clientPagesByNorm, onOpenDetail }) {
+export function TracerTable({ rows, clientPagesByNorm, onOpenDetail, cover = null, canPlan = null, onPlan = null }) {
     const [sort, setSort] = useState({ col: null, dir: -1 });
 
     const data = useMemo(
@@ -78,6 +81,10 @@ export function TracerTable({ rows, clientPagesByNorm, onOpenDetail }) {
         sums[c.id] = present.length ? present.reduce((s, d) => s + d.vals[c.id], 0) : null;
     }
 
+    // Demand the stores have to meet: the sum of rows, or the one row.
+    const need = data.length === 1 ? data[0].vals : sums;
+    const planning = Boolean(onPlan && canPlan);
+
     const toggleSort = (id) =>
         setSort((s) => (s.col === id ? (s.dir === -1 ? { col: id, dir: 1 } : { col: null, dir: -1 }) : { col: id, dir: -1 }));
 
@@ -99,6 +106,7 @@ export function TracerTable({ rows, clientPagesByNorm, onOpenDetail }) {
                                 </button>
                             </th>
                         ))}
+                        {planning && <th className="tracer-table-plan" aria-label="Plan a dispatch" />}
                     </tr>
                 </thead>
                 <tbody>
@@ -133,22 +141,77 @@ export function TracerTable({ rows, clientPagesByNorm, onOpenDetail }) {
                                     </td>
                                 );
                             })}
+                            {planning && (
+                                <td className="tracer-table-plan">
+                                    {!missing && !row.failed && canPlan(row) ? (
+                                        <button
+                                            type="button"
+                                            className="chip chip-tool"
+                                            title={`Open Dispatch filled with ${row.label}'s demand for this window`}
+                                            onClick={() => onPlan(row, vals)}
+                                        >
+                                            Plan dispatch
+                                        </button>
+                                    ) : null}
+                                </td>
+                            )}
                         </tr>
                     ))}
                 </tbody>
-                {data.length > 1 && (
+                {(data.length > 1 || cover) && (
                     <tfoot>
-                        <tr>
-                            <th scope="row" className="tracer-table-unit">
-                                Sum of rows
-                                <span className="tracer-table-group">not deduped across rows</span>
-                            </th>
-                            {COLUMNS.map((c) => (
-                                <td key={c.id} className="num">
-                                    {sums[c.id] == null ? '—' : fmt(sums[c.id])}
-                                </td>
-                            ))}
-                        </tr>
+                        {data.length > 1 && (
+                            <tr>
+                                <th scope="row" className="tracer-table-unit">
+                                    Sum of rows
+                                    <span className="tracer-table-group">not deduped across rows</span>
+                                </th>
+                                {COLUMNS.map((c) => (
+                                    <td key={c.id} className="num">
+                                        {sums[c.id] == null ? '—' : fmt(sums[c.id])}
+                                    </td>
+                                ))}
+                                {planning && <td />}
+                            </tr>
+                        )}
+                        {cover && (
+                            <>
+                                {/* Stores only: BU balances never go down yet, so they say nothing about need. */}
+                                <tr className="tracer-cover-row">
+                                    <th scope="row" className="tracer-table-unit">
+                                        Stores hold
+                                        <span className="tracer-table-group">all stores, today</span>
+                                    </th>
+                                    {COLUMNS.map((c) => (
+                                        <td key={c.id} className="num">
+                                            {cover[c.id] == null ? '—' : fmt(cover[c.id])}
+                                        </td>
+                                    ))}
+                                    {planning && <td />}
+                                </tr>
+                                <tr className="tracer-cover-row">
+                                    <th scope="row" className="tracer-table-unit">Cover</th>
+                                    {COLUMNS.map((c) => {
+                                        const have = cover[c.id];
+                                        const want = need[c.id];
+                                        if (have == null || want == null) {
+                                            return (
+                                                <td key={c.id} className="num is-na">
+                                                    —
+                                                </td>
+                                            );
+                                        }
+                                        const short = want - have;
+                                        return (
+                                            <td key={c.id} className={`num tracer-cover ${short > 0 ? 'is-short' : 'is-ok'}`}>
+                                                {short > 0 ? `short ${fmt(short)}` : 'covered'}
+                                            </td>
+                                        );
+                                    })}
+                                    {planning && <td />}
+                                </tr>
+                            </>
+                        )}
                     </tfoot>
                 )}
             </table>

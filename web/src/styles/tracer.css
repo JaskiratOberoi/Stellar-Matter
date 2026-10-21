@@ -1004,3 +1004,36 @@
         font-weight: 700;
     }
 }
+
+/* Warehouse cover rows and dispatch planning. */
+.tracer-cover-row th,
+.tracer-cover-row td {
+    color: rgb(var(--nx-ink-2));
+    font-weight: 600;
+}
+
+.tracer-cover.is-ok {
+    color: rgb(var(--nx-signal-success));
+}
+
+.tracer-cover.is-short {
+    color: rgb(var(--nx-signal-danger));
+}
+
+.tracer-table-plan {
+    text-align: right;
+    width: 1%;
+}
+
+.tracer-plan-conflict {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--sp-2) var(--sp-3);
+    margin-bottom: var(--sp-3);
+    padding: var(--sp-2) var(--sp-3);
+    border: 1px solid rgb(var(--nx-signal-warning) / 0.5);
+    border-radius: var(--r-sm);
+    background: rgb(var(--nx-signal-warning) / 0.08);
+    font-size: var(--fs-sm);
+}

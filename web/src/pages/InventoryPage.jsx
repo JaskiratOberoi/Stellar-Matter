@@ -1263,6 +1263,8 @@ const DRAFT_TTL_MS = 24 * 60 * 60 * 1000;
 
 function useFormDraft(key, { snapshot, isDirty, restore, enabled = true }) {
     const [restoredAt, setRestoredAt] = useState(null);
+    // A draft planned elsewhere (the Tracer) says where it came from.
+    const [source, setSource] = useState(null);
     const restoreRef = useRef(restore);
     restoreRef.current = restore;
     // True from restoring a draft until the restored values reach the form;
@@ -1277,6 +1279,7 @@ function useFormDraft(key, { snapshot, isDirty, restore, enabled = true }) {
                 restoringRef.current = true;
                 restoreRef.current(d.data);
                 setRestoredAt(new Date(d.at));
+                setSource(d.data.source || null);
             } else if (d) {
                 localStorage.removeItem(key);
             }
@@ -1297,17 +1300,33 @@ function useFormDraft(key, { snapshot, isDirty, restore, enabled = true }) {
             else {
                 localStorage.removeItem(key);
                 setRestoredAt(null);
+                setSource(null);
             }
         } catch {
             /* storage full or blocked */
         }
     }, [key, json, isDirty, enabled]);
 
-    return { restoredAt };
+    return { restoredAt, source };
 }
 
-function DraftNote({ restoredAt, onDiscard }) {
+function DraftNote({ restoredAt, source, onDiscard }) {
     if (!restoredAt) return null;
+    if (source) {
+        return (
+            <p className="inv-draft-note" role="status">
+                Filled from the Tracer: <strong>{source.unit}</strong> · {source.window}. Quantities are that demand,
+                rounded up to whole packs
+                {source.mixed && source.mixed.length
+                    ? `; ${source.mixed.join(', ')} stand in for vacuum and non-vacuum, so check those lines`
+                    : ''}
+                . Nothing is recorded until you press Record dispatch.{' '}
+                <button type="button" className="inv-linkbtn" onClick={onDiscard}>
+                    Discard it
+                </button>
+            </p>
+        );
+    }
     return (
         <p className="inv-draft-note" role="status">
             Restored your unsaved entry from{' '}
@@ -2522,7 +2541,7 @@ function ReceiveView({ inventory, canMove, showRecorded = false, onDone, onGoto,
                     )}
                 </SectionHead>
                 <form id="inv-receive-form" className="inv-order-form" onSubmit={onSubmit} onKeyDown={submitOnCtrlEnter}>
-                    <DraftNote restoredAt={draft.restoredAt} onDiscard={discardDraft} />
+                    <DraftNote restoredAt={draft.restoredAt} source={draft.source} onDiscard={discardDraft} />
                     <FormStep n="01" title="From whom & where" hint="Applies to every line below">
                         <label className="inv-field">
                             <span>Vendor</span>
@@ -3014,7 +3033,7 @@ function DispatchView({ inventory, canMove, showRecorded = false, onDone, onGoto
                     caption="Pick where it goes, then list every material in the shipment"
                 />
                 <form id="inv-dispatch-form" className="inv-order-form" onSubmit={onSubmit} onKeyDown={submitOnCtrlEnter}>
-                    <DraftNote restoredAt={draft.restoredAt} onDiscard={discardDraft} />
+                    <DraftNote restoredAt={draft.restoredAt} source={draft.source} onDiscard={discardDraft} />
                     <FormStep n="01" title="Route & paperwork" hint="Applies to every line below">
                         <label className="inv-field">
                             <span>From</span>
