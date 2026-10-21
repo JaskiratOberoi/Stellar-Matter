@@ -512,6 +512,19 @@ router.get('/audit-log', async (req, res) => {
             params.push(req.query.outcome);
             where.push(`outcome = $${params.length}`);
         }
+        // Date window as ISO timestamps built client-side from local midnight.
+        for (const [key, op] of [['from', '>='], ['to', '<']]) {
+            if (!req.query[key]) continue;
+            const d = new Date(String(req.query[key]));
+            if (Number.isNaN(d.getTime())) continue;
+            params.push(d.toISOString());
+            where.push(`created_at ${op} $${params.length}`);
+        }
+        // The catch-all request logger marks its rows { auto: true }; they
+        // are noise next to the handler-written entries unless asked for.
+        if (String(req.query.hide_auto || '') === '1') {
+            where.push(`COALESCE(metadata->>'auto', '') <> 'true'`);
+        }
         // Free-text sweep across the columns an investigator actually types
         // into: who, what, from where.
         if (req.query.q && String(req.query.q).trim()) {

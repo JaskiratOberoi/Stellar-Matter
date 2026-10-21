@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
 import { apiFetch } from '../apiClient.js';
+import { Topbar } from '../components/Topbar.jsx';
 
 export function AdminOrgsPage() {
     const [orgs, setOrgs] = useState([]);
@@ -35,75 +35,72 @@ export function AdminOrgsPage() {
     }, [reload]);
 
     return (
-        <main className="admin-shell">
-            <header className="admin-header row-between">
-                <div>
-                    <p className="eyebrow">Admin</p>
-                    <h1 className="wordmark">Organizations</h1>
-                    <p className="muted small">
-                        Tenants for tile + admin scoping. Every user is assigned to one or more orgs;
-                        the active org gates which runs they see in Letter Heads / Envelopes / Urine Containers.
-                    </p>
-                </div>
-                <div className="admin-actions">
-                    <Link to="/" className="chip chip-tool">
-                        ← Back to Inventory
-                    </Link>
-                    <Link to="/admin/users" className="chip chip-tool">
-                        Users
-                    </Link>
-                    <button type="button" className="btn-primary" onClick={() => setCreateOpen((v) => !v)}>
-                        {createOpen ? 'Cancel' : 'New org'}
-                    </button>
-                </div>
-            </header>
+        <>
+            <Topbar onOrgSwitched={() => reload()} />
+            <main className="admin-shell">
+                <header className="admin-header row-between">
+                    <div>
+                        <p className="eyebrow">Admin</p>
+                        <h1 className="wordmark">Organizations</h1>
+                        <p className="muted small">
+                            Tenants for tile + admin scoping. Every user is assigned to one or more orgs;
+                            the active org gates which runs they see in Letter Heads / Envelopes / Urine Containers.
+                        </p>
+                    </div>
+                    <div className="admin-actions">
+                        <button type="button" className="btn-primary" onClick={() => setCreateOpen((v) => !v)}>
+                            {createOpen ? 'Cancel' : 'New org'}
+                        </button>
+                    </div>
+                </header>
 
-            {createOpen && (
-                <CreateOrgForm
-                    onCreated={() => {
-                        setCreateOpen(false);
-                        reload();
-                    }}
-                />
-            )}
+                {createOpen && (
+                    <CreateOrgForm
+                        onCreated={() => {
+                            setCreateOpen(false);
+                            reload();
+                        }}
+                    />
+                )}
 
-            {err && <div className="results-error nexus-card">{err}</div>}
+                {err && <div className="results-error nexus-card">{err}</div>}
 
-            {loading ? (
-                <p className="muted">Loading…</p>
-            ) : (
-                <table className="packages admin-orgs-table">
-                    <thead>
-                        <tr>
-                            <th>Name</th>
-                            <th>Slug</th>
-                            <th>Members</th>
-                            <th>Active</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {orgs.map((o) => (
-                            <OrgRow
-                                key={o.id}
-                                org={o}
-                                users={users}
-                                assignOpen={assignOpenFor === o.id}
-                                onToggleAssign={() => setAssignOpenFor((v) => (v === o.id ? null : o.id))}
-                                onChanged={reload}
-                            />
-                        ))}
-                        {!orgs.length && (
+                {loading ? (
+                    <p className="muted">Loading…</p>
+                ) : (
+                    <table className="packages admin-orgs-table">
+                        <thead>
                             <tr>
-                                <td colSpan={5} className="muted">
-                                    No organizations yet.
-                                </td>
+                                <th>Name</th>
+                                <th>Slug</th>
+                                <th>Members</th>
+                                <th>Active</th>
+                                <th>Actions</th>
                             </tr>
-                        )}
-                    </tbody>
-                </table>
-            )}
-        </main>
+                        </thead>
+                        <tbody>
+                            {orgs.map((o) => (
+                                <OrgRow
+                                    key={o.id}
+                                    org={o}
+                                    users={users}
+                                    assignOpen={assignOpenFor === o.id}
+                                    onToggleAssign={() => setAssignOpenFor((v) => (v === o.id ? null : o.id))}
+                                    onChanged={reload}
+                                />
+                            ))}
+                            {!orgs.length && (
+                                <tr>
+                                    <td colSpan={5} className="muted">
+                                        No organizations yet.
+                                    </td>
+                                </tr>
+                            )}
+                        </tbody>
+                    </table>
+                )}
+            </main>
+        </>
     );
 }
 

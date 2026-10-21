@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
 import { apiFetch } from '../apiClient.js';
+import { Topbar } from '../components/Topbar.jsx';
 import { useAuth } from '../contexts/AuthContext.jsx';
 
 const ROLES = ['operator', 'admin', 'viewer'];
@@ -44,81 +44,75 @@ export function AdminUsersPage() {
     }, [reload]);
 
     return (
-        <main className="admin-shell">
-            <header className="admin-header row-between">
-                <div>
-                    <p className="eyebrow">Admin</p>
-                    <h1 className="wordmark">Users</h1>
-                    <p className="muted small">
-                        <strong>Viewer</strong> reads only · <strong>Operator</strong> moves stock, logs orders and runs the
-                        Tracer · <strong>Admin</strong> also manages the catalog and vendors.
+        <>
+            <Topbar onOrgSwitched={() => reload()} />
+            <main className="admin-shell">
+                <header className="admin-header row-between">
+                    <div>
+                        <p className="eyebrow">Admin</p>
+                        <h1 className="wordmark">Users</h1>
+                        <p className="muted small">
+                            <strong>Viewer</strong> reads only · <strong>Operator</strong> moves stock, logs orders and runs the
+                            Tracer · <strong>Admin</strong> also manages the catalog and vendors.
+                        </p>
+                    </div>
+                    <div className="admin-actions">
+                        <button type="button" className="btn-primary" onClick={() => setCreateOpen((v) => !v)}>
+                            {createOpen ? 'Cancel' : 'New user'}
+                        </button>
+                    </div>
+                </header>
+
+                {createOpen && (
+                    <CreateUserForm
+                        onCreated={(username) => {
+                            setCreateOpen(false);
+                            setNotice({ kind: 'success', text: `Created ${username}.` });
+                            reload();
+                        }}
+                    />
+                )}
+
+                {err && <div className="results-error nexus-card">{err}</div>}
+                {notice && (
+                    <p className={`admin-notice ${notice.kind === 'error' ? 'is-error' : 'is-success'}`} role="status">
+                        {notice.text}
                     </p>
-                </div>
-                <div className="admin-actions">
-                    <Link to="/" className="chip chip-tool">
-                        ← Back to Inventory
-                    </Link>
-                    <Link to="/admin/orgs" className="chip chip-tool">
-                        Orgs
-                    </Link>
-                    <Link to="/admin/audit-log" className="chip chip-tool">
-                        Audit log
-                    </Link>
-                    <button type="button" className="btn-primary" onClick={() => setCreateOpen((v) => !v)}>
-                        {createOpen ? 'Cancel' : 'New user'}
-                    </button>
-                </div>
-            </header>
-
-            {createOpen && (
-                <CreateUserForm
-                    onCreated={(username) => {
-                        setCreateOpen(false);
-                        setNotice({ kind: 'success', text: `Created ${username}.` });
-                        reload();
-                    }}
-                />
-            )}
-
-            {err && <div className="results-error nexus-card">{err}</div>}
-            {notice && (
-                <p className={`admin-notice ${notice.kind === 'error' ? 'is-error' : 'is-success'}`} role="status">
-                    {notice.text}
-                </p>
-            )}
-            {loading ? (
-                <p className="muted">Loading…</p>
-            ) : (
-                <table className="packages admin-users-table">
-                    <thead>
-                        <tr>
-                            <th>Username</th>
-                            <th>Display name</th>
-                            <th>Role</th>
-                            <th>Active</th>
-                            <th>Created</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {users.map((u) => (
-                            <UserRow
-                                key={u.id}
-                                user={u}
-                                isSelf={!!currentUser && currentUser.id === u.id}
-                                onChanged={reload}
-                                onNotice={setNotice}
-                            />
-                        ))}
-                        {!users.length && (
+                )}
+                {loading ? (
+                    <p className="muted">Loading…</p>
+                ) : (
+                    <table className="packages admin-users-table">
+                        <thead>
                             <tr>
-                                <td colSpan={6} className="muted">No users yet.</td>
+                                <th>Username</th>
+                                <th>Display name</th>
+                                <th>Role</th>
+                                <th>Active</th>
+                                <th>Created</th>
+                                <th>Actions</th>
                             </tr>
-                        )}
-                    </tbody>
-                </table>
-            )}
-        </main>
+                        </thead>
+                        <tbody>
+                            {users.map((u) => (
+                                <UserRow
+                                    key={u.id}
+                                    user={u}
+                                    isSelf={!!currentUser && currentUser.id === u.id}
+                                    onChanged={reload}
+                                    onNotice={setNotice}
+                                />
+                            ))}
+                            {!users.length && (
+                                <tr>
+                                    <td colSpan={6} className="muted">No users yet.</td>
+                                </tr>
+                            )}
+                        </tbody>
+                    </table>
+                )}
+            </main>
+        </>
     );
 }
 

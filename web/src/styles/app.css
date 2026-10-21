@@ -6762,3 +6762,199 @@ a.topbar-brand {
 .topbar-drawer-section .topbar-org-name {
     max-width: none;
 }
+
+/* -- Audit trail (readable list) -------------------------------------------- */
+
+.audit-ranges {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: var(--sp-1);
+    align-self: flex-end;
+}
+
+.audit-auto-toggle {
+    align-self: flex-end;
+    min-height: 36px;
+}
+
+.audit-empty {
+    margin-top: var(--sp-6);
+}
+
+.audit-day {
+    margin-top: var(--sp-6);
+}
+
+.audit-day-head {
+    position: sticky;
+    top: var(--topbar-h);
+    z-index: 2;
+    display: flex;
+    align-items: baseline;
+    gap: var(--sp-3);
+    margin: 0;
+    padding: var(--sp-2) 0;
+    background: rgb(var(--nx-bg));
+    border-bottom: 1px solid rgb(var(--nx-rule-strong));
+    font-size: var(--fs-sm);
+    font-weight: 650;
+}
+
+.audit-list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.audit-item {
+    border-bottom: 1px solid rgb(var(--nx-rule-soft));
+}
+
+.audit-item-row {
+    display: grid;
+    grid-template-columns: 4.5rem minmax(0, 1fr) minmax(7rem, 11rem) minmax(7rem, 13rem) 5.5rem;
+    align-items: center;
+    gap: var(--sp-4);
+    width: 100%;
+    padding: var(--sp-3) var(--sp-2);
+    background: none;
+    border: 0;
+    color: rgb(var(--nx-ink));
+    text-align: left;
+    font: inherit;
+    cursor: pointer;
+}
+
+.audit-item-row:hover,
+.audit-item.is-open .audit-item-row {
+    background: rgb(var(--nx-surface));
+}
+
+.audit-time {
+    font: 600 var(--fs-xs) / 1 var(--font-mono);
+    color: rgb(var(--nx-ink-3));
+    font-variant-numeric: tabular-nums;
+}
+
+.audit-what {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+}
+
+.audit-sentence {
+    font-size: var(--fs-sm);
+    font-weight: 550;
+}
+
+.audit-code {
+    font: 500 var(--fs-3xs) / 1 var(--font-mono);
+    color: rgb(var(--nx-ink-3));
+    letter-spacing: 0.04em;
+}
+
+.audit-item.is-auto .audit-sentence {
+    color: rgb(var(--nx-ink-2));
+    font-family: var(--font-mono);
+    font-size: var(--fs-xs);
+}
+
+.audit-item.is-failure .audit-sentence {
+    color: rgb(var(--nx-signal-danger));
+}
+
+.audit-who,
+.audit-where {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: var(--fs-xs);
+    color: rgb(var(--nx-ink-2));
+}
+
+.audit-item .audit-detail {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-3);
+    padding: var(--sp-3) var(--sp-2) var(--sp-4) calc(4.5rem + var(--sp-6));
+}
+
+.audit-changes {
+    border-collapse: collapse;
+    font-size: var(--fs-xs);
+    max-width: 52rem;
+}
+
+.audit-changes th,
+.audit-changes td {
+    padding: var(--sp-1) var(--sp-4) var(--sp-1) 0;
+    border-bottom: 1px solid rgb(var(--nx-rule-soft));
+    text-align: left;
+    vertical-align: top;
+    overflow-wrap: anywhere;
+}
+
+.audit-changes th {
+    font: 600 var(--fs-3xs) / 1.4 var(--font-mono);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: rgb(var(--nx-ink-3));
+}
+
+.audit-field {
+    color: rgb(var(--nx-ink-3));
+    white-space: nowrap;
+}
+
+.audit-changes tr.is-changed td:not(.audit-field) {
+    color: rgb(var(--nx-signal-warning));
+}
+
+.audit-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--sp-2) var(--sp-5);
+    margin: 0;
+    font-size: var(--fs-xs);
+}
+
+.audit-meta dt {
+    font: 600 var(--fs-3xs) / 1.4 var(--font-mono);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: rgb(var(--nx-ink-3));
+}
+
+.audit-meta dd {
+    margin: 0;
+    max-width: 40ch;
+    overflow-wrap: anywhere;
+}
+
+.audit-origin {
+    margin: 0;
+}
+
+.audit-raw > summary {
+    cursor: pointer;
+    font-size: var(--fs-xs);
+    color: rgb(var(--nx-ink-3));
+}
+
+@media (max-width: 760px) {
+    .audit-item-row {
+        grid-template-columns: 3.5rem minmax(0, 1fr);
+        row-gap: var(--sp-1);
+    }
+
+    .audit-who,
+    .audit-where {
+        grid-column: 2;
+    }
+
+    .audit-item .audit-detail {
+        padding-left: var(--sp-2);
+    }
+}
