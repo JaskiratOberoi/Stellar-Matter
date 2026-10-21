@@ -2099,9 +2099,11 @@ function OrdersView({ inventory, canMove, showRecorded = false, onDone, onGoto }
         load();
     }, [load]);
 
+    // Cancelling asks inside the row instead of a browser confirm box.
+    const [confirmCancelId, setConfirmCancelId] = useState(null);
     async function setStatus(o, status) {
         const verb = status === 'cancelled' ? 'Cancel' : status === 'placed' ? 'Reopen' : 'Close';
-        if (status === 'cancelled' && !window.confirm(`Cancel this order${o.reference ? ` (${o.reference})` : ''} with ${o.vendor_name}?`)) return;
+        setConfirmCancelId(null);
         try {
             await updateOrder(o.id, { status });
             onDone(`${verb === 'Cancel' ? 'Cancelled' : verb === 'Reopen' ? 'Reopened' : 'Closed'} order${o.reference ? ` ${o.reference}` : ''}.`);
@@ -2126,6 +2128,12 @@ function OrdersView({ inventory, canMove, showRecorded = false, onDone, onGoto }
     }
 
     const openCount = orders.filter((o) => o.status === 'placed').length;
+    // One lime Receive: the most overdue open order. The rest stay quiet.
+    const leadOrderId = (() => {
+        const late = orders.filter((o) => o.status === 'placed' && (dueLabel(o) || {}).tone === 'danger');
+        late.sort((a, b) => String(a.expected_on || '').localeCompare(String(b.expected_on || '')));
+        return late.length ? late[0].id : null;
+    })();
     const overdue = orders.filter((o) => {
         const d = dueLabel(o);
         return d && d.tone === 'danger';
@@ -2256,15 +2264,30 @@ function OrdersView({ inventory, canMove, showRecorded = false, onDone, onGoto }
                                         </td>
                                         {canMove && (
                                             <td className="inv-row-actions">
-                                                {o.status === 'placed' && (
+                                                {o.status === 'placed' && confirmCancelId !== o.id && (
                                                     <>
-                                                        <button type="button" className="btn-primary btn-sm" onClick={() => onGoto('receive', { order: o })}>
+                                                        <button
+                                                            type="button"
+                                                            className={o.id === leadOrderId ? 'btn-primary btn-sm' : 'chip chip-tool'}
+                                                            onClick={() => onGoto('receive', { order: o })}
+                                                        >
                                                             Receive
                                                         </button>
-                                                        <button type="button" className="chip chip-tool" onClick={() => setStatus(o, 'cancelled')}>
+                                                        <button type="button" className="chip chip-tool" onClick={() => setConfirmCancelId(o.id)}>
                                                             Cancel
                                                         </button>
                                                     </>
+                                                )}
+                                                {o.status === 'placed' && confirmCancelId === o.id && (
+                                                    <span className="inv-void-ask" role="alert">
+                                                        <span>Cancel this order with {o.vendor_name}?</span>
+                                                        <button type="button" className="chip chip-tool chip-danger" onClick={() => setStatus(o, 'cancelled')}>
+                                                            Cancel order
+                                                        </button>
+                                                        <button type="button" className="chip chip-tool" onClick={() => setConfirmCancelId(null)}>
+                                                            Keep
+                                                        </button>
+                                                    </span>
                                                 )}
                                                 {o.status === 'cancelled' && (
                                                     <button type="button" className="chip chip-tool" onClick={() => setStatus(o, 'placed')}>
