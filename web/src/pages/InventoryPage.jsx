@@ -1687,14 +1687,35 @@ function MovementDocket({ formId, heading, sign, total, ready, facts, lines, war
     const hidden = lines.length - shown.length;
     const bigClass = `inv-docket-big${ready ? '' : ' is-empty'}`;
 
+    // Sheets, vials and envelopes don't add up: one unit shows its total, a
+    // mix shows how many materials plus a total per unit underneath.
+    const perUnit = new Map();
+    for (const l of lines) if (l.unit) perUnit.set(l.unit, (perUnit.get(l.unit) || 0) + Math.abs(Number(l.qty) || 0));
+    const mixed = unitLabel === 'units' && perUnit.size > 1;
+    const bigNum = mixed ? lines.length : total;
+    const bigLabel = mixed
+        ? `material${lines.length === 1 ? '' : 's'}`
+        : unitLabel === 'units' && perUnit.size === 1
+          ? [...perUnit.keys()][0]
+          : unitLabel;
+    const bigSign = mixed ? '' : sign;
+
     return (
         <aside className={`inv-docket${warn ? ' is-warn' : ''}`} ref={ref}>
             <p className="inv-docket-head">{heading}</p>
             <div className={bigClass}>
-                {sign}
-                {fmt(total)}
-                <span className="inv-docket-unit">{unitLabel}</span>
+                {bigSign}
+                {fmt(bigNum)}
+                <span className="inv-docket-unit">{bigLabel}</span>
             </div>
+            {mixed && (
+                <p className="inv-docket-units">
+                    {[...perUnit.entries()]
+                        .sort((a, b) => b[1] - a[1])
+                        .map(([u, q]) => `${sign}${fmt(q)} ${u}`)
+                        .join(' · ')}
+                </p>
+            )}
             <dl className="inv-docket-dl">
                 {facts.map(([dt, dd, cls]) => (
                     <div key={dt}>
@@ -1741,8 +1762,8 @@ function MovementDocket({ formId, heading, sign, total, ready, facts, lines, war
             </div>
             <div className="inv-docket-bar" aria-hidden={ready ? undefined : 'true'}>
                 <span className="inv-docket-bar-total">
-                    {sign}
-                    {fmt(total)} <span className="inv-unit">{unitLabel}</span>
+                    {bigSign}
+                    {fmt(bigNum)} <span className="inv-unit">{bigLabel}</span>
                 </span>
                 {review && (
                     <button type="button" className="chip chip-tool" onClick={review.onCancel}>

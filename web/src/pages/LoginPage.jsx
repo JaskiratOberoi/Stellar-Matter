@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Navigate } from 'react-router-dom';
+import { Link, Navigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { BrandMark } from '../components/BrandMark.jsx';
 
@@ -70,6 +70,10 @@ export function LoginPage() {
                         {busy ? 'Signing in…' : 'Sign in'}
                     </button>
                 </form>
+                {/* Sites and labs request stock without an account. */}
+                <p className="muted small mreq-foot">
+                    Need materials but don't have an account? <Link to="/request">Request them here</Link>
+                </p>
             </div>
         </main>
     );

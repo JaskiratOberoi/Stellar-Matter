@@ -20,6 +20,37 @@ function isoToDdmm(s) {
     return m ? `${m[3]}/${m[2]}/${m[1]}` : '';
 }
 
+// Saved scopes: a named set of picks (units, regions, salespeople, client
+// codes, block shape) and a date choice, kept on this device. A quick-range
+// date ("last month") stays relative, so a monthly sweep always means the
+// month just gone.
+const LS_TRACER_PRESETS = 'stellar-matter.tracer.presets.v1';
+
+function readPresets() {
+    try {
+        const v = JSON.parse(localStorage.getItem(LS_TRACER_PRESETS) || '[]');
+        return Array.isArray(v) ? v : [];
+    } catch {
+        return [];
+    }
+}
+
+function writePresets(list) {
+    try {
+        localStorage.setItem(LS_TRACER_PRESETS, JSON.stringify(list));
+    } catch {
+        /* storage blocked: presets live for this session only */
+    }
+}
+
+function rangeIdFor(fromDate, toDate) {
+    const q = QUICK_RANGES.find((r) => {
+        const t = r.build();
+        return fmtDDMMYYYY(t.from) === fromDate && fmtDDMMYYYY(t.to) === toDate;
+    });
+    return q ? q.id : null;
+}
+
 /** The monthly sweep is the common case, so a fresh form starts on last month. */
 function lastMonthWindow() {
     const q = QUICK_RANGES.find((r) => r.id === 'lastMonth');
@@ -99,6 +130,60 @@ export function TracerForm({
     const buGroups = (buOptions.groups || []).filter((g) => buGroupSelected.has(g.id));
     const hasGroupPick = buGroups.length > 0;
     const hasCodePick = clientCodes.length > 0;
+
+    const [presets, setPresets] = useState(readPresets);
+    const [naming, setNaming] = useState(null); // null | draft name
+
+    function savePreset() {
+        const name = String(naming || '').trim();
+        if (!name) return;
+        const range = rangeIdFor(fromDate, toDate);
+        const preset = {
+            id: `p${Date.now()}`,
+            name,
+            bus: [...buSelected],
+            groups: [...buGroupSelected],
+            sales: [...salesSelectedIds].map((id) => {
+                const meta = salesUsers.find((u) => String(u.userId) === id);
+                return { id, label: meta ? meta.label : id };
+            }),
+            codes: clientCodes,
+            collate,
+            range,
+            from: range ? null : fromDate,
+            to: range ? null : toDate
+        };
+        const next = [...presets.filter((p) => p.name.toLowerCase() !== name.toLowerCase()), preset];
+        setPresets(next);
+        writePresets(next);
+        setNaming(null);
+    }
+
+    function applyPreset(p) {
+        buActions.clear();
+        for (const label of p.bus || []) buActions.toggle(label);
+        if (buActions.clearGroups) buActions.clearGroups();
+        for (const id of p.groups || []) if (buActions.toggleGroup) buActions.toggleGroup(id);
+        salesActions.clear();
+        for (const sp of p.sales || []) salesActions.toggle(sp.id, sp.label);
+        setClientCodes(p.codes || []);
+        setCollate(Boolean(p.collate));
+        const q = p.range ? QUICK_RANGES.find((r) => r.id === p.range) : null;
+        if (q) {
+            const t = q.build();
+            setFromDate(fmtDDMMYYYY(t.from));
+            setToDate(fmtDDMMYYYY(t.to));
+        } else if (p.from && p.to) {
+            setFromDate(p.from);
+            setToDate(p.to);
+        }
+    }
+
+    function deletePreset(id) {
+        const next = presets.filter((p) => p.id !== id);
+        setPresets(next);
+        writePresets(next);
+    }
 
     const [scopeTab, setScopeTab] = useState('bu');
     const [scopeQuery, setScopeQuery] = useState('');
@@ -243,6 +328,32 @@ export function TracerForm({
 
                 {/* One scope list at a time instead of four open walls of chips;
                     each tab carries its pick count so nothing selected is hidden. */}
+                {presets.length > 0 && (
+                    <div className="tracer-presets" role="group" aria-label="Saved scopes">
+                        <span className="eyebrow-lite">Saved</span>
+                        {presets.map((p) => (
+                            <span key={p.id} className="tracer-preset">
+                                <button
+                                    type="button"
+                                    className="tracer-preset-apply"
+                                    title={`${(p.bus || []).length} units, ${(p.groups || []).length} regions, ${(p.sales || []).length} salespeople${(p.codes || []).length ? ', client codes' : ''}${p.range ? ` · ${(QUICK_RANGES.find((r) => r.id === p.range) || {}).label || ''}` : ''}`}
+                                    onClick={() => applyPreset(p)}
+                                >
+                                    {p.name}
+                                </button>
+                                <button
+                                    type="button"
+                                    className="tracer-preset-x"
+                                    aria-label={`Delete saved scope ${p.name}`}
+                                    onClick={() => deletePreset(p.id)}
+                                >
+                                    ×
+                                </button>
+                            </span>
+                        ))}
+                    </div>
+                )}
+
                 <div className="tracer-scope-tabs" role="tablist" aria-label="Scope">
                     {scopeTabs.map((t) => (
                         <button
@@ -326,6 +437,38 @@ export function TracerForm({
                 {/* What Run will do, before it does it: every pick across all four
                     tabs, removable here, plus the window and the block shape. */}
                 <div className="tracer-willrun" aria-live="polite">
+                    {picks.length > 0 && (
+                        <div className="tracer-save">
+                            {naming == null ? (
+                                <button type="button" className="chip chip-tool" onClick={() => setNaming('')}>
+                                    Save these picks
+                                </button>
+                            ) : (
+                                <>
+                                    <input
+                                        type="text"
+                                        autoFocus
+                                        placeholder="Name, e.g. Monthly sweep"
+                                        value={naming}
+                                        onChange={(e) => setNaming(e.target.value)}
+                                        onKeyDown={(e) => {
+                                            if (e.key === 'Enter') {
+                                                e.preventDefault();
+                                                savePreset();
+                                            }
+                                            if (e.key === 'Escape') setNaming(null);
+                                        }}
+                                    />
+                                    <button type="button" className="chip chip-tool" disabled={!naming.trim()} onClick={savePreset}>
+                                        Save
+                                    </button>
+                                    <button type="button" className="chip chip-tool" onClick={() => setNaming(null)}>
+                                        Cancel
+                                    </button>
+                                </>
+                            )}
+                        </div>
+                    )}
                     <p className="tracer-willrun-head">
                         <span className="eyebrow-lite">Will run</span>
                         <span>

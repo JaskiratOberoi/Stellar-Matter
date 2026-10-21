@@ -7721,3 +7721,18 @@ a.topbar-brand {
         padding: var(--sp-5);
     }
 }
+
+/* Docket: per-unit totals under the big number when units are mixed. */
+.inv-docket-units {
+    margin: calc(-1 * var(--sp-2)) 0 var(--sp-3);
+    font-size: var(--fs-xs);
+    color: rgb(var(--nx-ink-2));
+    font-variant-numeric: tabular-nums;
+    line-height: 1.5;
+}
+
+.mreq-foot a {
+    color: rgb(var(--nx-accent));
+    text-decoration: underline;
+    text-underline-offset: 3px;
+}
