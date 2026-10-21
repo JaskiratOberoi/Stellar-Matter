@@ -8,9 +8,11 @@ async function readJson(res) {
     try {
         json = text ? JSON.parse(text) : {};
     } catch {
+        // An HTML page here means the API answered with its app shell: the
+        // server running doesn't have the material-requests routes yet.
         throw new Error(
             text.trim().startsWith('<')
-                ? 'Received HTML instead of JSON — is /api proxied to the server?'
+                ? "This server doesn't have material requests yet. The API needs updating."
                 : 'Invalid JSON from server.'
         );
     }

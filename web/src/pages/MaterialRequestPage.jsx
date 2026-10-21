@@ -1,33 +1,150 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { BrandMark } from '../components/BrandMark.jsx';
 import { unlockMaterialRequestCatalog, submitMaterialRequest } from '../hooks/useMaterialRequests.js';
 
+// Who is asking, kept on this device so a repeat requester doesn't retype it.
+const LS_REQUESTER = 'stellar-matter.request.requester';
+
+function readRequester() {
+    try {
+        const v = JSON.parse(localStorage.getItem(LS_REQUESTER) || 'null');
+        return v && typeof v === 'object' ? v : {};
+    } catch {
+        return {};
+    }
+}
+
+let lineSeq = 0;
 function emptyLine() {
-    return { material_id: '', material_name: '', quantity: '1', unit: 'unit', mode: 'catalog' };
+    lineSeq += 1;
+    // material_id set = a catalog item; otherwise material_name is free text.
+    return { key: `l${lineSeq}`, material_id: '', material_name: '', quantity: '1', unit: '' };
+}
+
+/**
+ * One box per line: type to search the catalog, or keep your own wording as
+ * an item that isn't in the catalog. Replaces a Catalog/Custom switch.
+ */
+function ItemPicker({ line, materials, onPick }) {
+    const rootRef = useRef(null);
+    const [open, setOpen] = useState(false);
+    const [q, setQ] = useState(line.material_id ? '' : line.material_name);
+    const [active, setActive] = useState(0);
+    const picked = line.material_id ? materials.find((m) => m.id === line.material_id) : null;
+
+    const matches = useMemo(() => {
+        const s = q.trim().toLowerCase();
+        const list = s ? materials.filter((m) => m.name.toLowerCase().includes(s)) : materials;
+        return list.slice(0, 30);
+    }, [q, materials]);
+    const exact = matches.some((m) => m.name.toLowerCase() === q.trim().toLowerCase());
+    const options = [...matches.map((m) => ({ m })), ...(q.trim() && !exact ? [{ custom: q.trim() }] : [])];
+
+    useEffect(() => setActive(0), [q]);
+    useEffect(() => {
+        if (!open) return undefined;
+        const onDown = (e) => {
+            if (rootRef.current && !rootRef.current.contains(e.target)) setOpen(false);
+        };
+        document.addEventListener('pointerdown', onDown);
+        return () => document.removeEventListener('pointerdown', onDown);
+    }, [open]);
+
+    const choose = (o) => {
+        if (o.m) {
+            onPick({ material_id: o.m.id, material_name: o.m.name, unit: o.m.base_unit || 'unit' });
+            setQ('');
+        } else {
+            onPick({ material_id: '', material_name: o.custom, unit: line.unit || '' });
+            setQ(o.custom);
+        }
+        setOpen(false);
+    };
+
+    const shown = open ? q : picked ? picked.name : q;
+    return (
+        <div className={`inv-combo mreq-item${open ? ' is-open' : ''}`} ref={rootRef}>
+            <input
+                className="inv-combo-input mreq-item-input"
+                value={shown}
+                placeholder="Search the catalog or describe the item"
+                aria-label="Item"
+                role="combobox"
+                aria-expanded={open ? 'true' : 'false'}
+                autoComplete="off"
+                onFocus={() => {
+                    setOpen(true);
+                    if (picked) setQ('');
+                }}
+                onChange={(e) => {
+                    setQ(e.target.value);
+                    setOpen(true);
+                    if (line.material_id) onPick({ material_id: '', material_name: e.target.value, unit: '' });
+                    else onPick({ material_name: e.target.value });
+                }}
+                onKeyDown={(e) => {
+                    if (e.key === 'ArrowDown') {
+                        e.preventDefault();
+                        setActive((a) => Math.min(a + 1, options.length - 1));
+                    } else if (e.key === 'ArrowUp') {
+                        e.preventDefault();
+                        setActive((a) => Math.max(a - 1, 0));
+                    } else if (e.key === 'Enter' && open && options[active]) {
+                        e.preventDefault();
+                        choose(options[active]);
+                    } else if (e.key === 'Escape') {
+                        setOpen(false);
+                    }
+                }}
+            />
+            {open && options.length > 0 && (
+                <div className="inv-combo-menu" role="listbox">
+                    {options.map((o, i) => (
+                        <button
+                            key={o.m ? o.m.id : 'custom'}
+                            type="button"
+                            role="option"
+                            aria-selected={i === active ? 'true' : 'false'}
+                            className={`inv-combo-option${i === active ? ' is-hl' : ''}${o.custom ? ' inv-combo-add' : ''}`}
+                            onMouseEnter={() => setActive(i)}
+                            onClick={() => choose(o)}
+                        >
+                            {o.m ? (
+                                <>
+                                    <span>{o.m.name}</span>
+                                    <span className="inv-combo-kind">{o.m.base_unit}</span>
+                                </>
+                            ) : (
+                                <>
+                                    <span>Use “{o.custom}”</span>
+                                    <span className="inv-combo-new-badge">not in catalog</span>
+                                </>
+                            )}
+                        </button>
+                    ))}
+                </div>
+            )}
+        </div>
+    );
 }
 
 export function MaterialRequestPage() {
+    const remembered = useMemo(readRequester, []);
     const [step, setStep] = useState('code'); // code | form | done
     const [code, setCode] = useState('');
     const [org, setOrg] = useState(null);
     const [materials, setMaterials] = useState([]);
     const [busy, setBusy] = useState(false);
     const [err, setErr] = useState(null);
-    const [submittedId, setSubmittedId] = useState(null);
+    const [sent, setSent] = useState(null);
 
-    const [requesterName, setRequesterName] = useState('');
-    const [requesterContact, setRequesterContact] = useState('');
-    const [locationText, setLocationText] = useState('');
+    const [requesterName, setRequesterName] = useState(remembered.name || '');
+    const [requesterContact, setRequesterContact] = useState(remembered.contact || '');
+    const [locationText, setLocationText] = useState(remembered.location || '');
     const [neededBy, setNeededBy] = useState('');
     const [notes, setNotes] = useState('');
-    const [lines, setLines] = useState([emptyLine()]);
-
-    const materialById = useMemo(() => {
-        const m = new Map();
-        for (const mat of materials) m.set(mat.id, mat);
-        return m;
-    }, [materials]);
+    const [lines, setLines] = useState(() => [emptyLine()]);
 
     async function onUnlock(e) {
         e.preventDefault();
@@ -36,7 +153,7 @@ export function MaterialRequestPage() {
         try {
             const j = await unlockMaterialRequestCatalog(code.trim());
             setOrg(j.org || null);
-            setMaterials(j.materials || []);
+            setMaterials((j.materials || []).slice().sort((a, b) => a.name.localeCompare(b.name)));
             setStep('form');
         } catch (e2) {
             setErr(String(e2.message || e2));
@@ -45,38 +162,26 @@ export function MaterialRequestPage() {
         }
     }
 
-    function updateLine(idx, patch) {
-        setLines((prev) => prev.map((line, i) => (i === idx ? { ...line, ...patch } : line)));
-    }
+    const updateLine = (key, patch) => setLines((prev) => prev.map((l) => (l.key === key ? { ...l, ...patch } : l)));
+    const removeLine = (key) => setLines((prev) => (prev.length <= 1 ? prev : prev.filter((l) => l.key !== key)));
 
-    function addLine() {
-        setLines((prev) => [...prev, emptyLine()]);
-    }
-
-    function removeLine(idx) {
-        setLines((prev) => (prev.length <= 1 ? prev : prev.filter((_, i) => i !== idx)));
-    }
+    const filled = lines.filter((l) => (l.material_id || l.material_name.trim()) && Number(l.quantity) > 0);
+    const incomplete = lines.some((l) => (l.material_id || l.material_name.trim()) && !(Number(l.quantity) > 0));
 
     async function onSubmit(e) {
         e.preventDefault();
-        setBusy(true);
         setErr(null);
+        if (!filled.length) return setErr('Add at least one item with a quantity.');
+        if (incomplete) return setErr('Every item needs a quantity above 0.');
+        const customNoUnit = filled.find((l) => !l.material_id && !l.unit.trim());
+        if (customNoUnit) return setErr(`Say what unit “${customNoUnit.material_name.trim()}” is counted in (box, piece…).`);
+        setBusy(true);
         try {
-            const payloadLines = lines.map((line) => {
-                if (line.mode === 'custom') {
-                    return {
-                        material_name: line.material_name.trim(),
-                        quantity: Number(line.quantity),
-                        unit: line.unit.trim() || 'unit'
-                    };
-                }
-                const mat = materialById.get(line.material_id);
-                return {
-                    material_id: line.material_id,
-                    quantity: Number(line.quantity),
-                    unit: (line.unit || (mat && mat.base_unit) || 'unit').trim()
-                };
-            });
+            const payloadLines = filled.map((l) =>
+                l.material_id
+                    ? { material_id: l.material_id, quantity: Number(l.quantity), unit: l.unit || 'unit' }
+                    : { material_name: l.material_name.trim(), quantity: Number(l.quantity), unit: l.unit.trim() }
+            );
             const j = await submitMaterialRequest({
                 code: code.trim(),
                 requester_name: requesterName.trim(),
@@ -86,7 +191,23 @@ export function MaterialRequestPage() {
                 notes: notes.trim() || null,
                 lines: payloadLines
             });
-            setSubmittedId(j.request && j.request.id);
+            try {
+                localStorage.setItem(
+                    LS_REQUESTER,
+                    JSON.stringify({ name: requesterName.trim(), contact: requesterContact.trim(), location: locationText.trim() })
+                );
+            } catch {
+                /* storage blocked: nothing remembered */
+            }
+            setSent({
+                id: j.request && j.request.id,
+                items: filled.map((l) => ({
+                    name: l.material_id ? (materials.find((m) => m.id === l.material_id) || {}).name || l.material_name : l.material_name.trim(),
+                    qty: Number(l.quantity),
+                    unit: l.unit
+                })),
+                neededBy
+            });
             setStep('done');
         } catch (e2) {
             setErr(String(e2.message || e2));
@@ -95,43 +216,46 @@ export function MaterialRequestPage() {
         }
     }
 
-    if (step === 'done') {
+    if (step === 'done' && sent) {
         return (
             <main className="login-shell mreq-shell">
                 <div className="nexus-card login-card mreq-card">
                     <div className="login-brand">
                         <BrandMark size={40} className="login-brand-mark" />
-                        <p className="eyebrow">Materials request</p>
+                        <p className="eyebrow">{org?.name || 'Material request'}</p>
                     </div>
-                    <h1 className="wordmark login-title">Request submitted</h1>
+                    <h1 className="wordmark login-title">Request sent</h1>
                     <p className="muted small login-sub">
-                        Thanks{requesterName ? `, ${requesterName}` : ''}. Your request
-                        {submittedId ? (
-                            <>
-                                {' '}
-                                (<code className="mreq-code">{submittedId}</code>)
-                            </>
-                        ) : null}{' '}
-                        was sent to {org?.name || 'the organization'} for review.
+                        Thanks{requesterName ? `, ${requesterName.split(' ')[0]}` : ''}. An admin will review it
+                        {sent.neededBy ? ` before ${new Date(`${sent.neededBy}T12:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}` : ''} and
+                        contact you at {requesterContact} if anything is unclear.
                     </p>
+                    <ul className="mreq-sent">
+                        {sent.items.map((it, i) => (
+                            <li key={i}>
+                                <span>{it.name}</span>
+                                <span className="mreq-sent-qty">
+                                    {it.qty.toLocaleString()} {it.unit}
+                                </span>
+                            </li>
+                        ))}
+                    </ul>
+                    {sent.id && <p className="muted small">Reference: <code className="mreq-code">{sent.id}</code></p>}
                     <div className="form-actions mreq-actions">
                         <button
                             type="button"
                             className="btn-primary"
                             onClick={() => {
                                 setStep('form');
-                                setSubmittedId(null);
+                                setSent(null);
                                 setLines([emptyLine()]);
                                 setNotes('');
                                 setNeededBy('');
                                 setErr(null);
                             }}
                         >
-                            Submit another
+                            Send another request
                         </button>
-                        <Link to="/login" className="chip chip-tool">
-                            Staff sign in
-                        </Link>
                     </div>
                 </div>
             </main>
@@ -146,13 +270,13 @@ export function MaterialRequestPage() {
                         <BrandMark size={40} className="login-brand-mark" />
                         <p className="eyebrow">Stellar Matter</p>
                     </div>
-                    <h1 className="wordmark login-title">Materials request</h1>
+                    <h1 className="wordmark login-title">Request materials</h1>
                     <p className="muted small login-sub">
-                        Enter the organization access code provided by your admin to open the request form.
+                        Enter the access code your organisation gave you to open the request form.
                     </p>
                     <form onSubmit={onUnlock} className="login-form">
                         <label>
-                            Organization access code
+                            Access code
                             <input
                                 type="text"
                                 autoComplete="off"
@@ -164,7 +288,7 @@ export function MaterialRequestPage() {
                                 spellCheck={false}
                             />
                         </label>
-                        {err && <p className="login-err">{err}</p>}
+                        {err && <p className="login-err" role="alert">{err}</p>}
                         <button type="submit" className="btn-primary" disabled={busy || code.trim().length < 6}>
                             {busy ? 'Checking…' : 'Continue'}
                         </button>
@@ -182,169 +306,115 @@ export function MaterialRequestPage() {
             <div className="nexus-card login-card mreq-card mreq-card--wide">
                 <div className="login-brand">
                     <BrandMark size={40} className="login-brand-mark" />
-                    <p className="eyebrow">{org?.name || 'Materials request'}</p>
+                    <p className="eyebrow">{org?.name || 'Material request'}</p>
                 </div>
                 <h1 className="wordmark login-title">Request materials</h1>
                 <p className="muted small login-sub">
-                    Pick catalog items or add a custom line. An admin will review before anything is ordered.
+                    Add what you need. An admin reviews every request before anything is sent.
                 </p>
 
                 <form onSubmit={onSubmit} className="login-form mreq-form">
-                    <div className="grid2 sidebar-grid">
-                        <label>
-                            Your name
-                            <input
-                                value={requesterName}
-                                onChange={(e) => setRequesterName(e.target.value)}
-                                required
-                                autoFocus
-                            />
-                        </label>
-                        <label>
-                            Contact (email or phone)
-                            <input
-                                value={requesterContact}
-                                onChange={(e) => setRequesterContact(e.target.value)}
-                                required
-                            />
-                        </label>
-                        <label>
-                            Location / lab
-                            <input
-                                value={locationText}
-                                onChange={(e) => setLocationText(e.target.value)}
-                                placeholder="e.g. Genomics store"
-                            />
-                        </label>
-                        <label>
-                            Needed by
-                            <input type="date" value={neededBy} onChange={(e) => setNeededBy(e.target.value)} />
-                        </label>
-                    </div>
+                    <fieldset className="mreq-who-fields">
+                        <legend className="eyebrow-lite">Your details</legend>
+                        <div className="grid2 sidebar-grid">
+                            <label>
+                                Your name
+                                <input
+                                    value={requesterName}
+                                    onChange={(e) => setRequesterName(e.target.value)}
+                                    autoComplete="name"
+                                    required
+                                    autoFocus={!requesterName}
+                                />
+                            </label>
+                            <label>
+                                Phone or email
+                                <input
+                                    value={requesterContact}
+                                    onChange={(e) => setRequesterContact(e.target.value)}
+                                    autoComplete="tel"
+                                    required
+                                />
+                            </label>
+                            <label>
+                                Site or lab
+                                <input
+                                    value={locationText}
+                                    onChange={(e) => setLocationText(e.target.value)}
+                                    placeholder="e.g. Karnal collection centre"
+                                />
+                            </label>
+                            <label>
+                                Needed by
+                                <input type="date" value={neededBy} onChange={(e) => setNeededBy(e.target.value)} />
+                            </label>
+                        </div>
+                    </fieldset>
+
+                    <fieldset className="mreq-items-fields">
+                        <legend className="eyebrow-lite">Items</legend>
+                        <div className="mreq-item-rows">
+                            {lines.map((line) => {
+                                const isCatalog = Boolean(line.material_id);
+                                return (
+                                    <div key={line.key} className="mreq-item-row">
+                                        <ItemPicker
+                                            line={line}
+                                            materials={materials}
+                                            onPick={(patch) => updateLine(line.key, patch)}
+                                        />
+                                        <input
+                                            className="mreq-qty"
+                                            type="number"
+                                            inputMode="numeric"
+                                            min="1"
+                                            step="1"
+                                            aria-label="Quantity"
+                                            value={line.quantity}
+                                            onChange={(e) => updateLine(line.key, { quantity: e.target.value })}
+                                        />
+                                        {isCatalog ? (
+                                            <span className="mreq-unit" title="Unit from the catalog">
+                                                {line.unit}
+                                            </span>
+                                        ) : (
+                                            <input
+                                                className="mreq-unit-input"
+                                                aria-label="Unit"
+                                                placeholder="unit"
+                                                value={line.unit}
+                                                onChange={(e) => updateLine(line.key, { unit: e.target.value })}
+                                            />
+                                        )}
+                                        <button
+                                            type="button"
+                                            className="mreq-remove"
+                                            aria-label="Remove item"
+                                            disabled={lines.length <= 1}
+                                            onClick={() => removeLine(line.key)}
+                                        >
+                                            ×
+                                        </button>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                        <button type="button" className="chip chip-tool mreq-add" onClick={() => setLines((p) => [...p, emptyLine()])}>
+                            + Add another item
+                        </button>
+                    </fieldset>
 
                     <label>
-                        Notes
+                        Anything else?
                         <textarea
                             rows={2}
                             value={notes}
                             onChange={(e) => setNotes(e.target.value)}
-                            placeholder="Optional context for the reviewer"
+                            placeholder="Optional note for the reviewer"
                         />
                     </label>
 
-                    <div className="mreq-lines">
-                        <div className="row-between mreq-lines-head">
-                            <p className="eyebrow-lite">Line items</p>
-                            <button type="button" className="chip chip-tool" onClick={addLine}>
-                                + Add line
-                            </button>
-                        </div>
-                        {lines.map((line, idx) => {
-                            const mat = materialById.get(line.material_id);
-                            return (
-                                <div key={idx} className="mreq-line nexus-card">
-                                    <div className="mreq-line-mode">
-                                        <label className="mreq-radio">
-                                            <input
-                                                type="radio"
-                                                name={`mode-${idx}`}
-                                                checked={line.mode === 'catalog'}
-                                                onChange={() =>
-                                                    updateLine(idx, {
-                                                        mode: 'catalog',
-                                                        material_name: '',
-                                                        unit: (mat && mat.base_unit) || line.unit || 'unit'
-                                                    })
-                                                }
-                                            />
-                                            Catalog
-                                        </label>
-                                        <label className="mreq-radio">
-                                            <input
-                                                type="radio"
-                                                name={`mode-${idx}`}
-                                                checked={line.mode === 'custom'}
-                                                onChange={() =>
-                                                    updateLine(idx, {
-                                                        mode: 'custom',
-                                                        material_id: '',
-                                                        unit: line.unit || 'unit'
-                                                    })
-                                                }
-                                            />
-                                            Custom
-                                        </label>
-                                        {lines.length > 1 && (
-                                            <button
-                                                type="button"
-                                                className="chip chip-tool mreq-line-remove"
-                                                onClick={() => removeLine(idx)}
-                                            >
-                                                Remove
-                                            </button>
-                                        )}
-                                    </div>
-                                    {line.mode === 'catalog' ? (
-                                        <label>
-                                            Material
-                                            <select
-                                                value={line.material_id}
-                                                required
-                                                onChange={(e) => {
-                                                    const next = materialById.get(e.target.value);
-                                                    updateLine(idx, {
-                                                        material_id: e.target.value,
-                                                        unit: (next && next.base_unit) || 'unit'
-                                                    });
-                                                }}
-                                            >
-                                                <option value="">— pick a material —</option>
-                                                {materials.map((m) => (
-                                                    <option key={m.id} value={m.id}>
-                                                        {m.name}
-                                                        {m.sku ? ` (${m.sku})` : ''}
-                                                    </option>
-                                                ))}
-                                            </select>
-                                        </label>
-                                    ) : (
-                                        <label>
-                                            Custom material name
-                                            <input
-                                                value={line.material_name}
-                                                onChange={(e) => updateLine(idx, { material_name: e.target.value })}
-                                                required
-                                                placeholder="Describe what you need"
-                                            />
-                                        </label>
-                                    )}
-                                    <div className="grid2 sidebar-grid">
-                                        <label>
-                                            Quantity
-                                            <input
-                                                type="number"
-                                                min="0.01"
-                                                step="any"
-                                                value={line.quantity}
-                                                onChange={(e) => updateLine(idx, { quantity: e.target.value })}
-                                                required
-                                            />
-                                        </label>
-                                        <label>
-                                            Unit
-                                            <input
-                                                value={line.unit}
-                                                onChange={(e) => updateLine(idx, { unit: e.target.value })}
-                                                required
-                                            />
-                                        </label>
-                                    </div>
-                                </div>
-                            );
-                        })}
-                    </div>
-
-                    {err && <p className="login-err">{err}</p>}
+                    {err && <p className="login-err" role="alert">{err}</p>}
                     <div className="form-actions mreq-actions">
                         <button
                             type="button"
@@ -355,10 +425,10 @@ export function MaterialRequestPage() {
                                 setErr(null);
                             }}
                         >
-                            Change code
+                            Use a different code
                         </button>
-                        <button type="submit" className="btn-primary" disabled={busy}>
-                            {busy ? 'Submitting…' : 'Submit request'}
+                        <button type="submit" className="btn-primary" disabled={busy || !filled.length}>
+                            {busy ? 'Sending…' : `Send request${filled.length ? ` (${filled.length} item${filled.length === 1 ? '' : 's'})` : ''}`}
                         </button>
                     </div>
                 </form>
