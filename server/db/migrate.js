@@ -349,6 +349,10 @@ async function migrate() {
         // module is tenant-scoped without touching legacy single-org deploys.
         await migrateInventory(client);
 
+        // Materials request workflow — public form submissions keyed by an
+        // org request code, plus admin consolidate → super_admin send handoff.
+        await migrateMaterialRequests(client);
+
         // Fold any legacy "Default" / duplicate acme-labs org into the single
         // canonical tenant so the org switcher only shows Qugen Pathlabs.
         await consolidateDefaultOrg(client);
@@ -774,6 +778,124 @@ async function backfillCatalogMaterials(client) {
             );
         }
     }
+}
+
+async function migrateMaterialRequests(client) {
+    // Public form unlocks via a shared org request code. Only the bcrypt hash
+    // is stored; plaintext is shown once at generation/reset time.
+    await client.query(
+        `ALTER TABLE organizations ADD COLUMN IF NOT EXISTS request_code_hash TEXT`
+    );
+    await client.query(
+        `ALTER TABLE organizations ADD COLUMN IF NOT EXISTS request_code_set_at TIMESTAMPTZ`
+    );
+
+    // Individual requests from the public form. Status moves
+    // submitted → approved → batched, or → cancelled at any pre-batched stage.
+    await client.query(`
+        CREATE TABLE IF NOT EXISTS material_requests (
+            id TEXT PRIMARY KEY,
+            org_id TEXT NOT NULL DEFAULT 'org-default'
+                REFERENCES organizations(id) ON DELETE RESTRICT,
+            status TEXT NOT NULL DEFAULT 'submitted'
+                CHECK (status IN ('submitted', 'approved', 'batched', 'cancelled')),
+            requester_name TEXT NOT NULL,
+            requester_contact TEXT NOT NULL,
+            location_text TEXT,
+            needed_by DATE,
+            notes TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            approved_at TIMESTAMPTZ,
+            approved_by TEXT,
+            cancelled_at TIMESTAMPTZ,
+            cancelled_by TEXT,
+            cancel_reason TEXT,
+            batch_id TEXT
+        );
+    `);
+    await client.query(
+        `CREATE INDEX IF NOT EXISTS material_requests_org_status_idx
+         ON material_requests (org_id, status, created_at DESC);`
+    );
+    await client.query(
+        `CREATE INDEX IF NOT EXISTS material_requests_batch_idx
+         ON material_requests (batch_id) WHERE batch_id IS NOT NULL;`
+    );
+
+    // Line items. material_name is always a snapshot so later catalog renames
+    // or custom free-text lines stay readable in the approval queue.
+    await client.query(`
+        CREATE TABLE IF NOT EXISTS material_request_lines (
+            id BIGSERIAL PRIMARY KEY,
+            request_id TEXT NOT NULL REFERENCES material_requests(id) ON DELETE CASCADE,
+            material_id TEXT REFERENCES inventory_materials(id) ON DELETE SET NULL,
+            material_name TEXT NOT NULL,
+            is_custom BOOLEAN NOT NULL DEFAULT false,
+            quantity NUMERIC NOT NULL CHECK (quantity > 0),
+            unit TEXT NOT NULL DEFAULT 'unit',
+            position INT NOT NULL DEFAULT 0
+        );
+    `);
+    await client.query(
+        `CREATE INDEX IF NOT EXISTS material_request_lines_request_idx
+         ON material_request_lines (request_id, position);`
+    );
+
+    // Consolidated batches handed from admins to the supply / super_admin queue.
+    // draft → submitted → sent, or cancelled.
+    await client.query(`
+        CREATE TABLE IF NOT EXISTS material_request_batches (
+            id TEXT PRIMARY KEY,
+            org_id TEXT NOT NULL DEFAULT 'org-default'
+                REFERENCES organizations(id) ON DELETE RESTRICT,
+            status TEXT NOT NULL DEFAULT 'draft'
+                CHECK (status IN ('draft', 'submitted', 'sent', 'cancelled')),
+            note TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            created_by TEXT,
+            submitted_at TIMESTAMPTZ,
+            submitted_by TEXT,
+            sent_at TIMESTAMPTZ,
+            sent_by TEXT,
+            cancelled_at TIMESTAMPTZ,
+            cancelled_by TEXT,
+            cancel_reason TEXT
+        );
+    `);
+    await client.query(
+        `CREATE INDEX IF NOT EXISTS material_request_batches_org_status_idx
+         ON material_request_batches (org_id, status, created_at DESC);`
+    );
+
+    // A request may belong to at most one batch (UNIQUE on request_id).
+    await client.query(`
+        CREATE TABLE IF NOT EXISTS material_request_batch_items (
+            batch_id TEXT NOT NULL
+                REFERENCES material_request_batches(id) ON DELETE CASCADE,
+            request_id TEXT NOT NULL
+                REFERENCES material_requests(id) ON DELETE RESTRICT,
+            PRIMARY KEY (batch_id, request_id),
+            UNIQUE (request_id)
+        );
+    `);
+
+    // FK from request → batch (added after batches exist so CREATE order is safe).
+    await client.query(`
+        DO $body$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM pg_constraint
+                WHERE conname = 'material_requests_batch_id_fkey'
+            ) THEN
+                ALTER TABLE material_requests
+                    ADD CONSTRAINT material_requests_batch_id_fkey
+                    FOREIGN KEY (batch_id)
+                    REFERENCES material_request_batches(id)
+                    ON DELETE SET NULL;
+            END IF;
+        END
+        $body$;
+    `);
 }
 
 async function seedSuperAdmin(client) {

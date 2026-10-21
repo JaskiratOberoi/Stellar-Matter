@@ -715,6 +715,7 @@ let auth = null;
 let authApi = null;
 let adminApi = null;
 let inventoryApi = null;
+let materialRequestsApi = null;
 let runMigrate = null;
 let auditLog = null;
 // Phase 8: runs ingest helpers. When DATABASE_URL is set we ingest each
@@ -736,6 +737,7 @@ try {
     authApi = require(path.join(serverDir, 'routes', 'authApi'));
     adminApi = require(path.join(serverDir, 'routes', 'adminApi'));
     inventoryApi = require(path.join(serverDir, 'routes', 'inventoryApi'));
+    materialRequestsApi = require(path.join(serverDir, 'routes', 'materialRequestsApi'));
     runMigrate = require(path.join(serverDir, 'db', 'migrate')).migrate;
     auditLog = require(path.join(serverDir, 'audit')).logAudit;
     auditRequests = require(path.join(serverDir, 'auditRequest')).auditRequests;
@@ -755,15 +757,19 @@ if (auditRequests) app.use(auditRequests());
 if (authApi) app.use('/api/auth', authApi);
 if (adminApi) app.use('/api/admin', adminApi);
 if (inventoryApi) app.use('/api/inventory', inventoryApi);
+if (materialRequestsApi) app.use('/api/material-requests', materialRequestsApi);
 
 if (auth) {
-    // Public whitelist: health + auth login. Everything else under /api requires a token
-    // when DATABASE_URL is set (auth.requireAuth gracefully no-ops when it isn't).
+    // Public whitelist: health + auth login + materials-request public form.
+    // Everything else under /api requires a token when DATABASE_URL is set
+    // (auth.requireAuth gracefully no-ops when it isn't). Admin + materials
+    // review routers install their own role gates.
     app.use((req, res, next) => {
         if (!req.path.startsWith('/api/')) return next();
         if (req.path === '/api/health') return next();
         if (req.path.startsWith('/api/auth/')) return next();
         if (req.path.startsWith('/api/admin/')) return next(); // adminApi installs its own gates
+        if (req.path.startsWith('/api/material-requests/public')) return next();
         return auth.requireAuth(req, res, next);
     });
 }

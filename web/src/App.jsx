@@ -8,6 +8,8 @@ import { LoginPage } from './pages/LoginPage.jsx';
 import { AdminUsersPage } from './pages/AdminUsersPage.jsx';
 import { AdminAuditLogPage } from './pages/AdminAuditLogPage.jsx';
 import { AdminOrgsPage } from './pages/AdminOrgsPage.jsx';
+import { AdminMaterialRequestsPage } from './pages/AdminMaterialRequestsPage.jsx';
+import { MaterialRequestPage } from './pages/MaterialRequestPage.jsx';
 import { InventoryPage } from './pages/InventoryPage.jsx';
 import { TracerPage } from './pages/TracerPage.jsx';
 import { useAuth } from './contexts/AuthContext.jsx';
@@ -35,6 +37,7 @@ export function App() {
             <>
                 <Routes>
                     <Route path="/login" element={<LoginPage />} />
+                    <Route path="/request" element={<MaterialRequestPage />} />
                     <Route path="*" element={<Navigate to="/login" replace />} />
                 </Routes>
                 <InstallPrompt />
@@ -53,6 +56,7 @@ export function App() {
         <>
             <Routes>
                 <Route path="/login" element={<LoginPage />} />
+                <Route path="/request" element={<MaterialRequestPage />} />
                 <Route
                     path="/admin/users"
                     element={
@@ -74,6 +78,14 @@ export function App() {
                     element={
                         <RoleGate roles={['super_admin']}>
                             <AdminOrgsPage />
+                        </RoleGate>
+                    }
+                />
+                <Route
+                    path="/admin/material-requests"
+                    element={
+                        <RoleGate roles={['super_admin', 'admin']}>
+                            <AdminMaterialRequestsPage />
                         </RoleGate>
                     }
                 />

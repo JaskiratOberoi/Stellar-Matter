@@ -59,7 +59,20 @@ const adminWriteLimiter = rateLimit({
     validate: { xForwardedForHeader: false }
 });
 
+// Public materials-request unlock + submit. IP-keyed like loginLimiter; a
+// slightly higher budget so a form round-trip (unlock then submit) is not
+// tripped by one mistyped code retry.
+const materialRequestPublicLimiter = rateLimit({
+    windowMs: ONE_MINUTE_MS,
+    limit: 20,
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    handler: buildHandler('materials-request'),
+    validate: false
+});
+
 module.exports = {
     loginLimiter,
-    adminWriteLimiter
+    adminWriteLimiter,
+    materialRequestPublicLimiter
 };

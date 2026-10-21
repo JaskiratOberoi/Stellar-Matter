@@ -13,6 +13,7 @@ const ROLE_LABEL = { super_admin: 'Super admin', admin: 'Admin', operator: 'Oper
 // Admin destinations, each gated by role. The topbar shows them in one menu
 // instead of a row of chips.
 const ADMIN_LINKS = [
+    { to: '/admin/material-requests', label: 'Material requests', caption: 'Review and approve requests', roles: ['super_admin', 'admin'] },
     { to: '/admin/users', label: 'Users', caption: 'Accounts and roles', roles: ['super_admin'] },
     { to: '/admin/orgs', label: 'Orgs', caption: 'Organisations and members', roles: ['super_admin'] },
     { to: '/admin/audit-log', label: 'Audit trail', caption: 'Who changed what, when', roles: ['super_admin'] }
@@ -363,30 +364,41 @@ export function Topbar({ statusPill, lastUpdated, onOrgSwitched }) {
                                         </p>
                                         <OrgSwitcher user={user} orgs={orgs} onSwitch={switchOrgHandler} />
                                     </div>
-                                    {user.role === 'super_admin' && (
+                                    {(user.role === 'super_admin' || user.role === 'admin') && (
                                         <div className="topbar-drawer-section">
                                             <p className="eyebrow">Admin</p>
                                             <Link
-                                                to="/admin/users"
+                                                to="/admin/material-requests"
                                                 className="chip chip-tool"
                                                 onClick={() => setMenuOpen(false)}
                                             >
-                                                Users
+                                                Materials requests
                                             </Link>
-                                            <Link
-                                                to="/admin/orgs"
-                                                className="chip chip-tool"
-                                                onClick={() => setMenuOpen(false)}
-                                            >
-                                                Orgs
-                                            </Link>
-                                            <Link
-                                                to="/admin/audit-log"
-                                                className="chip chip-tool"
-                                                onClick={() => setMenuOpen(false)}
-                                            >
-                                                Audit trail
-                                            </Link>
+                                            {user.role === 'super_admin' && (
+                                                <>
+                                                    <Link
+                                                        to="/admin/users"
+                                                        className="chip chip-tool"
+                                                        onClick={() => setMenuOpen(false)}
+                                                    >
+                                                        Users
+                                                    </Link>
+                                                    <Link
+                                                        to="/admin/orgs"
+                                                        className="chip chip-tool"
+                                                        onClick={() => setMenuOpen(false)}
+                                                    >
+                                                        Orgs
+                                                    </Link>
+                                                    <Link
+                                                        to="/admin/audit-log"
+                                                        className="chip chip-tool"
+                                                        onClick={() => setMenuOpen(false)}
+                                                    >
+                                                        Audit trail
+                                                    </Link>
+                                                </>
+                                            )}
                                         </div>
                                     )}
                                     <div className="topbar-drawer-section">

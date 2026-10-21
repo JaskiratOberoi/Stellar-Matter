@@ -15,6 +15,7 @@ const {
     runClientLocationsSync,
     getClientLocationsSyncStatus
 } = require('../sync/syncClientLocations');
+const mr = require('../db/materialRequests');
 
 const router = express.Router();
 
@@ -259,6 +260,8 @@ router.get('/orgs', async (_req, res) => {
         const pool = getPool();
         const r = await pool.query(
             `SELECT o.id, o.slug, o.name, o.active, o.created_at,
+                    (o.request_code_hash IS NOT NULL) AS has_request_code,
+                    o.request_code_set_at,
                     (SELECT COUNT(*) FROM user_org_assignments a WHERE a.org_id = o.id) AS member_count
              FROM organizations o
              ORDER BY o.name`
@@ -399,6 +402,31 @@ router.delete('/orgs/:id', adminWriteLimiter, async (req, res) => {
         res.json({ ok: true });
     } catch (err) {
         res.status(500).json({ error: err.message || String(err) });
+    }
+});
+
+// Generate or rotate the shared materials-request access code for an org.
+// Plaintext is returned once in this response and never stored.
+router.post('/orgs/:id/request-code', adminWriteLimiter, async (req, res) => {
+    try {
+        if (!useDatabase()) return res.status(503).json({ error: 'Database not configured' });
+        const { id } = req.params;
+        const result = await mr.resetOrgRequestCode(id);
+        await logAudit(req, {
+            action: 'admin.org.request_code.reset',
+            outcome: 'success',
+            targetType: 'org',
+            targetId: id,
+            metadata: { replaced: result.replaced }
+        });
+        res.json({
+            org: result.org,
+            request_code: result.code,
+            replaced: result.replaced
+        });
+    } catch (err) {
+        const status = err && Number.isInteger(err.status) ? err.status : 500;
+        res.status(status).json({ error: (err && err.message) || String(err) });
     }
 });
 

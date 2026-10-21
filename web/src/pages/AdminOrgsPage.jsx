@@ -74,6 +74,7 @@ export function AdminOrgsPage() {
                                 <th>Name</th>
                                 <th>Slug</th>
                                 <th>Members</th>
+                                <th>Request code</th>
                                 <th>Active</th>
                                 <th>Actions</th>
                             </tr>
@@ -91,7 +92,7 @@ export function AdminOrgsPage() {
                             ))}
                             {!orgs.length && (
                                 <tr>
-                                    <td colSpan={5} className="muted">
+                                    <td colSpan={6} className="muted">
                                         No organizations yet.
                                     </td>
                                 </tr>
@@ -160,6 +161,7 @@ function CreateOrgForm({ onCreated }) {
 
 function OrgRow({ org, users, assignOpen, onToggleAssign, onChanged }) {
     const [busy, setBusy] = useState(false);
+    const [freshCode, setFreshCode] = useState(null);
     const isDefault = org.id === 'org-default';
 
     async function patch(body) {
@@ -194,16 +196,56 @@ function OrgRow({ org, users, assignOpen, onToggleAssign, onChanged }) {
         }
     }
 
+    async function resetRequestCode() {
+        const verb = org.has_request_code ? 'Rotate' : 'Generate';
+        if (
+            !window.confirm(
+                `${verb} materials-request access code for "${org.name}"? The previous code will stop working immediately.`
+            )
+        ) {
+            return;
+        }
+        setBusy(true);
+        setFreshCode(null);
+        try {
+            const r = await apiFetch(`/api/admin/orgs/${org.id}/request-code`, { method: 'POST' });
+            const j = await r.json().catch(() => ({}));
+            if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+            setFreshCode(j.request_code || null);
+            onChanged();
+        } catch (e) {
+            window.alert(String(e.message || e));
+        } finally {
+            setBusy(false);
+        }
+    }
+
     return (
         <>
             <tr>
                 <td className="label">{org.name}</td>
                 <td className="muted small">{org.slug}</td>
                 <td>{org.member_count}</td>
+                <td>
+                    {org.has_request_code ? (
+                        <span className="muted small">Set</span>
+                    ) : (
+                        <span className="muted small">Not set</span>
+                    )}
+                    {freshCode && (
+                        <div className="mreq-code-reveal">
+                            <code className="mreq-code">{freshCode}</code>
+                            <span className="muted small">Copy now — shown once</span>
+                        </div>
+                    )}
+                </td>
                 <td>{org.active ? '✓' : '—'}</td>
                 <td className="admin-row-actions">
                     <button type="button" className="chip chip-tool" disabled={busy} onClick={onToggleAssign}>
                         {assignOpen ? 'Hide members' : 'Manage members'}
+                    </button>
+                    <button type="button" className="chip chip-tool" disabled={busy || !org.active} onClick={resetRequestCode}>
+                        {org.has_request_code ? 'Rotate request code' : 'Generate request code'}
                     </button>
                     {!isDefault && (
                         <>
@@ -224,7 +266,7 @@ function OrgRow({ org, users, assignOpen, onToggleAssign, onChanged }) {
             </tr>
             {assignOpen && (
                 <tr>
-                    <td colSpan={5} className="audit-detail-cell">
+                    <td colSpan={6} className="audit-detail-cell">
                         <OrgMembersPanel orgId={org.id} users={users} onChanged={onChanged} />
                     </td>
                 </tr>

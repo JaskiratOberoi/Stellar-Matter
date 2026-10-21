@@ -5727,6 +5727,211 @@ tr.inv-voided td:nth-child(3) {
     color: rgb(var(--nx-ink-3));
 }
 
+/* -- Materials request (public form + admin review) ----------------------- */
+
+.mreq-shell--wide {
+    align-items: flex-start;
+    padding-top: var(--sp-6);
+    padding-bottom: var(--sp-8);
+}
+
+.mreq-card--wide {
+    width: min(720px, 100%);
+    max-width: 720px;
+}
+
+.mreq-form textarea {
+    width: 100%;
+    resize: vertical;
+    min-height: 4rem;
+}
+
+.mreq-foot {
+    margin-top: var(--sp-4);
+    text-align: center;
+}
+
+.mreq-actions {
+    position: static;
+    justify-content: flex-end;
+}
+
+.mreq-lines {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-3);
+    margin-top: var(--sp-2);
+}
+
+.mreq-lines-head {
+    align-items: center;
+}
+
+.mreq-line {
+    padding: var(--sp-3);
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-3);
+}
+
+.mreq-line-mode {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--sp-3);
+    align-items: center;
+}
+
+.mreq-radio {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: var(--fs-sm);
+}
+
+.mreq-line-remove {
+    margin-left: auto;
+}
+
+.mreq-code {
+    font-family: var(--font-mono);
+    font-size: 0.95em;
+    letter-spacing: 0.04em;
+}
+
+.mreq-code-reveal {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    margin-top: 0.35rem;
+}
+
+.mreq-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--sp-2);
+    margin-bottom: var(--sp-4);
+}
+
+.mreq-tabs .chip.is-active {
+    border-color: rgb(var(--nx-ink));
+    background: rgb(var(--nx-ink) / 0.06);
+}
+
+.mreq-toolbar {
+    gap: var(--sp-3);
+    align-items: flex-end;
+    margin-bottom: var(--sp-4);
+    flex-wrap: wrap;
+}
+
+.mreq-filter {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.mreq-combine {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--sp-2);
+    align-items: center;
+}
+
+.mreq-combine input[type='text'] {
+    min-width: min(240px, 100%);
+}
+
+.mreq-status {
+    display: inline-block;
+    font-size: var(--fs-3xs);
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    padding: 0.15rem 0.45rem;
+    border-radius: 999px;
+    border: 1px solid rgb(var(--nx-rule-soft));
+    color: rgb(var(--nx-ink-2));
+}
+
+.mreq-status--submitted {
+    color: rgb(var(--nx-ink));
+}
+
+.mreq-status--approved,
+.mreq-status--sent {
+    color: rgb(var(--nx-signal-success));
+    border-color: rgb(var(--nx-signal-success) / 0.35);
+}
+
+.mreq-status--batched,
+.mreq-status--draft {
+    color: rgb(var(--nx-ink-2));
+}
+
+.mreq-status--submitted.mreq-status--submitted,
+.mreq-status--submitted {
+    border-color: rgb(var(--nx-ink) / 0.25);
+}
+
+.mreq-status--cancelled {
+    color: rgb(var(--nx-signal-danger));
+    border-color: rgb(var(--nx-signal-danger) / 0.35);
+}
+
+.mreq-detail {
+    margin-top: var(--sp-5);
+    padding: var(--sp-4);
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-3);
+}
+
+.mreq-meta {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: var(--sp-3);
+    margin: 0;
+}
+
+.mreq-meta dt {
+    font-size: var(--fs-3xs);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: rgb(var(--nx-ink-3));
+    margin: 0 0 0.2rem;
+}
+
+.mreq-meta dd {
+    margin: 0;
+    font-size: var(--fs-sm);
+}
+
+.mreq-batch-req {
+    padding: var(--sp-3) 0;
+    border-top: 1px solid rgb(var(--nx-rule-soft));
+}
+
+.mreq-line-list {
+    margin: 0.35rem 0 0;
+    padding-left: 1.1rem;
+    font-size: var(--fs-sm);
+}
+
+@media (max-width: 640px) {
+    .mreq-card--wide {
+        width: 100%;
+    }
+
+    .mreq-combine {
+        width: 100%;
+    }
+
+    .mreq-combine input[type='text'],
+    .mreq-combine .btn-primary {
+        width: 100%;
+    }
+}
+
 /* -- Session & connection (SessionGuard) ------------------------------------ */
 
 /* Offline: a floating amber pill, clear of the phone action bar. */
