@@ -436,16 +436,40 @@ async function updateLocation(orgId, id, fields) {
 // -- Balances --------------------------------------------------------------
 
 // Full material x location on-hand rows. The UI turns these into a matrix,
-// filling absent (material, location) pairs with zero.
+// filling absent (material, location) pairs with zero. ever_positive says
+// whether the running balance at that cell was ever above zero, so the matrix
+// can tell "ran out" (0) from "never stocked here" (-).
 async function listBalances(orgId) {
     const pool = getPool();
     const r = await pool.query(
-        `SELECT b.material_id, b.location_id, b.on_hand,
+        `WITH legs AS (
+             SELECT material_id, to_location_id AS location_id, qty_base AS qty, occurred_at, id
+             FROM inventory_movements
+             WHERE org_id = $1 AND voided_at IS NULL AND to_location_id IS NOT NULL
+             UNION ALL
+             SELECT material_id, from_location_id, -qty_base, occurred_at, id
+             FROM inventory_movements
+             WHERE org_id = $1 AND voided_at IS NULL AND from_location_id IS NOT NULL
+         ),
+         peaks AS (
+             SELECT material_id, location_id, MAX(running) AS peak
+             FROM (
+                 SELECT material_id, location_id,
+                        SUM(qty) OVER (PARTITION BY material_id, location_id
+                                       ORDER BY occurred_at, id
+                                       ROWS UNBOUNDED PRECEDING) AS running
+                 FROM legs
+             ) t
+             GROUP BY material_id, location_id
+         )
+         SELECT b.material_id, b.location_id, b.on_hand,
+                COALESCE(pk.peak, 0) > 0 AS ever_positive,
                 m.name AS material_name, m.base_unit, m.reorder_level, m.metric_kind,
                 l.name AS location_name, l.kind AS location_kind,
                 lm.created_at AS last_recorded_at,
                 COALESCE(cu.display_name, cu.username, lm.created_by) AS last_recorded_by
          FROM inventory_balances b
+         LEFT JOIN peaks pk ON pk.material_id = b.material_id AND pk.location_id = b.location_id
          JOIN inventory_materials m ON m.id = b.material_id AND m.org_id = b.org_id
          JOIN inventory_locations l ON l.id = b.location_id AND l.org_id = b.org_id
          -- The newest live movement touching this cell: when the balance last

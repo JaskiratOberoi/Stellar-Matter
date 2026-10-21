@@ -43,11 +43,25 @@ function kindDot(kind) {
     return kind === 'business_unit' ? 'bu' : kind === 'store' ? 'store' : 'lab';
 }
 
+// Stock is physical, so a balance never reads below zero; a ledger that has
+// dispatched more than it received shows as empty, not as a debt.
 function useBalanceMap(balances) {
     return useMemo(() => {
         const map = new Map();
-        for (const b of balances) map.set(balanceKey(b.material_id, b.location_id), Number(b.on_hand) || 0);
+        for (const b of balances) map.set(balanceKey(b.material_id, b.location_id), Math.max(0, Number(b.on_hand) || 0));
         return map;
+    }, [balances]);
+}
+
+// Cells whose running balance was ever above zero. An API without the
+// ever_positive field counts every recorded cell as stocked.
+function useEverStockedSet(balances) {
+    return useMemo(() => {
+        const set = new Set();
+        for (const b of balances) {
+            if (b.ever_positive ?? true) set.add(balanceKey(b.material_id, b.location_id));
+        }
+        return set;
     }, [balances]);
 }
 
@@ -671,6 +685,7 @@ function StockView({ inventory, showRecorded = false, onGoto }) {
     const activeMaterials = materials.filter((m) => m.active);
     const activeLocations = locations.filter((l) => l.active);
     const balMap = useBalanceMap(balances);
+    const everStocked = useEverStockedSet(balances);
     const stamps = useMemo(() => {
         const cell = new Map();
         const row = new Map();
@@ -701,7 +716,7 @@ function StockView({ inventory, showRecorded = false, onGoto }) {
         const others = activeLocations.filter((l) => l.kind !== 'store');
         if (showAllLocations) return [...stores, ...others];
         const colTotalAll = (locId) =>
-            activeMaterials.reduce((s, m) => s + Math.abs(balMap.get(balanceKey(m.id, locId)) || 0), 0);
+            activeMaterials.reduce((s, m) => s + (balMap.get(balanceKey(m.id, locId)) || 0), 0);
         const ranked = others
             .map((l) => ({ l, t: colTotalAll(l.id) }))
             .filter((x) => x.t > 0)
@@ -819,6 +834,7 @@ function StockView({ inventory, showRecorded = false, onGoto }) {
                                 </td>
                                 {shownLocations.map((l) => {
                                     const val = balMap.get(balanceKey(m.id, l.id)) || 0;
+                                    const stocked = everStocked.has(balanceKey(m.id, l.id));
                                     const low = storeIds.has(l.id) && m.reorder_level > 0 && val < m.reorder_level;
                                     const st = showRecorded ? stamps.cell.get(balanceKey(m.id, l.id)) : null;
                                     const tip = [];
@@ -827,10 +843,10 @@ function StockView({ inventory, showRecorded = false, onGoto }) {
                                     return (
                                         <td
                                             key={l.id}
-                                            className={`num${val === 0 ? ' inv-zero' : ''}${val < 0 ? ' inv-neg' : ''}${low ? ' inv-low' : ''}`}
+                                            className={`num${val === 0 ? ' inv-zero' : ''}${low ? ' inv-low' : ''}`}
                                             title={tip.length ? tip.join('\n') : undefined}
                                         >
-                                            {val === 0 ? '·' : fmt(val)}
+                                            {val > 0 ? fmt(val) : stocked ? '0' : '-'}
                                         </td>
                                     );
                                 })}
@@ -869,7 +885,7 @@ function StockView({ inventory, showRecorded = false, onGoto }) {
                                 {shownLocations.map((l) => {
                                     const t = colTotal(l.id);
                                     return (
-                                        <td key={l.id} className={`num${t < 0 ? ' inv-neg' : ''}`}>
+                                        <td key={l.id} className="num">
                                             {fmt(t)}
                                         </td>
                                     );
@@ -2860,7 +2876,7 @@ function ConsumptionView({ inventory }) {
                                                                     <span className="inv-unit">{m.material ? m.material.base_unit : ''}</span>
                                                                 </td>
                                                                 <td className={`num inv-cons-send${send > 0 ? ' is-due' : ' inv-zero'}`}>{send > 0 ? fmt(send) : '·'}</td>
-                                                                <td className={`num${onHand === 0 ? ' inv-zero' : ''}${onHand < 0 ? ' inv-neg' : ''}`}>{onHand === 0 ? '·' : fmt(onHand)}</td>
+                                                                <td className={`num${onHand === 0 ? ' inv-zero' : ''}`}>{onHand === 0 ? '·' : fmt(onHand)}</td>
                                                                 <td className="num inv-cons-avg">{fmt(Math.round(m.avg))}</td>
                                                                 {m.series.map((v, i) => (
                                                                     <td key={months[i]} className={`num${v === 0 ? ' inv-zero' : ''}${i === 0 ? ' inv-cons-m0' : ''}${i === months.length - 1 ? ' is-now' : ''}`}>
