@@ -792,7 +792,7 @@ function StockView({ inventory, showRecorded = false, onGoto }) {
                 {(hiddenLocationCount > 0 || showAllLocations) && (
                     <button
                         type="button"
-                        className="chip chip-tool"
+                        className="chip chip-tool inv-stock-allcols"
                         aria-pressed={showAllLocations ? 'true' : 'false'}
                         onClick={() => setShowAllLocations((v) => !v)}
                     >
@@ -808,7 +808,18 @@ function StockView({ inventory, showRecorded = false, onGoto }) {
                 </button>
             </SectionHead>
 
-            <div className="inv-table-wrap">
+            <StockCards
+                rows={rows}
+                locations={activeLocations}
+                storeIds={storeIds}
+                balMap={balMap}
+                everStocked={everStocked}
+                totalFor={totalFor}
+                stamps={showRecorded ? stamps : null}
+                query={query}
+            />
+
+            <div className="inv-table-wrap inv-stock-table">
                 <table className="inv-matrix">
                     <thead>
                         <tr>
@@ -899,6 +910,100 @@ function StockView({ inventory, showRecorded = false, onGoto }) {
                 </table>
             </div>
         </section>
+    );
+}
+
+// Phone layout of the stock matrix (CSS shows it at <=640px instead of the
+// table): one card per material with its total and store figures up front,
+// the busiest sites as a preview, and every site holding stock on expand.
+const CARD_SITE_PREVIEW = 3;
+
+function StockCards({ rows, locations, storeIds, balMap, everStocked, totalFor, stamps, query }) {
+    const stores = locations.filter((l) => storeIds.has(l.id));
+    const sites = locations.filter((l) => !storeIds.has(l.id));
+
+    return (
+        <ul className="inv-stock-cards" aria-label="Stock by material">
+            {rows.map((m) => {
+                const total = totalFor(m.id);
+                const holding = sites
+                    .map((l) => ({ l, v: balMap.get(balanceKey(m.id, l.id)) || 0 }))
+                    .filter((x) => x.v > 0)
+                    .sort((a, b) => b.v - a.v);
+                const low = stores.some(
+                    (s) => m.reorder_level > 0 && (balMap.get(balanceKey(m.id, s.id)) || 0) < m.reorder_level
+                );
+                const st = stamps ? stamps.row.get(m.id) : null;
+                return (
+                    <li key={m.id} className="inv-stock-card">
+                        <div className="inv-stock-card-head">
+                            <span className="inv-stock-card-name">
+                                <span className="inv-mat-name">{m.name}</span>
+                                <span className="inv-unit">{m.base_unit}</span>
+                            </span>
+                            <span className="inv-stock-card-total">
+                                {fmt(total)}
+                                <span className="inv-stock-card-cap">total</span>
+                            </span>
+                        </div>
+                        {low && <span className="inv-stock-card-low">Below reorder level ({fmt(m.reorder_level)})</span>}
+                        <dl className="inv-stock-card-stores">
+                            {stores.map((s) => {
+                                const v = balMap.get(balanceKey(m.id, s.id)) || 0;
+                                const stocked = everStocked.has(balanceKey(m.id, s.id));
+                                return (
+                                    <div key={s.id} className={v === 0 ? 'is-zero' : undefined}>
+                                        <dt>{s.name}</dt>
+                                        <dd>{v > 0 ? fmt(v) : stocked ? '0' : '-'}</dd>
+                                    </div>
+                                );
+                            })}
+                        </dl>
+                        {holding.length > 0 ? (
+                            holding.length > CARD_SITE_PREVIEW ? (
+                                <details className="inv-stock-card-sites">
+                                    <summary>
+                                        <SitePreview items={holding.slice(0, CARD_SITE_PREVIEW)} />
+                                        <span className="inv-stock-card-more">
+                                            +{holding.length - CARD_SITE_PREVIEW} more site{holding.length - CARD_SITE_PREVIEW === 1 ? '' : 's'}
+                                        </span>
+                                    </summary>
+                                    <SitePreview items={holding.slice(CARD_SITE_PREVIEW)} />
+                                </details>
+                            ) : (
+                                <div className="inv-stock-card-sites">
+                                    <SitePreview items={holding} />
+                                </div>
+                            )
+                        ) : (
+                            <p className="inv-stock-card-none">No business unit or lab holds any.</p>
+                        )}
+                        {st && (
+                            <p className="inv-stock-card-rec">
+                                rec {fmtRecorded(new Date(st.at))}
+                                {st.who ? ` · ${st.who}` : ''}
+                                {st.where ? ` · ${st.where}` : ''}
+                            </p>
+                        )}
+                    </li>
+                );
+            })}
+            {!rows.length && <li className="muted inv-nomatch">No materials match “{query}”.</li>}
+        </ul>
+    );
+}
+
+function SitePreview({ items }) {
+    return (
+        <span className="inv-stock-card-sitelist">
+            {items.map(({ l, v }) => (
+                <span key={l.id} className="inv-stock-card-site">
+                    <span className={`inv-dot inv-dot-${kindDot(l.kind)}`} />
+                    {l.name}
+                    <b>{fmt(v)}</b>
+                </span>
+            ))}
+        </span>
     );
 }
 
@@ -1091,11 +1196,11 @@ const DOCKET_LINE_CAP = 8;
  * number quiet until there is something to record, and on phones repeats
  * the action in a bar that stays reachable while the form scrolls.
  */
-function MovementDocket({ formId, heading, sign, total, ready, facts, lines, warn, note, err, disabled, label }) {
+function MovementDocket({ formId, heading, sign, total, ready, facts, lines, warn, note, err, disabled, label, review }) {
     const ref = useRef(null);
     useEffect(() => {
-        if (err && ref.current) ref.current.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-    }, [err]);
+        if ((err || review) && ref.current) ref.current.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }, [err, review]);
 
     const shown = lines.slice(0, DOCKET_LINE_CAP);
     const hidden = lines.length - shown.length;
@@ -1135,18 +1240,36 @@ function MovementDocket({ formId, heading, sign, total, ready, facts, lines, war
             )}
             {note && <p className="inv-docket-note">{note}</p>}
             {err && <p className="login-err inv-docket-err">{err}</p>}
+            {/* A second, explicit step for writes that fan out (e.g. every BU):
+                the submit buttons become the confirm, with a way back. */}
+            {review && (
+                <div className="inv-docket-review" role="alert">
+                    <p className="inv-docket-review-title">{review.title}</p>
+                    {review.body}
+                </div>
+            )}
             <div className="inv-docket-actions">
                 <button type="submit" form={formId} className="btn-primary" disabled={disabled}>
-                    {label}
+                    {review ? review.confirmLabel : label}
                 </button>
+                {review && (
+                    <button type="button" className="chip chip-tool" onClick={review.onCancel}>
+                        Back
+                    </button>
+                )}
             </div>
             <div className="inv-docket-bar" aria-hidden={ready ? undefined : 'true'}>
                 <span className="inv-docket-bar-total">
                     {sign}
                     {fmt(total)} <span className="inv-unit">units</span>
                 </span>
+                {review && (
+                    <button type="button" className="chip chip-tool" onClick={review.onCancel}>
+                        Back
+                    </button>
+                )}
                 <button type="submit" form={formId} className="btn-primary" disabled={disabled}>
-                    {label}
+                    {review ? review.confirmLabel : label}
                 </button>
             </div>
         </aside>
@@ -2198,6 +2321,11 @@ function DispatchView({ inventory, canMove, showRecorded = false, onDone, onGoto
         (l) => l.id !== fromLocationId && l.kind !== 'business_unit' && l.kind !== 'lab'
     );
     const isAllBus = toLocationId === ALL_BUS_DEST;
+    const [reviewingAllBus, setReviewingAllBus] = useState(false);
+    // Any edit after the review was shown invalidates it.
+    useEffect(() => {
+        setReviewingAllBus(false);
+    }, [toLocationId, fromLocationId, lines]);
     const allBuEstimate = Math.max(buLabDestinations.length, buOptions.options.length);
     const destCount = isAllBus ? Math.max(allBuEstimate, 1) : 1;
     const source = activeLocations.find((l) => l.id === fromLocationId) || null;
@@ -2267,6 +2395,12 @@ function DispatchView({ inventory, canMove, showRecorded = false, onDone, onGoto
         if (isAllBus && allBuEstimate === 0) {
             return setErr('No business units or labs available. Sync client locations or add destinations in Catalog.');
         }
+        // Every line goes to every BU and lab: show the scale and ask once more.
+        if (isAllBus && !reviewingAllBus) {
+            setReviewingAllBus(true);
+            return;
+        }
+        setReviewingAllBus(false);
         setBusy(true);
         try {
             const result = await createMovementsBatch({
@@ -2525,7 +2659,32 @@ function DispatchView({ inventory, canMove, showRecorded = false, onDone, onGoto
                 }
                 err={err}
                 disabled={busy || anyUploading || !validLines.length || (isAllBus && allBuEstimate === 0)}
-                label={busy ? 'Dispatching…' : anyUploading ? 'Uploading photo…' : isAllBus ? 'Dispatch to all BUs/labs' : 'Record dispatch'}
+                label={busy ? 'Dispatching…' : anyUploading ? 'Uploading photo…' : isAllBus ? 'Review dispatch to all BUs/labs' : 'Record dispatch'}
+                review={
+                    isAllBus && reviewingAllBus && !busy
+                        ? {
+                              title: `Send to all ${fmt(destCount)} business units and labs?`,
+                              confirmLabel: `Dispatch to ${fmt(destCount)} sites`,
+                              onCancel: () => setReviewingAllBus(false),
+                              body: (
+                                  <>
+                                      <p className="inv-docket-review-text">
+                                          Every line below goes to each site:{' '}
+                                          <strong>{fmt(validLines.reduce((s, l) => s + l.qty, 0))} units per site</strong>,{' '}
+                                          <strong>{fmt(totalOut)} units</strong> out of {source ? source.name : 'the source'} in
+                                          all, as {fmt(validLines.length * destCount)} ledger entries.
+                                      </p>
+                                      {buLabDestinations.length > 0 && (
+                                          <details className="inv-docket-review-sites">
+                                              <summary>See the {fmt(buLabDestinations.length)} sites</summary>
+                                              <p>{buLabDestinations.map((l) => l.name).join(', ')}</p>
+                                          </details>
+                                      )}
+                                  </>
+                              )
+                          }
+                        : null
+                }
             />
             <RecentMovements
                 kind="dispatch"
@@ -2634,6 +2793,8 @@ function buildConsumption(data, locations, matById) {
             avg: avgOf(monthTotals),
             monthTotals,
             busThisMonth: bus.filter((b) => b.thisMonth > 0).length,
+            // Same-days comparison from the API; absent on an older server.
+            mtd: data.month_to_date || null,
             busActive: active,
             busAll: bus.length,
             topMaterial: top ? { qty: top.qty, material: matById.get(top.id) || null } : null
@@ -2708,7 +2869,13 @@ function ConsumptionView({ inventory }) {
     if (!model) return null;
 
     const { months, stats } = model;
-    const change = pctChange(stats.thisMonth, stats.lastMonth);
+    // A month in progress is only compared with the same days of last month;
+    // set against a whole month it always reads as a collapse.
+    const mtd = stats.mtd;
+    const change = mtd ? pctChange(mtd.this_qty, mtd.prev_qty) : null;
+    const now = new Date();
+    const dayOfMonth = mtd ? mtd.day : now.getDate();
+    const daysInMonth = mtd ? mtd.days_in_month : new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
     const anyData = stats.busActive > 0;
     const sparkMax = Math.max(1, ...model.bus.map((b) => Math.max(...b.series)));
 
@@ -2743,9 +2910,14 @@ function ConsumptionView({ inventory }) {
                             <span className="inv-figure-num">{fmt(stats.thisMonth)}</span>
                             <span className="inv-figure-label">This month</span>
                             <span className="inv-figure-cap">
-                                {change == null ? 'units sent to BUs' : (
-                                    <span className={change >= 0 ? 'inv-cons-up' : 'inv-cons-down'}>
-                                        {change >= 0 ? '+' : ''}{change}% vs last month
+                                {change == null ? (
+                                    `month to date · day ${dayOfMonth} of ${daysInMonth}`
+                                ) : (
+                                    <span
+                                        className={change >= 0 ? 'inv-cons-up' : 'inv-cons-down'}
+                                        title={`${fmt(mtd.this_qty)} so far against ${fmt(mtd.prev_qty)} by day ${mtd.day} last month`}
+                                    >
+                                        {change >= 0 ? '+' : ''}{change}% vs first {dayOfMonth} days of last month
                                     </span>
                                 )}
                             </span>

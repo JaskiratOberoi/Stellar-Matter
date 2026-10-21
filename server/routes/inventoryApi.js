@@ -20,7 +20,7 @@ const express = require('express');
 const { useDatabase, getPool } = require('../db/pool');
 const { requireAuth, requireRole } = require('../auth');
 const { adminWriteLimiter } = require('../rateLimit');
-const { logAudit } = require('../audit');
+const { logAudit, AUDITED } = require('../audit');
 const inv = require('../db/inventory');
 const { uploadPhoto, urlFor } = require('../inventoryPhotos');
 
@@ -271,11 +271,28 @@ router.post('/ensure-bus-locations', requireMover, adminWriteLimiter, async (req
         const body = req.body || {};
         const extraUnits = Array.isArray(body.business_units) ? body.business_units : [];
         const orgId = orgOf(req);
+        const before = new Set((await inv.listLocations(orgId, { includeInactive: true })).map((l) => l.id));
         const locations = await inv.listLocations(orgId, {
             includeInactive: true,
             ensureBus: true,
             extraUnits
         });
+        // This sync runs on every Inventory visit and almost always changes
+        // nothing. Only a sync that actually added sites is worth an audit
+        // row; the no-op is kept out of the trail (AUDITED stops the generic
+        // catch-all from logging it).
+        const added = locations.filter((l) => !before.has(l.id));
+        if (added.length) {
+            await logAudit(req, {
+                action: 'inventory.location.sync',
+                targetType: 'inventory_location',
+                targetId: added.length === 1 ? added[0].id : `${added.length} locations`,
+                outcome: 'success',
+                after: { added: added.map((l) => l.name) }
+            });
+        } else {
+            req[AUDITED] = true;
+        }
         const businessUnits = locations.filter((l) => l.active && l.kind === 'business_unit');
         res.json({ locations, business_units: businessUnits.length });
     } catch (err) {

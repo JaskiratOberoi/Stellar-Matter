@@ -1337,7 +1337,43 @@ async function listConsumption(orgId, { months = 12 } = {}) {
          ORDER BY 3, 1, 2`,
         [orgId, `${keys[0]}-01`, CONSUMPTION_TZ]
     );
-    return { months: keys, rows: r.rows };
+    // Like-for-like pace: this month so far against the same stretch of last
+    // month (capped at last month's end), so day 21 is never set against a
+    // whole 30-day month.
+    const mtd = await pool.query(
+        `WITH b AS (
+             SELECT date_trunc('month', NOW() AT TIME ZONE $2) AS this_start,
+                    date_trunc('month', NOW() AT TIME ZONE $2) - INTERVAL '1 month' AS prev_start,
+                    (NOW() AT TIME ZONE $2) - date_trunc('month', NOW() AT TIME ZONE $2) AS elapsed
+         )
+         SELECT EXTRACT(DAY FROM NOW() AT TIME ZONE $2)::int AS day,
+                EXTRACT(DAY FROM (b.this_start + INTERVAL '1 month' - INTERVAL '1 day'))::int AS days_in_month,
+                COALESCE(SUM(mv.qty_base) FILTER (
+                    WHERE (mv.occurred_at AT TIME ZONE $2) >= b.this_start), 0)::bigint AS this_qty,
+                COALESCE(SUM(mv.qty_base) FILTER (
+                    WHERE (mv.occurred_at AT TIME ZONE $2) >= b.prev_start
+                      AND (mv.occurred_at AT TIME ZONE $2) < LEAST(b.prev_start + b.elapsed, b.this_start)), 0)::bigint AS prev_qty
+         FROM b
+         LEFT JOIN inventory_movements mv
+           ON mv.org_id = $1 AND mv.kind = 'dispatch' AND mv.voided_at IS NULL
+          AND (mv.occurred_at AT TIME ZONE $2) >= b.prev_start
+          AND EXISTS (
+              SELECT 1 FROM inventory_locations l
+              WHERE l.id = mv.to_location_id AND l.kind IN ('business_unit', 'lab'))
+         GROUP BY b.this_start, b.prev_start, b.elapsed`,
+        [orgId, CONSUMPTION_TZ]
+    );
+    const m = mtd.rows[0] || {};
+    return {
+        months: keys,
+        rows: r.rows,
+        month_to_date: {
+            day: Number(m.day) || 0,
+            days_in_month: Number(m.days_in_month) || 0,
+            this_qty: Number(m.this_qty) || 0,
+            prev_qty: Number(m.prev_qty) || 0
+        }
+    };
 }
 
 module.exports = {

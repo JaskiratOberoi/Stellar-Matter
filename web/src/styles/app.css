@@ -5789,3 +5789,214 @@ tr.inv-voided td:nth-child(3) {
         padding-bottom: calc(var(--sp-8) + env(safe-area-inset-bottom, 0px));
     }
 }
+
+/* -- Stock on hand: phone cards (StockCards) --------------------------------- */
+
+.inv-stock-cards {
+    display: none;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+@media (max-width: 640px) {
+    /* The matrix is ~1,400px wide; on a phone it becomes one card per material. */
+    .inv-stock-table,
+    .inv-stock-allcols {
+        display: none;
+    }
+
+    .inv-stock-cards {
+        display: block;
+    }
+
+    /* A pinned head with search, toggle and actions filled a quarter of the
+       screen and hid the rows under it; on phones it scrolls away. */
+    .inv-panel > .inv-sechead {
+        position: static;
+    }
+}
+
+.inv-stock-card {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-3);
+    padding: var(--sp-4) 0;
+    border-bottom: 1px solid rgb(var(--nx-rule-soft));
+}
+
+.inv-stock-card-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--sp-3);
+}
+
+.inv-stock-card-name {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-1);
+    min-width: 0;
+}
+
+.inv-stock-card-total {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    font-size: var(--fs-xl, 1.25rem);
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    font-variant-numeric: tabular-nums;
+}
+
+.inv-stock-card-cap,
+.inv-stock-card-stores dt {
+    font: 600 var(--fs-3xs) / 1 var(--font-mono);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: rgb(var(--nx-ink-3));
+}
+
+.inv-stock-card-low {
+    align-self: flex-start;
+    color: rgb(var(--nx-signal-warning));
+    font-size: var(--fs-xs, 0.75rem);
+    font-weight: 600;
+}
+
+.inv-stock-card-stores {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--sp-2);
+    margin: 0;
+}
+
+.inv-stock-card-stores > div {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-1);
+    padding: var(--sp-2) var(--sp-3);
+    background: rgb(var(--nx-surface));
+    border-radius: var(--r-sm, 6px);
+}
+
+.inv-stock-card-stores dt {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.inv-stock-card-stores dd {
+    margin: 0;
+    font-weight: 650;
+    font-variant-numeric: tabular-nums;
+}
+
+.inv-stock-card-stores > .is-zero dd {
+    color: rgb(var(--nx-ink-3));
+}
+
+.inv-stock-card-sitelist {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--sp-1) var(--sp-3);
+}
+
+.inv-stock-card-site {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--sp-1);
+    color: rgb(var(--nx-ink-2));
+    font-size: var(--fs-sm);
+}
+
+.inv-stock-card-site b {
+    color: rgb(var(--nx-ink));
+    font-weight: 650;
+    font-variant-numeric: tabular-nums;
+}
+
+details.inv-stock-card-sites > summary {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--sp-2) var(--sp-3);
+    min-height: 44px;
+    cursor: pointer;
+    list-style: none;
+}
+
+details.inv-stock-card-sites > summary::-webkit-details-marker {
+    display: none;
+}
+
+details.inv-stock-card-sites > .inv-stock-card-sitelist {
+    margin-top: var(--sp-2);
+}
+
+.inv-stock-card-more {
+    font: 600 var(--fs-3xs) / 1 var(--font-mono);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: rgb(var(--nx-accent));
+}
+
+details[open].inv-stock-card-sites .inv-stock-card-more {
+    display: none;
+}
+
+.inv-stock-card-none,
+.inv-stock-card-rec {
+    margin: 0;
+    color: rgb(var(--nx-ink-3));
+    font-size: var(--fs-xs, 0.75rem);
+}
+
+/* Docket review step: a fan-out write (dispatch to every BU) states its scale
+   before it is recorded. Amber, because it is a warning, not an error. */
+.inv-docket-review {
+    margin-top: var(--sp-4);
+    padding: var(--sp-3) var(--sp-4);
+    border: 1px solid rgb(var(--nx-signal-warning) / 0.55);
+    border-radius: var(--r-sm);
+    background: rgb(var(--nx-signal-warning) / 0.08);
+}
+
+.inv-docket-review-title {
+    margin: 0 0 var(--sp-2);
+    color: rgb(var(--nx-signal-warning));
+    font-weight: 650;
+}
+
+.inv-docket-review-text {
+    margin: 0;
+    font-size: var(--fs-sm);
+    line-height: 1.5;
+}
+
+.inv-docket-review-sites {
+    margin-top: var(--sp-2);
+    font-size: var(--fs-xs);
+    color: rgb(var(--nx-ink-2));
+}
+
+.inv-docket-review-sites > summary {
+    cursor: pointer;
+    color: rgb(var(--nx-ink));
+}
+
+.inv-docket-review-sites > p {
+    margin: var(--sp-2) 0 0;
+    max-height: 10rem;
+    overflow-y: auto;
+}
+
+.inv-docket-actions {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-2);
+}
+
+.inv-docket-actions .chip {
+    align-self: center;
+}
