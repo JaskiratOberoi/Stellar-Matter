@@ -457,6 +457,11 @@ export function InventoryPage() {
     // keeps the place, and Back steps through tabs instead of leaving the app.
     const [searchParams, setSearchParams] = useSearchParams();
     const tabParam = searchParams.get('tab');
+    // Deep links (from search): ?q= filters Stock; ?location= / ?material=
+    // filter the Ledger. Each remounts its view so the filter applies once.
+    const urlQ = searchParams.get('q') || '';
+    const urlLocation = searchParams.get('location') || '';
+    const urlMaterial = searchParams.get('material') || '';
     const setView = useCallback(
         (v) => {
             if (v === (searchParams.get('tab') || 'stock')) return;
@@ -652,11 +657,12 @@ export function InventoryPage() {
                     <div className="inv-view">
                         {view === 'stock' && (
                             <StockView
-                                key={presetFor('stock') ? presetFor('stock').n : 'stock'}
+                                key={presetFor('stock') ? presetFor('stock').n : `stock:${urlQ}`}
                                 inventory={inventory}
                                 showRecorded={isSuperAdmin}
                                 onGoto={goto}
                                 initialLowOnly={!!(presetFor('stock') && presetFor('stock').lowOnly)}
+                                initialQuery={urlQ}
                             />
                         )}
                         {view === 'orders' && (
@@ -691,7 +697,7 @@ export function InventoryPage() {
                         {view === 'count' && canManageCatalog && <CountView inventory={inventory} onDone={showFlash} />}
                         {view === 'ledger' && (
                             <LedgerView
-                                key={presetFor('ledger') ? presetFor('ledger').n : 'ledger'}
+                                key={presetFor('ledger') ? presetFor('ledger').n : `ledger:${urlLocation}:${urlMaterial}`}
                                 initialFilters={
                                     presetFor('ledger')
                                         ? {
@@ -699,7 +705,9 @@ export function InventoryPage() {
                                               to: presetFor('ledger').to || '',
                                               hideVoided: !!presetFor('ledger').hideVoided
                                           }
-                                        : null
+                                        : urlLocation || urlMaterial
+                                          ? { locationId: urlLocation, materialId: urlMaterial }
+                                          : null
                                 }
                                 inventory={inventory}
                                 canMove={canMove}
@@ -902,7 +910,7 @@ function EmptyState({ icon = 'box', title, children, action }) {
 // showRecorded (super admin only): every cell's tooltip carries when that
 // balance last changed and by whom, and a trailing column shows the same for
 // the material's most recent change anywhere.
-function StockView({ inventory, showRecorded = false, onGoto, initialLowOnly = false }) {
+function StockView({ inventory, showRecorded = false, onGoto, initialLowOnly = false, initialQuery = '' }) {
     const { materials, locations, balances } = inventory;
     const activeMaterials = materials.filter((m) => m.active);
     const activeLocations = locations.filter((l) => l.active);
@@ -920,7 +928,7 @@ function StockView({ inventory, showRecorded = false, onGoto, initialLowOnly = f
         }
         return { cell, row };
     }, [balances]);
-    const [query, setQuery] = useState('');
+    const [query, setQuery] = useState(initialQuery);
     const [hideEmpty, setHideEmpty] = useState(false);
     const [showAllLocations, setShowAllLocations] = useState(false);
     // Same rule as the summary: stock across all stores under the reorder level.

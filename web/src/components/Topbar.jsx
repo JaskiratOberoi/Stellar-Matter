@@ -4,6 +4,9 @@ import { Link, NavLink, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { BrandMark } from './BrandMark.jsx';
 import { usePwaInstall } from '../hooks/usePwaInstall.js';
+import { CommandPalette } from './CommandPalette.jsx';
+
+const IS_MAC = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || '');
 
 const ROLE_LABEL = { super_admin: 'Super admin', admin: 'Admin', operator: 'Operator', viewer: 'Viewer' };
 
@@ -154,6 +157,19 @@ export function Topbar({ statusPill, lastUpdated, onOrgSwitched }) {
     const [menuOpen, setMenuOpen] = useState(false);
     const [installHintOpen, setInstallHintOpen] = useState(false);
     const drawerRef = useRef(null);
+    const [searchOpen, setSearchOpen] = useState(false);
+
+    // Ctrl/Cmd+K opens search from anywhere a signed-in page is showing.
+    useEffect(() => {
+        const onKey = (e) => {
+            if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'k') {
+                e.preventDefault();
+                setSearchOpen((o) => !o);
+            }
+        };
+        document.addEventListener('keydown', onKey);
+        return () => document.removeEventListener('keydown', onKey);
+    }, []);
     const { installMode, triggerNativeInstall } = usePwaInstall();
 
     useEffect(() => {
@@ -227,6 +243,21 @@ export function Topbar({ statusPill, lastUpdated, onOrgSwitched }) {
                             )}
                         </span>
                     )}
+                    {user && (
+                        <button
+                            type="button"
+                            className="topbar-search topbar-desktop-nav"
+                            onClick={() => setSearchOpen(true)}
+                            aria-label="Search"
+                        >
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+                                <circle cx="11" cy="11" r="7" />
+                                <path d="m20 20-3.5-3.5" />
+                            </svg>
+                            <span className="topbar-search-label">Search</span>
+                            <kbd>{IS_MAC ? '⌘K' : 'Ctrl K'}</kbd>
+                        </button>
+                    )}
                     {authRequired && user && (
                         <span className="topbar-desktop-user">
                             <OrgSwitcher user={user} orgs={orgs} onSwitch={switchOrgHandler} />
@@ -267,6 +298,16 @@ export function Topbar({ statusPill, lastUpdated, onOrgSwitched }) {
                             <div className="topbar-drawer-section topbar-drawer-nav">
                                 <p className="eyebrow">Navigate</p>
                                 {navLinks(() => setMenuOpen(false))}
+                                <button
+                                    type="button"
+                                    className="topbar-nav-link"
+                                    onClick={() => {
+                                        setMenuOpen(false);
+                                        setSearchOpen(true);
+                                    }}
+                                >
+                                    Search materials, sites and pages
+                                </button>
                             </div>
                             {installMode !== 'installed' && (
                                 <div className="topbar-drawer-section">
@@ -366,6 +407,7 @@ export function Topbar({ statusPill, lastUpdated, onOrgSwitched }) {
                     </div>,
                     document.body,
                 )}
+            {user && <CommandPalette role={user.role} open={searchOpen} onClose={() => setSearchOpen(false)} />}
         </header>
     );
 }
