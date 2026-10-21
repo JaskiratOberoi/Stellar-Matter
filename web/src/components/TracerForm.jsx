@@ -174,183 +174,186 @@ export function TracerForm({
 
     return (
         <form className="tracer-form nexus-card tracer-hide-print" onSubmit={handleSubmit}>
-            <div className="field-block tracer-form-first-field">
-                <span className="eyebrow-lite field-label">Date quick picks</span>
-                <DateChips
-                    fromDate={fromDate}
-                    toDate={toDate}
-                    onPick={({ from, to }) => {
-                        setFromDate(from);
-                        setToDate(to);
-                    }}
-                />
-            </div>
-            <div className="tracer-date-grid">
-                <label className="inv-field">
-                    <span>From date</span>
-                    <input
-                        type="date"
-                        value={fromIso}
-                        max={toIso || undefined}
-                        aria-invalid={datesBackwards ? 'true' : undefined}
-                        onChange={(e) => setFromDate(isoToDdmm(e.target.value))}
+            {/* Read-only while a run is going, so the picks on screen are the ones running. */}
+            <fieldset className="tracer-form-fields" disabled={busy}>
+                <div className="field-block tracer-form-first-field">
+                    <span className="eyebrow-lite field-label">Date quick picks</span>
+                    <DateChips
+                        fromDate={fromDate}
+                        toDate={toDate}
+                        onPick={({ from, to }) => {
+                            setFromDate(from);
+                            setToDate(to);
+                        }}
                     />
-                </label>
-                <label className="inv-field">
-                    <span>To date</span>
-                    <input
-                        type="date"
-                        value={toIso}
-                        min={fromIso || undefined}
-                        aria-invalid={datesBackwards ? 'true' : undefined}
-                        onChange={(e) => setToDate(isoToDdmm(e.target.value))}
-                    />
-                </label>
-            </div>
-            {datesBackwards && <p className="login-err tracer-date-err" role="alert">The From date is after the To date.</p>}
-            {/* Most runs are whole days; the hour window is there when needed. */}
-            <details className="tracer-hours" open={Boolean(fromHour || toHour) || undefined}>
-                <summary>Hour window (optional)</summary>
+                </div>
                 <div className="tracer-date-grid">
                     <label className="inv-field">
-                        <span>From hour</span>
+                        <span>From date</span>
                         <input
-                            type="number"
-                            inputMode="numeric"
-                            min="0"
-                            max="23"
-                            placeholder="0"
-                            value={fromHour}
-                            onChange={(e) => setFromHour(e.target.value)}
+                            type="date"
+                            value={fromIso}
+                            max={toIso || undefined}
+                            aria-invalid={datesBackwards ? 'true' : undefined}
+                            onChange={(e) => setFromDate(isoToDdmm(e.target.value))}
                         />
                     </label>
                     <label className="inv-field">
-                        <span>To hour</span>
+                        <span>To date</span>
                         <input
-                            type="number"
-                            inputMode="numeric"
-                            min="0"
-                            max="23"
-                            placeholder="23"
-                            value={toHour}
-                            onChange={(e) => setToHour(e.target.value)}
+                            type="date"
+                            value={toIso}
+                            min={fromIso || undefined}
+                            aria-invalid={datesBackwards ? 'true' : undefined}
+                            onChange={(e) => setToDate(isoToDdmm(e.target.value))}
                         />
                     </label>
                 </div>
-            </details>
-
-            {/* One scope list at a time instead of four open walls of chips;
-                each tab carries its pick count so nothing selected is hidden. */}
-            <div className="tracer-scope-tabs" role="tablist" aria-label="Scope">
-                {scopeTabs.map((t) => (
-                    <button
-                        key={t.id}
-                        type="button"
-                        role="tab"
-                        aria-selected={scopeTab === t.id ? 'true' : 'false'}
-                        className={`tracer-scope-tab${scopeTab === t.id ? ' active' : ''}`}
-                        onClick={() => {
-                            setScopeTab(t.id);
-                            setScopeQuery('');
-                        }}
-                    >
-                        {t.label}
-                        {t.count > 0 && <span className="tracer-scope-count">{t.count}</span>}
-                    </button>
-                ))}
-            </div>
-
-            <div className="tracer-scope-panel" role="tabpanel">
-                {(scopeTab === 'bu' || scopeTab === 'sales') && (
-                    <input
-                        type="search"
-                        className="inv-search tracer-scope-search"
-                        placeholder={scopeTab === 'bu' ? 'Find a business unit…' : 'Find a salesperson…'}
-                        value={scopeQuery}
-                        onChange={(e) => setScopeQuery(e.target.value)}
-                    />
-                )}
-                {scopeTab === 'bu' && (
-                    <BuChips
-                        source="sql"
-                        options={matchQuery(buOptions.options, (o) => o.label)}
-                        selected={buSelected}
-                        onToggle={buActions.toggle}
-                        onSelectAll={buActions.selectAll}
-                        onClear={buActions.clear}
-                        lookupError={buOptions.error}
-                        freeTextField={
+                {datesBackwards && <p className="login-err tracer-date-err" role="alert">The From date is after the To date.</p>}
+                {/* Most runs are whole days; the hour window is there when needed. */}
+                <details className="tracer-hours" open={Boolean(fromHour || toHour) || undefined}>
+                    <summary>Hour window (optional)</summary>
+                    <div className="tracer-date-grid">
+                        <label className="inv-field">
+                            <span>From hour</span>
                             <input
-                                type="text"
-                                placeholder="ROHTAK or id"
-                                autoComplete="off"
-                                value={bu}
-                                onChange={(e) => setBu(e.target.value)}
+                                type="number"
+                                inputMode="numeric"
+                                min="0"
+                                max="23"
+                                placeholder="0"
+                                value={fromHour}
+                                onChange={(e) => setFromHour(e.target.value)}
                             />
-                        }
-                    />
-                )}
-                {scopeTab === 'region' && (
-                    <RegionGroupChips
-                        groups={buOptions.groups || []}
-                        selected={buGroupSelected}
-                        onToggle={(id) => buActions.toggleGroup && buActions.toggleGroup(id)}
-                        onSelectAll={() => buActions.selectAllGroups && buActions.selectAllGroups()}
-                        onClear={() => buActions.clearGroups && buActions.clearGroups()}
-                    />
-                )}
-                {scopeTab === 'sales' && (
-                    <SalesChips
-                        users={matchQuery(salesUsers, (u) => u.label)}
-                        loading={salesLoading}
-                        lookupError={salesLookupError}
-                        selectedIds={salesSelectedIds}
-                        onToggle={salesActions.toggle}
-                        onClear={salesActions.clear}
-                    />
-                )}
-                {scopeTab === 'codes' && (
-                    <ClientCodePicker
-                        selected={clientCodes}
-                        onAdd={(item) =>
-                            setClientCodes((prev) => (prev.some((c) => c.code === item.code) ? prev : [...prev, item]))
-                        }
-                        onRemove={(code) => setClientCodes((prev) => prev.filter((c) => c.code !== code))}
-                        onClear={() => setClientCodes([])}
-                    />
-                )}
-            </div>
-
-            {/* What Run will do, before it does it: every pick across all four
-                tabs, removable here, plus the window and the block shape. */}
-            <div className="tracer-willrun" aria-live="polite">
-                <p className="tracer-willrun-head">
-                    <span className="eyebrow-lite">Will run</span>
-                    <span>
-                        {datesOk ? fmtDateRange(fromDate, toDate) : 'no date window'}
-                        {fromHour || toHour ? ` · hours ${fromHour || '0'}–${toHour || '23'}` : ''}
-                        {' · '}
-                        {picks.length === 0
-                            ? 'nothing picked yet'
-                            : collate
-                              ? `${picks.length} scope${picks.length === 1 ? '' : 's'} merged into 1 block`
-                              : `${picks.length} block${picks.length === 1 ? '' : 's'}`}
-                    </span>
-                </p>
-                {picks.length > 0 && (
-                    <div className="tracer-willrun-chips">
-                        {picks.map((p) => (
-                            <span key={p.key} className={`tracer-pick tracer-pick-${p.kind}`}>
-                                <span className="tracer-pick-kind">{p.kindLabel}</span>
-                                {p.label}
-                                <button type="button" aria-label={`Remove ${p.label}`} onClick={p.remove} disabled={busy}>
-                                    ×
-                                </button>
-                            </span>
-                        ))}
+                        </label>
+                        <label className="inv-field">
+                            <span>To hour</span>
+                            <input
+                                type="number"
+                                inputMode="numeric"
+                                min="0"
+                                max="23"
+                                placeholder="23"
+                                value={toHour}
+                                onChange={(e) => setToHour(e.target.value)}
+                            />
+                        </label>
                     </div>
-                )}
-            </div>
+                </details>
+
+                {/* One scope list at a time instead of four open walls of chips;
+                    each tab carries its pick count so nothing selected is hidden. */}
+                <div className="tracer-scope-tabs" role="tablist" aria-label="Scope">
+                    {scopeTabs.map((t) => (
+                        <button
+                            key={t.id}
+                            type="button"
+                            role="tab"
+                            aria-selected={scopeTab === t.id ? 'true' : 'false'}
+                            className={`tracer-scope-tab${scopeTab === t.id ? ' active' : ''}`}
+                            onClick={() => {
+                                setScopeTab(t.id);
+                                setScopeQuery('');
+                            }}
+                        >
+                            {t.label}
+                            {t.count > 0 && <span className="tracer-scope-count">{t.count}</span>}
+                        </button>
+                    ))}
+                </div>
+
+                <div className="tracer-scope-panel" role="tabpanel">
+                    {(scopeTab === 'bu' || scopeTab === 'sales') && (
+                        <input
+                            type="search"
+                            className="inv-search tracer-scope-search"
+                            placeholder={scopeTab === 'bu' ? 'Find a business unit…' : 'Find a salesperson…'}
+                            value={scopeQuery}
+                            onChange={(e) => setScopeQuery(e.target.value)}
+                        />
+                    )}
+                    {scopeTab === 'bu' && (
+                        <BuChips
+                            source="sql"
+                            options={matchQuery(buOptions.options, (o) => o.label)}
+                            selected={buSelected}
+                            onToggle={buActions.toggle}
+                            onSelectAll={buActions.selectAll}
+                            onClear={buActions.clear}
+                            lookupError={buOptions.error}
+                            freeTextField={
+                                <input
+                                    type="text"
+                                    placeholder="ROHTAK or id"
+                                    autoComplete="off"
+                                    value={bu}
+                                    onChange={(e) => setBu(e.target.value)}
+                                />
+                            }
+                        />
+                    )}
+                    {scopeTab === 'region' && (
+                        <RegionGroupChips
+                            groups={buOptions.groups || []}
+                            selected={buGroupSelected}
+                            onToggle={(id) => buActions.toggleGroup && buActions.toggleGroup(id)}
+                            onSelectAll={() => buActions.selectAllGroups && buActions.selectAllGroups()}
+                            onClear={() => buActions.clearGroups && buActions.clearGroups()}
+                        />
+                    )}
+                    {scopeTab === 'sales' && (
+                        <SalesChips
+                            users={matchQuery(salesUsers, (u) => u.label)}
+                            loading={salesLoading}
+                            lookupError={salesLookupError}
+                            selectedIds={salesSelectedIds}
+                            onToggle={salesActions.toggle}
+                            onClear={salesActions.clear}
+                        />
+                    )}
+                    {scopeTab === 'codes' && (
+                        <ClientCodePicker
+                            selected={clientCodes}
+                            onAdd={(item) =>
+                                setClientCodes((prev) => (prev.some((c) => c.code === item.code) ? prev : [...prev, item]))
+                            }
+                            onRemove={(code) => setClientCodes((prev) => prev.filter((c) => c.code !== code))}
+                            onClear={() => setClientCodes([])}
+                        />
+                    )}
+                </div>
+
+                {/* What Run will do, before it does it: every pick across all four
+                    tabs, removable here, plus the window and the block shape. */}
+                <div className="tracer-willrun" aria-live="polite">
+                    <p className="tracer-willrun-head">
+                        <span className="eyebrow-lite">Will run</span>
+                        <span>
+                            {datesOk ? fmtDateRange(fromDate, toDate) : 'no date window'}
+                            {fromHour || toHour ? ` · hours ${fromHour || '0'}–${toHour || '23'}` : ''}
+                            {' · '}
+                            {picks.length === 0
+                                ? 'nothing picked yet'
+                                : collate
+                                  ? `${picks.length} scope${picks.length === 1 ? '' : 's'} merged into 1 block`
+                                  : `${picks.length} block${picks.length === 1 ? '' : 's'}`}
+                        </span>
+                    </p>
+                    {picks.length > 0 && (
+                        <div className="tracer-willrun-chips">
+                            {picks.map((p) => (
+                                <span key={p.key} className={`tracer-pick tracer-pick-${p.kind}`}>
+                                    <span className="tracer-pick-kind">{p.kindLabel}</span>
+                                    {p.label}
+                                    <button type="button" aria-label={`Remove ${p.label}`} onClick={p.remove} disabled={busy}>
+                                        ×
+                                    </button>
+                                </span>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            </fieldset>
 
             <div className="tracer-form-actions">
                 <button type="submit" className="btn-primary" disabled={!canRun || busy}>

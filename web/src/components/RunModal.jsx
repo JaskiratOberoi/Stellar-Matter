@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { aggregateEnvelopes, aggregatePages, makeOtherTestsPinned } from '../lib/envelopes.js';
-import { fmtDateRange, tileEyebrow } from '../lib/format.js';
+import { fmtDateRange } from '../lib/format.js';
 import { PackagesTable } from './PackagesTable.jsx';
 
 export function RunModal({ tile, kind, indexFromOne, clientPagesByNorm, onClose }) {
@@ -82,7 +82,13 @@ export function RunModal({ tile, kind, indexFromOne, clientPagesByNorm, onClose 
 
     if (!tile) return null;
 
-    const baseEyebrow = tileEyebrow(tile, indexFromOne);
+    // When this result was computed; the artefact paths and wall index the
+    // header used to show meant nothing to a reader.
+    const ranAt = tile.startedAt ? new Date(tile.startedAt) : null;
+    const ranLabel =
+        ranAt && !Number.isNaN(ranAt.getTime())
+            ? `run ${ranAt.toLocaleString(undefined, { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}`
+            : 'run';
     const isUrine = kind === 'urine_containers';
     const isEdta = kind === 'edta_vials';
     const isCitrate = kind === 'citrate_vials';
@@ -242,7 +248,7 @@ export function RunModal({ tile, kind, indexFromOne, clientPagesByNorm, onClose 
             <div className="run-modal-inner nexus-card">
                 <header className="run-modal-header row-between">
                     <div>
-                        <p className="eyebrow">{`${baseEyebrow} \u00b7 ${kindBadge}`}</p>
+                        <p className="eyebrow">{`${kindBadge} \u00b7 ${ranLabel}`}</p>
                         <h2 className="run-modal-title">{String(tile.bu || '\u2014')}</h2>
                         <p className="muted small">{`${range} \u00b7 ${status}`}</p>
                     </div>
@@ -250,11 +256,6 @@ export function RunModal({ tile, kind, indexFromOne, clientPagesByNorm, onClose 
                         Close
                     </button>
                 </header>
-                <div className="run-modal-paths muted small path">
-                    {tile.paths?.mainJson && <span>main: {tile.paths.mainJson}</span>}
-                    {tile.paths?.mainJson && tile.paths?.packagesJson && ' \u00b7 '}
-                    {tile.paths?.packagesJson && <span>packages: {tile.paths.packagesJson}</span>}
-                </div>
                 {isUrine ? (
                     <div className="packages-table-host-modal table-wrap">
                         <UrineBreakdownTable urineContainers={tile.urineContainers} />

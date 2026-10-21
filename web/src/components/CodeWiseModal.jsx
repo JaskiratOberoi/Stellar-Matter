@@ -246,6 +246,7 @@ export function CodeWiseModal({ tile, bu, fromDate, toDate, clientPagesByNorm, o
         setSort((prev) => (prev.key === key ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'desc' }));
 
     const sortMark = (key) => (sort.key === key ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : '');
+    const ariaSort = (key) => (sort.key === key ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none');
 
     const dialog = (
         <dialog ref={dialogRef} className="run-modal code-wise-modal">
@@ -263,7 +264,7 @@ export function CodeWiseModal({ tile, bu, fromDate, toDate, clientPagesByNorm, o
                             onClick={exportCsv}
                             disabled={visible.length === 0}
                         >
-                            Export to Excel
+                            Export CSV
                         </button>
                         <button type="button" className="chip chip-tool" aria-label="Close" onClick={onClose}>
                             Close
@@ -296,18 +297,18 @@ export function CodeWiseModal({ tile, bu, fromDate, toDate, clientPagesByNorm, o
                             <table className="code-wise-table urine-breakdown">
                                 <thead>
                                     <tr>
-                                        <th>
+                                        <th aria-sort={ariaSort('code')}>
                                             <button type="button" className="th-sort" onClick={() => toggleSort('code')}>
                                                 {`Code${sortMark('code')}`}
                                             </button>
                                         </th>
-                                        <th>
+                                        <th aria-sort={ariaSort('name')}>
                                             <button type="button" className="th-sort" onClick={() => toggleSort('name')}>
                                                 {`Client${sortMark('name')}`}
                                             </button>
                                         </th>
                                         {COLUMNS.map((col) => (
-                                            <th key={col.key} className="num" title={col.title || undefined}>
+                                            <th key={col.key} className="num" title={col.title || undefined} aria-sort={ariaSort(col.key)}>
                                                 <button
                                                     type="button"
                                                     className="th-sort"
@@ -322,13 +323,13 @@ export function CodeWiseModal({ tile, bu, fromDate, toDate, clientPagesByNorm, o
                                 <tbody>
                                     {visible.map((r) => (
                                         <tr key={r.code || '(unassigned)'}>
-                                            <td>{r.code ? <code>{r.code}</code> : <em>{UNASSIGNED_LABEL}</em>}</td>
-                                            <td>
+                                            <td data-label="Code">{r.code ? <code>{r.code}</code> : <em>{UNASSIGNED_LABEL}</em>}</td>
+                                            <td data-label="Client">
                                                 {r.name || <span className="muted">Not in client mirror</span>}
                                                 {r.city ? <span className="muted small"> · {r.city}</span> : null}
                                             </td>
                                             {COLUMNS.map((col) => (
-                                                <td key={col.key} className="num">
+                                                <td key={col.key} className="num" data-label={col.label}>
                                                     {(Number(r[col.key]) || 0).toLocaleString('en-US')}
                                                     {col.key === 'pages' && r.pagesEstimated ? '*' : ''}
                                                 </td>
@@ -341,7 +342,7 @@ export function CodeWiseModal({ tile, bu, fromDate, toDate, clientPagesByNorm, o
                                         <td>TOTAL</td>
                                         <td>{`${visible.length} code${visible.length === 1 ? '' : 's'}`}</td>
                                         {COLUMNS.map((col) => (
-                                            <td key={col.key} className="num">
+                                            <td key={col.key} className="num" data-label={col.label}>
                                                 {(totals[col.key] || 0).toLocaleString('en-US')}
                                             </td>
                                         ))}
@@ -350,7 +351,10 @@ export function CodeWiseModal({ tile, bu, fromDate, toDate, clientPagesByNorm, o
                             </table>
                         </div>
                         <footer className="run-modal-footer row-between">
-                            <span className="eyebrow-lite">Counts are unique SIDs per client code</span>
+                            <span className="eyebrow-lite">
+                                Counts are unique samples per client code. A sample shared by two codes counts under both,
+                                so the total can be higher than the unit's figure.
+                            </span>
                             <span className="muted small">
                                 * page count is a minimum — some labels have no pages-per-report mapping
                             </span>

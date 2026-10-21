@@ -824,3 +824,183 @@
         position: static;
     }
 }
+
+/* -- Run progress: meter, summary, per-scope pills --------------------------- */
+
+.run-progress-meter {
+    height: 4px;
+    background: rgb(var(--nx-rule-soft));
+}
+
+.run-progress-meter > span {
+    display: block;
+    height: 100%;
+    background: rgb(var(--nx-accent));
+    transition: width 0.4s var(--ease, ease-out);
+}
+
+.run-progress-summary {
+    font-size: var(--fs-sm);
+    color: rgb(var(--nx-ink-2));
+    font-variant-numeric: tabular-nums;
+}
+
+.run-progress-summary strong {
+    color: rgb(var(--nx-ink));
+}
+
+.run-progress-bad {
+    color: rgb(var(--nx-signal-danger));
+}
+
+.run-progress-time {
+    color: rgb(var(--nx-ink-3));
+}
+
+.run-progress-pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--sp-1) var(--sp-2);
+    margin: 0;
+    padding: 0 var(--sp-4) var(--sp-3);
+    list-style: none;
+}
+
+.run-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px var(--sp-2);
+    border: 1px solid rgb(var(--nx-rule-soft));
+    border-radius: 999px;
+    font: 600 var(--fs-3xs) / 1.2 var(--font-mono);
+    letter-spacing: 0.04em;
+    color: rgb(var(--nx-ink-3));
+}
+
+.run-pill-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 999px;
+    background: rgb(var(--nx-ink-3) / 0.5);
+}
+
+.run-pill.is-running {
+    color: rgb(var(--nx-signal-info));
+    border-color: rgb(var(--nx-signal-info) / 0.45);
+}
+
+.run-pill.is-running .run-pill-dot {
+    background: rgb(var(--nx-signal-info));
+    animation: run-pill-pulse 1s ease-in-out infinite alternate;
+}
+
+.run-pill.is-done {
+    color: rgb(var(--nx-ink-2));
+}
+
+.run-pill.is-done .run-pill-dot {
+    background: rgb(var(--nx-signal-success));
+}
+
+.run-pill.is-failed {
+    color: rgb(var(--nx-signal-danger));
+    border-color: rgb(var(--nx-signal-danger) / 0.5);
+}
+
+.run-pill.is-failed .run-pill-dot {
+    background: rgb(var(--nx-signal-danger));
+}
+
+.run-pill.is-cancelled .run-pill-dot {
+    background: rgb(var(--nx-signal-warning));
+}
+
+@keyframes run-pill-pulse {
+    from { opacity: 0.35; }
+    to { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .run-pill.is-running .run-pill-dot { animation: none; }
+    .run-progress-meter > span { transition: none; }
+}
+
+.visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+}
+
+/* The form is read-only while a run is going. */
+.tracer-form-fields {
+    margin: 0;
+    padding: 0;
+    border: 0;
+    min-width: 0;
+}
+
+.tracer-form-fields:disabled {
+    opacity: 0.55;
+}
+
+/* Code-wise table on phones: one card per client code, labelled figures,
+   instead of 15 columns scrolling sideways. */
+@media (max-width: 640px) {
+    .code-wise-table thead {
+        display: none;
+    }
+
+    .code-wise-table,
+    .code-wise-table tbody,
+    .code-wise-table tfoot {
+        display: block;
+    }
+
+    .code-wise-table tr {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: var(--sp-1) var(--sp-3);
+        padding: var(--sp-3) 0;
+        border-bottom: 1px solid rgb(var(--nx-rule-soft));
+    }
+
+    .code-wise-table td {
+        display: flex;
+        justify-content: space-between;
+        gap: var(--sp-2);
+        padding: 0;
+        border: 0;
+        white-space: normal;
+        text-align: right;
+    }
+
+    .code-wise-table td[data-label='Code'],
+    .code-wise-table td[data-label='Client'] {
+        grid-column: 1 / -1;
+        justify-content: flex-start;
+        text-align: left;
+    }
+
+    .code-wise-table td[data-label]::before {
+        content: attr(data-label);
+        font: 600 var(--fs-3xs) / 1.4 var(--font-mono);
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: rgb(var(--nx-ink-3));
+        text-align: left;
+    }
+
+    .code-wise-table td[data-label='Code']::before,
+    .code-wise-table td[data-label='Client']::before {
+        content: none;
+    }
+
+    .code-wise-table tfoot tr {
+        border-bottom: 0;
+        font-weight: 700;
+    }
+}
