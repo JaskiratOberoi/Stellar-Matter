@@ -7736,3 +7736,140 @@ a.topbar-brand {
     text-decoration: underline;
     text-underline-offset: 3px;
 }
+
+/* Orders table on desktop: fit the screen instead of scrolling sideways.
+   Long vendor names and the "rec … · who" line wrap; materials get room
+   to read as a list rather than a broken column. */
+@media (min-width: 641px) {
+    .inv-orders-table td.inv-order-vendor {
+        white-space: normal;
+        min-width: 12rem;
+        max-width: 20rem;
+    }
+
+    .inv-orders-table td.inv-order-when {
+        max-width: 11rem;
+        white-space: normal;
+    }
+
+    .inv-orders-table td.inv-order-when .inv-when-recorded {
+        white-space: normal;
+    }
+
+    .inv-orders-table td.inv-order-dest {
+        white-space: normal;
+        max-width: 10rem;
+    }
+
+    .inv-orders-table .inv-order-lines-cell {
+        min-width: 14rem;
+        max-width: 22rem;
+    }
+
+    .inv-orders-table td.inv-row-actions {
+        padding-left: var(--sp-2);
+    }
+}
+
+@media (min-width: 641px) and (max-width: 1200px) {
+    /* Narrow desktops: tighter cells so all columns still fit. */
+    .inv-orders-table th,
+    .inv-orders-table td {
+        padding-left: var(--sp-2);
+        padding-right: var(--sp-2);
+    }
+
+    .inv-orders-table .inv-order-lines-cell {
+        min-width: 11rem;
+    }
+}
+
+@media (min-width: 641px) and (max-width: 1200px) {
+    /* Receive / Cancel stack instead of sitting side by side. */
+    .inv-orders-table td.inv-row-actions {
+        white-space: normal;
+    }
+
+    .inv-orders-table td.inv-row-actions > * {
+        display: block;
+        width: 100%;
+        margin: 0 0 var(--sp-1);
+    }
+
+    .inv-orders-table td.inv-order-vendor {
+        min-width: 9rem;
+    }
+
+    .inv-orders-table .inv-order-lines-cell {
+        min-width: 9rem;
+    }
+}
+
+/* Fit wide grids on desktop instead of scrolling sideways. */
+
+/* Stock: long site names wrap in their header; "Last recorded" narrows. */
+@media (min-width: 641px) {
+    .inv-matrix thead th .inv-col-name {
+        white-space: normal;
+        max-width: 8.5rem;
+        margin-left: auto;
+        line-height: 1.25;
+    }
+
+    .inv-matrix th.inv-stock-rec,
+    .inv-matrix td.inv-stock-rec {
+        white-space: normal;
+        max-width: 9.5rem;
+        padding-left: var(--sp-3);
+    }
+}
+
+/* Consumption: a narrower site list and a tighter month grid. */
+@media (min-width: 901px) {
+    .inv-cons-layout {
+        grid-template-columns: minmax(280px, 330px) minmax(0, 1fr);
+        gap: var(--sp-6);
+    }
+}
+
+.inv-cons-grid th,
+.inv-cons-grid td {
+    padding-left: var(--sp-2);
+    padding-right: var(--sp-2);
+}
+
+.inv-cons-year {
+    display: block;
+    margin-top: 2px;
+    font-size: 0.6rem;
+    color: rgb(var(--nx-ink-3));
+}
+
+.inv-cons-list th,
+.inv-cons-list td {
+    padding-left: var(--sp-2);
+    padding-right: var(--sp-2);
+}
+
+.inv-cons-list th:first-child,
+.inv-cons-list td:first-child {
+    padding-left: 0;
+}
+
+.inv-cons-grid th,
+.inv-cons-grid td {
+    padding-left: 6px;
+    padding-right: 6px;
+}
+
+/* Small laptops: the site list sits above the month grid, as on phones. */
+@media (min-width: 641px) and (max-width: 1100px) {
+    .inv-cons-layout {
+        grid-template-columns: minmax(0, 1fr);
+        gap: var(--sp-6);
+    }
+
+    .inv-cons-detail {
+        scroll-margin-top: calc(var(--topbar-h) + var(--sp-4));
+    }
+}

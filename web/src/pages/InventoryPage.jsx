@@ -3679,7 +3679,11 @@ function Spark({ series, max }) {
 
 function ConsumptionView({ inventory }) {
     const { materials, locations, balances, fetchConsumption } = inventory;
-    const [windowMonths, setWindowMonths] = useState(12);
+    // Twelve month columns only fit beside the site list on a wide screen;
+    // narrower desktops open on six (12 is one click away).
+    const [windowMonths, setWindowMonths] = useState(() =>
+        typeof window !== 'undefined' && window.innerWidth < 1500 ? 6 : 12
+    );
     const [data, setData] = useState(null);
     const [loading, setLoading] = useState(true);
     const [err, setErr] = useState(null);
@@ -3718,7 +3722,7 @@ function ConsumptionView({ inventory }) {
     function pick(id) {
         setSelectedId(id);
         // On a phone the grid sits below the list; bring it into view.
-        if (window.innerWidth <= 900 && detailRef.current) {
+        if (window.innerWidth <= 1100 && detailRef.current) {
             detailRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }
     }
@@ -3893,7 +3897,17 @@ function ConsumptionView({ inventory }) {
                                                         <th className="num">On hand</th>
                                                         <th className="num inv-cons-avg">Avg / mo</th>
                                                         {months.map((m, i) => (
-                                                            <th key={m} className={`num${i === 0 ? ' inv-cons-m0' : ''}${i === months.length - 1 ? ' is-now' : ''}`}>{monthLabel(m)}</th>
+                                                            <th
+                                                                key={m}
+                                                                className={`num${i === 0 ? ' inv-cons-m0' : ''}${i === months.length - 1 ? ' is-now' : ''}`}
+                                                                title={monthLabel(m)}
+                                                            >
+                                                                {/* Short month; the year only where it changes, so 12 columns fit. */}
+                                                                {new Date(`${m}-01T12:00:00`).toLocaleDateString(undefined, { month: 'short' })}
+                                                                {(i === 0 || m.endsWith('-01')) && (
+                                                                    <span className="inv-cons-year">{m.slice(0, 4)}</span>
+                                                                )}
+                                                            </th>
                                                         ))}
                                                     </tr>
                                                 </thead>
