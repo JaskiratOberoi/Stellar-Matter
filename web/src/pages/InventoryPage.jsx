@@ -1,5 +1,4 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { printChallan, printReceivingSlip } from '../lib/challanPrint.js';
 import { useSearchParams } from 'react-router-dom';
 import { apiUrl } from '../apiClient.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
@@ -525,8 +524,7 @@ function ChallanDialog({ movementId, inventory, onClose }) {
         try {
             const j = await inventory.saveChallan(movementId, details);
             setExisting(j.challan);
-            if (kind === 'slip') printReceivingSlip(j.challan);
-            else printChallan(j.challan);
+            await inventory.downloadChallanPdf(j.challan.number, kind);
         } catch (e) {
             setErr(String(e.message || e));
         } finally {
@@ -588,15 +586,15 @@ function ChallanDialog({ movementId, inventory, onClose }) {
                         {err && <p className="login-err inv-challan-wide" role="alert">{err}</p>}
                         <div className="inv-challan-actions inv-challan-wide">
                             <button type="submit" className="btn-primary" disabled={busy}>
-                                {busy ? 'Preparing…' : 'Print / save challan'}
+                                {busy ? 'Preparing…' : 'Download challan'}
                             </button>
                             <button type="button" className="chip chip-tool" disabled={busy} onClick={() => run('slip')}>
-                                Print receiving slip
+                                Download receiving slip
                             </button>
                         </div>
                         <p className="muted small inv-challan-wide">
                             The challan travels with the goods. The receiving slip is for the site to fill in what
-                            arrived and sign. In the print dialog, choose “Save as PDF” for a file.
+                            arrived and sign. Both download as A4 PDFs, ready to print or share.
                         </p>
                     </form>
                 )}

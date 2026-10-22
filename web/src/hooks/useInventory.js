@@ -229,6 +229,20 @@ export function useInventory() {
             request('/api/inventory/challans', { method: 'POST', body: JSON.stringify({ movement_id: movementId, details }) }),
         []
     );
+    // Downloads the server-rendered PDF (kind 'challan' or 'slip').
+    const downloadChallanPdf = useCallback(async (number, kind) => {
+        const res = await apiFetch(`/api/inventory/challans/${number}/pdf?kind=${kind}`);
+        if (!res.ok) await readJson(res);
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = kind === 'slip' ? `Receiving-slip-${number}.pdf` : `Challan-${number}.pdf`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 60000);
+    }, []);
 
     const fetchOnHand = useCallback(async (materialId, locationId) => {
         const q = new URLSearchParams({ material_id: materialId, location_id: locationId });
@@ -274,6 +288,7 @@ export function useInventory() {
         fetchOnHand,
         findChallan,
         saveChallan,
+        downloadChallanPdf,
         fetchLabs
     };
 }

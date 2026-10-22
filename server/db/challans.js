@@ -172,4 +172,20 @@ async function findChallan(orgId, movementId) {
     }
 }
 
-module.exports = { getOrCreateChallan, findChallan, DETAIL_KEYS };
+/** A challan by its running number, for re-rendering its PDF. */
+async function getChallanByNumber(orgId, number) {
+    const pool = getPool();
+    const client = await pool.connect();
+    try {
+        const row = (
+            await client.query(`SELECT * FROM inventory_challans WHERE org_id = $1 AND number = $2`, [orgId, number])
+        ).rows[0];
+        if (!row) throw httpError('Challan not found', 404);
+        const batch = await loadBatch(client, orgId, Number(row.movement_ids[0]));
+        return shape(client, orgId, row, batch);
+    } finally {
+        client.release();
+    }
+}
+
+module.exports = { getOrCreateChallan, findChallan, getChallanByNumber, DETAIL_KEYS };

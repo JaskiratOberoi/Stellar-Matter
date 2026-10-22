@@ -23,6 +23,7 @@ const { adminWriteLimiter } = require('../rateLimit');
 const { logAudit, AUDITED } = require('../audit');
 const inv = require('../db/inventory');
 const challans = require('../db/challans');
+const { renderChallanPdf } = require('../challanPdf');
 const { uploadPhoto, urlFor } = require('../inventoryPhotos');
 
 const router = express.Router();
@@ -964,6 +965,25 @@ router.post('/challans', requireMover, adminWriteLimiter, async (req, res) => {
             }
         });
         res.json({ challan });
+    } catch (err) {
+        sendError(res, err);
+    }
+});
+
+// The challan or its receiving slip as an A4 PDF download.
+router.get('/challans/:number/pdf', requireMover, async (req, res) => {
+    if (!dbGuard(res)) return;
+    try {
+        const number = Number(req.params.number);
+        if (!Number.isInteger(number)) return res.status(400).json({ error: 'invalid challan number' });
+        const kind = req.query.kind === 'slip' ? 'slip' : 'challan';
+        const challan = await challans.getChallanByNumber(orgOf(req), number);
+        const pdf = await renderChallanPdf(challan, kind);
+        const name = kind === 'slip' ? `Receiving-slip-${number}.pdf` : `Challan-${number}.pdf`;
+        res.set('Content-Type', 'application/pdf');
+        res.set('Content-Disposition', `attachment; filename="${name}"`);
+        res.set('Cache-Control', 'no-store');
+        res.send(Buffer.from(pdf));
     } catch (err) {
         sendError(res, err);
     }

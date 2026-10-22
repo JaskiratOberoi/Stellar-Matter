@@ -1,6 +1,7 @@
-// Printable dispatch paperwork, laid out for A4 and printed from a hidden
-// frame so the app page is untouched. "Save as PDF" in the print dialog gives
-// the PDF for the courier.
+'use strict';
+
+// Dispatch paperwork as A4 HTML, rendered to PDF by challanPdf.js so the
+// download looks the same whatever printer or viewer the user has.
 //
 // - Challan: travels with the goods (issuer letterhead, party, transport,
 //   items and quantities, signatures). Quantities only, no prices.
@@ -19,7 +20,10 @@ const fmtQty = (n) => Number(n || 0).toLocaleString('en-IN');
 function fmtDate(v) {
     const d = new Date(v);
     if (Number.isNaN(d.getTime())) return '';
-    return d.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '-');
+    // Rendered on the server (UTC), so pin the date to India time.
+    return d
+        .toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'Asia/Kolkata' })
+        .replace(/\//g, '-');
 }
 
 function packText(l) {
@@ -36,7 +40,7 @@ function unitTotals(lines) {
 const BASE_CSS = `
 @page { size: A4; margin: 12mm; }
 * { box-sizing: border-box; }
-body { margin: 0; font: 11pt/1.35 Arial, Helvetica, sans-serif; color: #111; }
+body { margin: 0; font: 11pt/1.35 Arial, "Liberation Sans", Helvetica, sans-serif; color: #111; }
 .sheet { border: 1.5px solid #111; }
 .head { text-align: center; padding: 8px 12px 10px; border-bottom: 1.5px solid #111; }
 .doc-title { font-size: 13pt; font-weight: 700; text-decoration: underline; letter-spacing: .02em; margin: 0 0 4px; }
@@ -189,32 +193,4 @@ table.items td { height: 26px; }
 </body></html>`;
 }
 
-function printHtml(html) {
-    const frame = document.createElement('iframe');
-    frame.setAttribute('aria-hidden', 'true');
-    frame.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden';
-    document.body.appendChild(frame);
-    const doc = frame.contentDocument;
-    doc.open();
-    doc.write(html);
-    doc.close();
-    const go = () => {
-        frame.contentWindow.focus();
-        frame.contentWindow.print();
-        // Leave it long enough for the dialog to read it, then tidy up.
-        setTimeout(() => frame.remove(), 60000);
-    };
-    if (doc.readyState === 'complete') setTimeout(go, 50);
-    else frame.onload = go;
-}
-
-export function printChallan(challan) {
-    printHtml(challanHtml(challan));
-}
-
-export function printReceivingSlip(challan) {
-    printHtml(receivingHtml(challan));
-}
-
-// Exposed for previews and tests.
-export { challanHtml, receivingHtml };
+module.exports = { challanHtml, receivingHtml };
