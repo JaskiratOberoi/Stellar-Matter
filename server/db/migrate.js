@@ -788,6 +788,7 @@ async function migrateChallans(client) {
     await client.query(`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS address TEXT`);
     await client.query(`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS phone TEXT`);
     await client.query(`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS licence_no TEXT`);
+    await client.query(`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS gst TEXT`);
 
     await client.query(`
         CREATE TABLE IF NOT EXISTS inventory_challans (

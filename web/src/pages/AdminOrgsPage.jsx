@@ -300,17 +300,18 @@ function OrgRow({ org, users, assignOpen, onToggleAssign, onChanged }) {
 }
 
 // The organisation's letterhead on dispatch challans: postal address, phone
-// and drug licence number(s). Name comes from the org itself.
+// drug licence number(s) and GST status. Name comes from the org itself.
 function OrgChallanDetails({ org, busy, onSave }) {
     const [address, setAddress] = useState(org.address || '');
     const [phone, setPhone] = useState(org.phone || '');
     const [licence, setLicence] = useState(org.licence_no || '');
+    const [gst, setGst] = useState(org.gst || '');
     return (
         <form
             className="org-challan-form"
             onSubmit={(e) => {
                 e.preventDefault();
-                onSave({ address, phone, licence_no: licence });
+                onSave({ address, phone, licence_no: licence, gst });
             }}
         >
             <p className="muted small">
@@ -328,6 +329,10 @@ function OrgChallanDetails({ org, busy, onSave }) {
                 <label>
                     Drug licence no(s).
                     <input value={licence} onChange={(e) => setLicence(e.target.value)} placeholder="e.g. WLF20B…, WLF21B…" />
+                </label>
+                <label>
+                    GST
+                    <input value={gst} onChange={(e) => setGst(e.target.value)} placeholder="GSTIN, or why not applicable" />
                 </label>
             </div>
             <div className="form-actions">

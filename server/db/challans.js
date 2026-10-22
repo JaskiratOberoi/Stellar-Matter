@@ -56,7 +56,7 @@ async function loadBatch(client, orgId, movementId) {
 
 async function shape(client, orgId, challan, batch) {
     const [org, locs] = await Promise.all([
-        client.query(`SELECT name, address, phone, licence_no FROM organizations WHERE id = $1`, [orgId]),
+        client.query(`SELECT name, address, phone, licence_no, gst FROM organizations WHERE id = $1`, [orgId]),
         client.query(
             `SELECT id, name, kind, bu_code, client_code FROM inventory_locations WHERE org_id = $1 AND id = ANY($2)`,
             [orgId, [batch.seed.from_location_id, batch.seed.to_location_id].filter(Boolean)]

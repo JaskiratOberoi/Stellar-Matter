@@ -83,6 +83,7 @@ function letterhead(c, title) {
   <p class="org">${esc((org.name || '').toUpperCase())}</p>
   ${sub ? `<p class="org-sub">${sub}</p>` : ''}
   ${org.licence_no ? `<p class="org-sub">Drug Licence No. : ${esc(org.licence_no)}</p>` : ''}
+  ${org.gst ? `<p class="org-sub">GST : ${esc(org.gst)}</p>` : ''}
 </div>`;
 }
 
@@ -187,7 +188,7 @@ table.items td { height: 26px; }
     <div><span>Phone</span><span class="line"></span></div>
     <div><span>Signature &amp; stamp</span><span class="line"></span></div>
   </div>
-  <div class="note">Please sign and return this slip, or send a clear photo of it, to ${esc(org.name || 'the sender')}${org.phone ? ` (${esc(org.phone)})` : ''}.</div>
+  <div class="note">Please sign and return this slip, or send a clear photo of it, to ${esc(org.phone ? org.name || 'the sender' : (org.name || 'the sender').replace(/\.+$/, ''))}${org.phone ? ` (${esc(org.phone)})` : ''}.</div>
 </div>
 <div class="foot"><span>Receiving slip · ${esc(org.name || '')}</span><span>Against Challan No. ${esc(c.number)}</span></div>
 </body></html>`;
