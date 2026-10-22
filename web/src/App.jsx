@@ -9,6 +9,7 @@ import { AdminUsersPage } from './pages/AdminUsersPage.jsx';
 import { AdminAuditLogPage } from './pages/AdminAuditLogPage.jsx';
 import { AdminOrgsPage } from './pages/AdminOrgsPage.jsx';
 import { AdminMaterialRequestsPage } from './pages/AdminMaterialRequestsPage.jsx';
+import { AdminDeliverySitesPage } from './pages/AdminDeliverySitesPage.jsx';
 import { MaterialRequestPage } from './pages/MaterialRequestPage.jsx';
 import { InventoryPage } from './pages/InventoryPage.jsx';
 import { TracerPage } from './pages/TracerPage.jsx';
@@ -86,6 +87,14 @@ export function App() {
                     element={
                         <RoleGate roles={['super_admin', 'admin']}>
                             <AdminMaterialRequestsPage />
+                        </RoleGate>
+                    }
+                />
+                <Route
+                    path="/admin/delivery-sites"
+                    element={
+                        <RoleGate roles={['super_admin', 'admin']}>
+                            <AdminDeliverySitesPage />
                         </RoleGate>
                     }
                 />

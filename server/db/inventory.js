@@ -362,7 +362,8 @@ async function listLocations(orgId, { includeInactive = false, ensureBus = false
     const where = ['org_id = $1'];
     if (!includeInactive) where.push('active = true');
     const r = await pool.query(
-        `SELECT id, org_id, name, kind, bu_code, client_code, active, created_at
+        `SELECT id, org_id, name, kind, bu_code, client_code, active, created_at,
+                address, contact_name, contact_phone, licence_no
          FROM inventory_locations
          WHERE ${where.join(' AND ')}
          ORDER BY
@@ -376,7 +377,8 @@ async function listLocations(orgId, { includeInactive = false, ensureBus = false
 async function getLocation(orgId, id) {
     const pool = getPool();
     const r = await pool.query(
-        `SELECT id, org_id, name, kind, bu_code, client_code, active, created_at
+        `SELECT id, org_id, name, kind, bu_code, client_code, active, created_at,
+                address, contact_name, contact_phone, licence_no
          FROM inventory_locations
          WHERE org_id = $1 AND id = $2`,
         [orgId, id]
@@ -416,6 +418,9 @@ async function updateLocation(orgId, id, fields) {
     if (fields.buCode !== undefined) push('bu_code', fields.buCode);
     if (fields.clientCode !== undefined) push('client_code', fields.clientCode);
     if (fields.active !== undefined) push('active', fields.active);
+    for (const col of ['address', 'contact_name', 'contact_phone', 'licence_no']) {
+        if (fields[col] !== undefined) push(col, fields[col]);
+    }
     if (!sets.length) return getLocation(orgId, id);
     try {
         const r = await pool.query(

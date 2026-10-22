@@ -14,6 +14,7 @@ const ROLE_LABEL = { super_admin: 'Super admin', admin: 'Admin', operator: 'Oper
 // instead of a row of chips.
 const ADMIN_LINKS = [
     { to: '/admin/material-requests', label: 'Material requests', caption: 'Review and approve requests', roles: ['super_admin', 'admin'] },
+    { to: '/admin/delivery-sites', label: 'Delivery sites', caption: 'Addresses and contacts for challans', roles: ['super_admin', 'admin'] },
     { to: '/admin/users', label: 'Users', caption: 'Accounts and roles', roles: ['super_admin'] },
     { to: '/admin/orgs', label: 'Orgs', caption: 'Organisations and members', roles: ['super_admin'] },
     { to: '/admin/audit-log', label: 'Audit trail', caption: 'Who changed what, when', roles: ['super_admin'] }
@@ -373,6 +374,13 @@ export function Topbar({ statusPill, lastUpdated, onOrgSwitched }) {
                                                 onClick={() => setMenuOpen(false)}
                                             >
                                                 Materials requests
+                                            </Link>
+                                            <Link
+                                                to="/admin/delivery-sites"
+                                                className="chip chip-tool"
+                                                onClick={() => setMenuOpen(false)}
+                                            >
+                                                Delivery sites
                                             </Link>
                                             {user.role === 'super_admin' && (
                                                 <>

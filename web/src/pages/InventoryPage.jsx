@@ -470,8 +470,21 @@ const CHALLAN_FIELDS = [
     { key: 'vehicle_no', label: 'Vehicle No.' },
     { key: 'station', label: 'Station' },
     { key: 'eway_bill', label: 'E-Way Bill No.' },
-    { key: 'party_licence', label: 'Party D.L. No.' }
+    { key: 'party_licence', label: 'Party D.L. No.' },
+    { key: 'contact_name', label: 'Contact person' },
+    { key: 'contact_phone', label: 'Contact phone' }
 ];
+
+// A delivery site's saved details, as challan fields.
+function siteDetails(site) {
+    if (!site) return {};
+    const out = {};
+    if (site.address) out.party_address = site.address;
+    if (site.licence_no) out.party_licence = site.licence_no;
+    if (site.contact_name) out.contact_name = site.contact_name;
+    if (site.contact_phone) out.contact_phone = site.contact_phone;
+    return out;
+}
 
 /**
  * Transport details for a dispatch's challan, then print the challan (for
@@ -482,6 +495,7 @@ function ChallanDialog({ movementId, inventory, onClose }) {
     const [loading, setLoading] = useState(true);
     const [existing, setExisting] = useState(null);
     const [details, setDetails] = useState({});
+    const [fromSite, setFromSite] = useState(false);
     const [busy, setBusy] = useState(false);
     const [err, setErr] = useState(null);
     const firstRef = useRef(null);
@@ -492,9 +506,14 @@ function ChallanDialog({ movementId, inventory, onClose }) {
             .findChallan(movementId)
             .then((j) => {
                 if (!alive) return;
+                // Start from the delivery site's saved details; what this
+                // challan already recorded wins.
                 if (j.challan) {
                     setExisting(j.challan);
-                    setDetails(j.challan.details || {});
+                    setDetails({ ...siteDetails(j.challan.to), ...(j.challan.details || {}) });
+                } else {
+                    setDetails(siteDetails(j.site));
+                    setFromSite(Boolean(j.site && j.site.address));
                 }
             })
             .catch((e) => alive && setErr(String(e.message || e)))
@@ -568,7 +587,7 @@ function ChallanDialog({ movementId, inventory, onClose }) {
                         }}
                     >
                         <label className="inv-challan-wide">
-                            Party address
+                            Party address{fromSite ? ' · from the delivery site' : ''}
                             <textarea
                                 ref={firstRef}
                                 rows={3}

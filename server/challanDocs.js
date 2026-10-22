@@ -90,12 +90,17 @@ function letterhead(c, title) {
 function partyBlock(c) {
     const d = c.details || {};
     const to = c.to || {};
+    // The challan keeps its own copy of the site's details; the saved
+    // delivery site fills in for challans made before it had them.
+    const address = d.party_address || to.address || '';
+    const contact = [d.contact_name || to.contact_name, d.contact_phone || to.contact_phone].filter(Boolean);
     return `
   <div>
     <p class="label">Party Details :</p>
     <p class="party-name">${esc(to.name || '')}${to.bu_code && to.bu_code !== to.name ? ` (${esc(to.bu_code)})` : ''}</p>
-    ${d.party_address ? `<div>${esc(d.party_address).replace(/\n/g, '<br>')}</div>` : ''}
-    <p style="margin-top:14px">Party D.L. No. : ${esc(d.party_licence || '')}</p>
+    ${address ? `<div>${esc(address).replace(/\n/g, '<br>')}</div>` : ''}
+    ${contact.length ? `<p style="margin-top:6px">Contact : ${contact.map(esc).join(' · ')}</p>` : ''}
+    <p style="margin-top:${contact.length ? 4 : 14}px">Party D.L. No. : ${esc(d.party_licence || to.licence_no || '')}</p>
   </div>`;
 }
 

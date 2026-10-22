@@ -14,7 +14,17 @@ function httpError(message, status) {
     return err;
 }
 
-const DETAIL_KEYS = ['party_address', 'party_licence', 'transport', 'gr_no', 'vehicle_no', 'station', 'eway_bill'];
+const DETAIL_KEYS = [
+    'party_address',
+    'party_licence',
+    'contact_name',
+    'contact_phone',
+    'transport',
+    'gr_no',
+    'vehicle_no',
+    'station',
+    'eway_bill'
+];
 
 function cleanDetails(raw) {
     const out = {};
@@ -58,7 +68,8 @@ async function shape(client, orgId, challan, batch) {
     const [org, locs] = await Promise.all([
         client.query(`SELECT name, address, phone, licence_no, gst FROM organizations WHERE id = $1`, [orgId]),
         client.query(
-            `SELECT id, name, kind, bu_code, client_code FROM inventory_locations WHERE org_id = $1 AND id = ANY($2)`,
+            `SELECT id, name, kind, bu_code, client_code, address, contact_name, contact_phone, licence_no
+             FROM inventory_locations WHERE org_id = $1 AND id = ANY($2)`,
             [orgId, [batch.seed.from_location_id, batch.seed.to_location_id].filter(Boolean)]
         )
     ]);
@@ -164,7 +175,14 @@ async function findChallan(orgId, movementId) {
             )
         ).rows[0];
         if (!row) {
-            return { challan: null, lines: batch.lines.length };
+            // No challan yet: hand back the destination's saved delivery-site
+            // details so the form can start from them.
+            const site = await client.query(
+                `SELECT id, name, address, contact_name, contact_phone, licence_no
+                 FROM inventory_locations WHERE org_id = $1 AND id = $2`,
+                [orgId, batch.seed.to_location_id]
+            );
+            return { challan: null, lines: batch.lines.length, site: site.rows[0] || null };
         }
         return { challan: await shape(client, orgId, row, batch) };
     } finally {

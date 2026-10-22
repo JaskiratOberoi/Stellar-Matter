@@ -36,6 +36,13 @@ const requireCatalogAdmin = requireRole('super_admin', 'admin');
 const MOVEMENT_KINDS = new Set(['receipt', 'dispatch', 'adjustment']);
 const LOCATION_DIRS = new Set(['from', 'to']);
 const LOCATION_KINDS = new Set(['store', 'business_unit', 'lab']);
+const SITE_FIELDS = ['address', 'contact_name', 'contact_phone', 'licence_no'];
+
+function siteAudit(l) {
+    const out = { name: l.name, kind: l.kind, active: l.active };
+    for (const col of SITE_FIELDS) out[col] = l[col] || null;
+    return out;
+}
 
 function orgOf(req) {
     return (req.user && req.user.activeOrgId) || 'org-default';
@@ -357,14 +364,18 @@ router.patch('/locations/:id', requireCatalogAdmin, adminWriteLimiter, async (re
         if (body.bu_code !== undefined) fields.buCode = trimStr(body.bu_code) || null;
         if (body.client_code !== undefined) fields.clientCode = trimStr(body.client_code) || null;
         if (typeof body.active === 'boolean') fields.active = body.active;
+        // Delivery-site details, copied onto challans for dispatches here.
+        for (const col of SITE_FIELDS) {
+            if (body[col] !== undefined) fields[col] = trimStr(body[col]).slice(0, 500) || null;
+        }
         const location = await inv.updateLocation(orgId, req.params.id, fields);
         await logAudit(req, {
             action: 'inventory.location.update',
             targetType: 'inventory_location',
             targetId: req.params.id,
             outcome: 'success',
-            before: { name: before.name, kind: before.kind, active: before.active },
-            after: location ? { name: location.name, kind: location.kind, active: location.active } : null
+            before: siteAudit(before),
+            after: location ? siteAudit(location) : null
         });
         res.json({ location });
     } catch (err) {

@@ -789,6 +789,10 @@ async function migrateChallans(client) {
     await client.query(`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS phone TEXT`);
     await client.query(`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS licence_no TEXT`);
     await client.query(`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS gst TEXT`);
+    // Delivery sites: where a dispatch to this location goes, and who takes it.
+    for (const col of ['address', 'contact_name', 'contact_phone', 'licence_no']) {
+        await client.query(`ALTER TABLE inventory_locations ADD COLUMN IF NOT EXISTS ${col} TEXT`);
+    }
 
     await client.query(`
         CREATE TABLE IF NOT EXISTS inventory_challans (
