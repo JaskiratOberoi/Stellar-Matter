@@ -352,6 +352,7 @@ async function migrate() {
         // Materials request workflow — public form submissions keyed by an
         // org request code, plus admin consolidate → super_admin send handoff.
         await migrateMaterialRequests(client);
+        await migrateChallans(client);
 
         // Fold any legacy "Default" / duplicate acme-labs org into the single
         // canonical tenant so the org switcher only shows Qugen Pathlabs.
@@ -778,6 +779,36 @@ async function backfillCatalogMaterials(client) {
             );
         }
     }
+}
+
+// Dispatch challans: the organisation's own details for the slip header, and
+// one row per dispatched batch holding its running number and the transport
+// details typed when it was printed, so a reprint matches the first copy.
+async function migrateChallans(client) {
+    await client.query(`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS address TEXT`);
+    await client.query(`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS phone TEXT`);
+    await client.query(`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS licence_no TEXT`);
+
+    await client.query(`
+        CREATE TABLE IF NOT EXISTS inventory_challans (
+            id BIGSERIAL PRIMARY KEY,
+            org_id TEXT NOT NULL DEFAULT 'org-default'
+                REFERENCES organizations(id) ON DELETE RESTRICT,
+            number INT NOT NULL,
+            movement_ids BIGINT[] NOT NULL,
+            from_location_id TEXT REFERENCES inventory_locations(id) ON DELETE RESTRICT,
+            to_location_id TEXT REFERENCES inventory_locations(id) ON DELETE RESTRICT,
+            dispatched_at TIMESTAMPTZ NOT NULL,
+            details JSONB NOT NULL DEFAULT '{}'::jsonb,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            created_by TEXT,
+            UNIQUE (org_id, number)
+        );
+    `);
+    await client.query(
+        `CREATE INDEX IF NOT EXISTS inventory_challans_movements_idx
+         ON inventory_challans USING GIN (movement_ids);`
+    );
 }
 
 async function migrateMaterialRequests(client) {

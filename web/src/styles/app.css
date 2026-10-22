@@ -7873,3 +7873,120 @@ a.topbar-brand {
         scroll-margin-top: calc(var(--topbar-h) + var(--sp-4));
     }
 }
+
+/* Orgs: challan letterhead details. */
+.org-challan-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-3);
+    max-width: 44rem;
+}
+
+.org-challan-form label {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-1);
+    font-size: var(--fs-xs);
+    color: rgb(var(--nx-ink-2));
+}
+
+.org-challan-form input,
+.org-challan-form textarea {
+    padding: var(--sp-2) var(--sp-3);
+    border: 1px solid rgb(var(--nx-rule-strong));
+    border-radius: var(--r-sm);
+    background: rgb(var(--nx-surface));
+    color: rgb(var(--nx-ink));
+    font: 400 var(--fs-sm) / 1.4 var(--font-sans);
+}
+
+.org-challan-row {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--sp-3);
+}
+
+@media (max-width: 640px) {
+    .org-challan-row {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+/* Challan dialog. */
+.inv-challan {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-4);
+    width: min(640px, 100%);
+    max-height: 86vh;
+    overflow-y: auto;
+    padding: var(--sp-5);
+    background: rgb(var(--nx-surface));
+    border: 1px solid rgb(var(--nx-rule-strong));
+    border-radius: var(--r-lg);
+}
+
+.inv-challan-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: var(--sp-3);
+}
+
+.inv-challan-title {
+    margin: 2px 0 4px;
+    font-size: var(--fs-lg, 1.125rem);
+    font-weight: 650;
+}
+
+.inv-challan-form {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--sp-3);
+}
+
+.inv-challan-form label {
+    display: flex;
+    flex-direction: column;
+    gap: var(--sp-1);
+    font-size: var(--fs-xs);
+    color: rgb(var(--nx-ink-2));
+}
+
+.inv-challan-form input,
+.inv-challan-form textarea {
+    min-height: 38px;
+    padding: var(--sp-2) var(--sp-3);
+    border: 1px solid rgb(var(--nx-rule-strong));
+    border-radius: var(--r-sm);
+    background: rgb(var(--nx-bg));
+    color: rgb(var(--nx-ink));
+    font: 400 var(--fs-sm) / 1.4 var(--font-sans);
+}
+
+.inv-challan-wide {
+    grid-column: 1 / -1;
+}
+
+.inv-challan-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--sp-2);
+    padding-top: var(--sp-2);
+}
+
+.inv-challan-btn {
+    margin-top: var(--sp-1);
+}
+
+@media (max-width: 640px) {
+    .inv-challan-form {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .inv-challan-form input,
+    .inv-challan-form textarea {
+        min-height: 44px;
+        font-size: 16px;
+    }
+}

@@ -162,6 +162,7 @@ function CreateOrgForm({ onCreated }) {
 function OrgRow({ org, users, assignOpen, onToggleAssign, onChanged }) {
     const [busy, setBusy] = useState(false);
     const [freshCode, setFreshCode] = useState(null);
+    const [detailsOpen, setDetailsOpen] = useState(false);
     const isDefault = org.id === 'org-default';
 
     async function patch(body) {
@@ -244,6 +245,15 @@ function OrgRow({ org, users, assignOpen, onToggleAssign, onChanged }) {
                     <button type="button" className="chip chip-tool" disabled={busy} onClick={onToggleAssign}>
                         {assignOpen ? 'Hide members' : 'Manage members'}
                     </button>
+                    <button
+                        type="button"
+                        className="chip chip-tool"
+                        aria-expanded={detailsOpen ? 'true' : 'false'}
+                        onClick={() => setDetailsOpen((v) => !v)}
+                        title="Address, phone and licence numbers printed on dispatch challans"
+                    >
+                        {detailsOpen ? 'Hide challan details' : 'Challan details'}
+                    </button>
                     <button type="button" className="chip chip-tool" disabled={busy || !org.active} onClick={resetRequestCode}>
                         {org.has_request_code ? 'Rotate request code' : 'Generate request code'}
                     </button>
@@ -264,6 +274,20 @@ function OrgRow({ org, users, assignOpen, onToggleAssign, onChanged }) {
                     )}
                 </td>
             </tr>
+            {detailsOpen && (
+                <tr>
+                    <td colSpan={6} className="audit-detail-cell">
+                        <OrgChallanDetails
+                            org={org}
+                            busy={busy}
+                            onSave={async (fields) => {
+                                await patch(fields);
+                                setDetailsOpen(false);
+                            }}
+                        />
+                    </td>
+                </tr>
+            )}
             {assignOpen && (
                 <tr>
                     <td colSpan={6} className="audit-detail-cell">
@@ -272,6 +296,46 @@ function OrgRow({ org, users, assignOpen, onToggleAssign, onChanged }) {
                 </tr>
             )}
         </>
+    );
+}
+
+// The organisation's letterhead on dispatch challans: postal address, phone
+// and drug licence number(s). Name comes from the org itself.
+function OrgChallanDetails({ org, busy, onSave }) {
+    const [address, setAddress] = useState(org.address || '');
+    const [phone, setPhone] = useState(org.phone || '');
+    const [licence, setLicence] = useState(org.licence_no || '');
+    return (
+        <form
+            className="org-challan-form"
+            onSubmit={(e) => {
+                e.preventDefault();
+                onSave({ address, phone, licence_no: licence });
+            }}
+        >
+            <p className="muted small">
+                Printed under “{org.name}” at the top of every dispatch challan and receiving slip.
+            </p>
+            <label>
+                Address
+                <textarea rows={2} value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Street, area, city, PIN" />
+            </label>
+            <div className="org-challan-row">
+                <label>
+                    Phone
+                    <input value={phone} onChange={(e) => setPhone(e.target.value)} />
+                </label>
+                <label>
+                    Drug licence no(s).
+                    <input value={licence} onChange={(e) => setLicence(e.target.value)} placeholder="e.g. WLF20B…, WLF21B…" />
+                </label>
+            </div>
+            <div className="form-actions">
+                <button type="submit" className="btn-primary btn-sm" disabled={busy}>
+                    {busy ? 'Saving…' : 'Save challan details'}
+                </button>
+            </div>
+        </form>
     );
 }
 

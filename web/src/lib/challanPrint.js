@@ -1,0 +1,220 @@
+// Printable dispatch paperwork, laid out for A4 and printed from a hidden
+// frame so the app page is untouched. "Save as PDF" in the print dialog gives
+// the PDF for the courier.
+//
+// - Challan: travels with the goods (issuer letterhead, party, transport,
+//   items and quantities, signatures). Quantities only, no prices.
+// - Receiving slip: for the receiving site to fill in what actually arrived
+//   and sign, against the same challan number.
+
+const esc = (v) =>
+    String(v == null ? '' : v)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+
+const fmtQty = (n) => Number(n || 0).toLocaleString('en-IN');
+
+function fmtDate(v) {
+    const d = new Date(v);
+    if (Number.isNaN(d.getTime())) return '';
+    return d.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '-');
+}
+
+function packText(l) {
+    if (l.pack_qty && l.pack_size && l.pack_size > 1) return `${fmtQty(l.pack_qty)} × ${fmtQty(l.pack_size)}`;
+    return '';
+}
+
+function unitTotals(lines) {
+    const m = new Map();
+    for (const l of lines) m.set(l.unit, (m.get(l.unit) || 0) + Number(l.qty || 0));
+    return [...m.entries()].map(([u, q]) => `${fmtQty(q)} ${esc(u)}`).join(' · ');
+}
+
+const BASE_CSS = `
+@page { size: A4; margin: 12mm; }
+* { box-sizing: border-box; }
+body { margin: 0; font: 11pt/1.35 Arial, Helvetica, sans-serif; color: #111; }
+.sheet { border: 1.5px solid #111; }
+.head { text-align: center; padding: 8px 12px 10px; border-bottom: 1.5px solid #111; }
+.doc-title { font-size: 13pt; font-weight: 700; text-decoration: underline; letter-spacing: .02em; margin: 0 0 4px; }
+.org { font-size: 20pt; font-weight: 700; margin: 0; letter-spacing: .02em; }
+.org-sub { font-size: 9.5pt; font-weight: 700; margin: 2px 0 0; }
+.meta { display: grid; grid-template-columns: 1.05fr 1fr; border-bottom: 1.5px solid #111; }
+.meta > div { padding: 8px 12px; min-height: 120px; }
+.meta > div + div { border-left: 1.5px solid #111; }
+.label { font-weight: 700; font-style: italic; margin: 0 0 4px; }
+.party-name { font-weight: 700; margin: 0 0 2px; }
+.kv { display: grid; grid-template-columns: 9.5em 1em 1fr; row-gap: 3px; font-size: 10pt; }
+.kv b { font-weight: 400; }
+table.items { width: 100%; border-collapse: collapse; font-size: 10pt; }
+table.items th { text-align: left; font-weight: 700; padding: 6px 6px; border-bottom: 1.5px solid #111; }
+table.items td { padding: 5px 6px; vertical-align: top; }
+table.items th + th, table.items td + td { border-left: 1px solid #111; }
+table.items .num { text-align: right; white-space: nowrap; }
+table.items .sn { width: 2.5em; }
+table.items tr.fill td { height: 160px; }
+.total { display: flex; justify-content: space-between; gap: 12px; padding: 7px 12px; border-top: 1.5px solid #111; font-weight: 700; }
+.note { padding: 6px 12px; border-top: 1.5px solid #111; font-size: 9.5pt; }
+.sign { display: grid; grid-template-columns: 1fr 1fr; border-top: 1.5px solid #111; }
+.sign > div { padding: 10px 12px 12px; min-height: 92px; display: flex; flex-direction: column; justify-content: space-between; }
+.sign > div + div { border-left: 1.5px solid #111; text-align: right; }
+.foot { display: flex; justify-content: space-between; font-size: 8.5pt; color: #555; margin-top: 4px; }
+.blank { border-bottom: 1px solid #111; min-width: 9em; display: inline-block; }
+.check { display: flex; gap: 22px; padding: 8px 12px; border-top: 1.5px solid #111; font-size: 10pt; }
+.box { display: inline-block; width: 11px; height: 11px; border: 1px solid #111; margin-right: 6px; vertical-align: -1px; }
+.fields { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 24px; padding: 12px; border-top: 1.5px solid #111; font-size: 10pt; }
+.fields div { display: flex; gap: 8px; align-items: flex-end; }
+.fields .line { flex: 1; border-bottom: 1px solid #111; height: 1.2em; }
+`;
+
+function letterhead(c, title) {
+    const org = c.org || {};
+    const sub = [org.address, org.phone ? `Phone: ${org.phone}` : null].filter(Boolean).map(esc).join(' · ');
+    return `
+<div class="head">
+  <p class="doc-title">${esc(title)}</p>
+  <p class="org">${esc((org.name || '').toUpperCase())}</p>
+  ${sub ? `<p class="org-sub">${sub}</p>` : ''}
+  ${org.licence_no ? `<p class="org-sub">Drug Licence No. : ${esc(org.licence_no)}</p>` : ''}
+</div>`;
+}
+
+function partyBlock(c) {
+    const d = c.details || {};
+    const to = c.to || {};
+    return `
+  <div>
+    <p class="label">Party Details :</p>
+    <p class="party-name">${esc(to.name || '')}${to.bu_code && to.bu_code !== to.name ? ` (${esc(to.bu_code)})` : ''}</p>
+    ${d.party_address ? `<div>${esc(d.party_address).replace(/\n/g, '<br>')}</div>` : ''}
+    <p style="margin-top:14px">Party D.L. No. : ${esc(d.party_licence || '')}</p>
+  </div>`;
+}
+
+function challanHtml(c) {
+    const d = c.details || {};
+    const lines = c.lines || [];
+    const rows = lines
+        .map(
+            (l, i) => `<tr>
+      <td class="sn">${i + 1}.</td>
+      <td>${esc(l.material_name)}</td>
+      <td class="num">${esc(packText(l))}</td>
+      <td class="num">${fmtQty(l.qty)}</td>
+      <td>${esc(l.unit)}</td>
+    </tr>`
+        )
+        .join('');
+    return `<!doctype html><html><head><meta charset="utf-8"><title>Challan ${esc(c.number)}</title><style>${BASE_CSS}</style></head><body>
+<div class="sheet">
+  ${letterhead(c, 'DELIVERY CHALLAN · MATERIAL ISSUED TO PARTY')}
+  <div class="meta">
+    ${partyBlock(c)}
+    <div class="kv">
+      <span>No.</span><span>:</span><b>${esc(c.number)}</b>
+      <span>Dated</span><span>:</span><b>${esc(fmtDate(c.occurred_at))}</b>
+      <span>From</span><span>:</span><b>${esc((c.from && c.from.name) || '')}</b>
+      <span>GR/RR No.</span><span>:</span><b>${esc(d.gr_no || '')}</b>
+      <span>Transport</span><span>:</span><b>${esc(d.transport || '')}</b>
+      <span>Vehicle No.</span><span>:</span><b>${esc(d.vehicle_no || '')}</b>
+      <span>Station</span><span>:</span><b>${esc(d.station || '')}</b>
+      <span>E-Way Bill No.</span><span>:</span><b>${esc(d.eway_bill || '')}</b>
+    </div>
+  </div>
+  <table class="items">
+    <thead><tr><th class="sn">S.N.</th><th>Description of Goods</th><th class="num">Packs</th><th class="num">Qty.</th><th>Unit</th></tr></thead>
+    <tbody>${rows}<tr class="fill"><td></td><td></td><td></td><td></td><td></td></tr></tbody>
+  </table>
+  <div class="total"><span>Total: ${lines.length} item${lines.length === 1 ? '' : 's'}</span><span>${unitTotals(lines)}</span></div>
+  ${c.reference || c.note ? `<div class="note">${c.reference ? `Ref: ${esc(c.reference)}` : ''}${c.reference && c.note ? ' · ' : ''}${esc(c.note || '')}</div>` : ''}
+  <div class="sign">
+    <div><span>Received the above goods in good condition</span><span>Receiver's signature &amp; stamp</span></div>
+    <div><span><b>for ${esc((c.org && c.org.name) || '')}</b></span><span><b>Authorised Signatory</b></span></div>
+  </div>
+</div>
+<div class="foot"><span>Delivery challan · ${esc((c.org && c.org.name) || '')} · Material transfer, not a sale</span><span>Challan No. ${esc(c.number)}</span></div>
+</body></html>`;
+}
+
+function receivingHtml(c) {
+    const lines = c.lines || [];
+    const rows = lines
+        .map(
+            (l, i) => `<tr>
+      <td class="sn">${i + 1}.</td>
+      <td>${esc(l.material_name)}</td>
+      <td class="num">${fmtQty(l.qty)}</td>
+      <td>${esc(l.unit)}</td>
+      <td></td>
+      <td></td>
+    </tr>`
+        )
+        .join('');
+    const org = c.org || {};
+    return `<!doctype html><html><head><meta charset="utf-8"><title>Receiving slip ${esc(c.number)}</title><style>${BASE_CSS}
+table.items td { height: 26px; }
+</style></head><body>
+<div class="sheet">
+  ${letterhead(c, 'MATERIAL RECEIVING SLIP')}
+  <div class="meta">
+    ${partyBlock(c)}
+    <div class="kv">
+      <span>Against Challan</span><span>:</span><b>No. ${esc(c.number)}</b>
+      <span>Challan date</span><span>:</span><b>${esc(fmtDate(c.occurred_at))}</b>
+      <span>Sent from</span><span>:</span><b>${esc((c.from && c.from.name) || '')}</b>
+      <span>Transport</span><span>:</span><b>${esc((c.details && c.details.transport) || '')}</b>
+      <span>GR/RR No.</span><span>:</span><b>${esc((c.details && c.details.gr_no) || '')}</b>
+    </div>
+  </div>
+  <table class="items">
+    <thead><tr><th class="sn">S.N.</th><th>Item</th><th class="num">Qty. sent</th><th>Unit</th><th style="width:7.5em">Qty. received</th><th style="width:12em">Remarks (short / damaged)</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table>
+  <div class="check">
+    <span><span class="box"></span>All items received in good condition</span>
+    <span><span class="box"></span>Short / damaged (see remarks)</span>
+  </div>
+  <div class="fields">
+    <div><span>Received on (date &amp; time)</span><span class="line"></span></div>
+    <div><span>Received by (name)</span><span class="line"></span></div>
+    <div><span>Phone</span><span class="line"></span></div>
+    <div><span>Signature &amp; stamp</span><span class="line"></span></div>
+  </div>
+  <div class="note">Please sign and return this slip, or send a clear photo of it, to ${esc(org.name || 'the sender')}${org.phone ? ` (${esc(org.phone)})` : ''}.</div>
+</div>
+<div class="foot"><span>Receiving slip · ${esc(org.name || '')}</span><span>Against Challan No. ${esc(c.number)}</span></div>
+</body></html>`;
+}
+
+function printHtml(html) {
+    const frame = document.createElement('iframe');
+    frame.setAttribute('aria-hidden', 'true');
+    frame.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden';
+    document.body.appendChild(frame);
+    const doc = frame.contentDocument;
+    doc.open();
+    doc.write(html);
+    doc.close();
+    const go = () => {
+        frame.contentWindow.focus();
+        frame.contentWindow.print();
+        // Leave it long enough for the dialog to read it, then tidy up.
+        setTimeout(() => frame.remove(), 60000);
+    };
+    if (doc.readyState === 'complete') setTimeout(go, 50);
+    else frame.onload = go;
+}
+
+export function printChallan(challan) {
+    printHtml(challanHtml(challan));
+}
+
+export function printReceivingSlip(challan) {
+    printHtml(receivingHtml(challan));
+}
+
+// Exposed for previews and tests.
+export { challanHtml, receivingHtml };

@@ -22,6 +22,7 @@ const { requireAuth, requireRole } = require('../auth');
 const { adminWriteLimiter } = require('../rateLimit');
 const { logAudit, AUDITED } = require('../audit');
 const inv = require('../db/inventory');
+const challans = require('../db/challans');
 const { uploadPhoto, urlFor } = require('../inventoryPhotos');
 
 const router = express.Router();
@@ -922,6 +923,48 @@ router.post('/movements/batch', requireMover, adminWriteLimiter, async (req, res
                 metadata: { reason: 'insufficient_stock', available: err.available }
             });
         }
+        sendError(res, err);
+    }
+});
+
+// -- Dispatch challans -------------------------------------------------------
+
+// The challan already made for a dispatch, if any. Reading never takes a
+// number, so opening the dialog and backing out leaves no gap.
+router.get('/challans/for/:movementId', async (req, res) => {
+    if (!dbGuard(res)) return;
+    try {
+        const id = Number(req.params.movementId);
+        if (!Number.isFinite(id)) return res.status(400).json({ error: 'movementId must be a number' });
+        res.json(await challans.findChallan(orgOf(req), id));
+    } catch (err) {
+        sendError(res, err);
+    }
+});
+
+// Create (first print) or update (reprint with new transport details) the
+// challan for the dispatch batch a movement belongs to.
+router.post('/challans', requireMover, adminWriteLimiter, async (req, res) => {
+    if (!dbGuard(res)) return;
+    try {
+        const body = req.body || {};
+        const id = Number(body.movement_id);
+        if (!Number.isFinite(id)) return res.status(400).json({ error: 'movement_id is required' });
+        const { challan } = await challans.getOrCreateChallan(orgOf(req), id, body.details, (req.user && req.user.id) || null);
+        await logAudit(req, {
+            action: 'inventory.challan.print',
+            targetType: 'inventory_challan',
+            targetId: String(challan.number),
+            outcome: 'success',
+            after: {
+                number: challan.number,
+                to: challan.to ? challan.to.name : null,
+                lines: challan.lines.length,
+                transport: challan.details.transport || null
+            }
+        });
+        res.json({ challan });
+    } catch (err) {
         sendError(res, err);
     }
 });

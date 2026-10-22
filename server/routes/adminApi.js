@@ -260,6 +260,7 @@ router.get('/orgs', async (_req, res) => {
         const pool = getPool();
         const r = await pool.query(
             `SELECT o.id, o.slug, o.name, o.active, o.created_at,
+                    o.address, o.phone, o.licence_no,
                     (o.request_code_hash IS NOT NULL) AS has_request_code,
                     o.request_code_set_at,
                     (SELECT COUNT(*) FROM user_org_assignments a WHERE a.org_id = o.id) AS member_count
@@ -304,7 +305,7 @@ router.post('/orgs', adminWriteLimiter, async (req, res) => {
             throw err;
         }
         const r = await pool.query(
-            `SELECT id, slug, name, active, created_at FROM organizations WHERE id = $1`,
+            `SELECT id, slug, name, active, created_at, address, phone, licence_no FROM organizations WHERE id = $1`,
             [id]
         );
         await logAudit(req, {
@@ -327,7 +328,7 @@ router.patch('/orgs/:id', adminWriteLimiter, async (req, res) => {
         const { id } = req.params;
         const pool = getPool();
         const before = await pool.query(
-            `SELECT id, slug, name, active FROM organizations WHERE id = $1`,
+            `SELECT id, slug, name, active, address, phone, licence_no FROM organizations WHERE id = $1`,
             [id]
         );
         if (!before.rows.length) return res.status(404).json({ error: 'Not found' });
@@ -340,6 +341,13 @@ router.patch('/orgs/:id', adminWriteLimiter, async (req, res) => {
             await pool.query(`UPDATE organizations SET name = $1 WHERE id = $2`, [name, id]);
             changedFields.push('name');
         }
+        // Letterhead details printed on dispatch challans.
+        for (const key of ['address', 'phone', 'licence_no']) {
+            if (body[key] === undefined) continue;
+            const v = body[key] == null ? null : String(body[key]).trim().slice(0, 500) || null;
+            await pool.query(`UPDATE organizations SET ${key} = $1 WHERE id = $2`, [v, id]);
+            changedFields.push(key);
+        }
         if (typeof body.active === 'boolean') {
             if (id === 'org-default' && body.active === false) {
                 return res.status(409).json({ error: 'org-default cannot be deactivated' });
@@ -348,7 +356,7 @@ router.patch('/orgs/:id', adminWriteLimiter, async (req, res) => {
             changedFields.push('active');
         }
         const after = await pool.query(
-            `SELECT id, slug, name, active, created_at FROM organizations WHERE id = $1`,
+            `SELECT id, slug, name, active, created_at, address, phone, licence_no FROM organizations WHERE id = $1`,
             [id]
         );
         await logAudit(req, {
@@ -356,8 +364,8 @@ router.patch('/orgs/:id', adminWriteLimiter, async (req, res) => {
             outcome: 'success',
             targetType: 'org',
             targetId: id,
-            before: { slug: beforeRow.slug, name: beforeRow.name, active: beforeRow.active },
-            after: { slug: after.rows[0].slug, name: after.rows[0].name, active: after.rows[0].active },
+            before: { slug: beforeRow.slug, name: beforeRow.name, active: beforeRow.active, address: beforeRow.address, phone: beforeRow.phone, licence_no: beforeRow.licence_no },
+            after: { slug: after.rows[0].slug, name: after.rows[0].name, active: after.rows[0].active, address: after.rows[0].address, phone: after.rows[0].phone, licence_no: after.rows[0].licence_no },
             metadata: { changed_fields: changedFields }
         });
         res.json({ org: after.rows[0] });

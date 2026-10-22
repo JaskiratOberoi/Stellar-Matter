@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { printChallan, printReceivingSlip } from '../lib/challanPrint.js';
 import { useSearchParams } from 'react-router-dom';
 import { apiUrl } from '../apiClient.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
@@ -450,6 +451,160 @@ function LocationCombobox({
     );
 }
 
+// Any dispatch row (recent list, ledger, the save toast) can open the
+// challan dialog for its batch.
+const ChallanContext = createContext(null);
+
+function ChallanButton({ movementId, label = 'Challan' }) {
+    const open = useContext(ChallanContext);
+    if (!open || !movementId) return null;
+    return (
+        <button type="button" className="chip chip-tool inv-challan-btn" onClick={() => open(movementId)}>
+            {label}
+        </button>
+    );
+}
+
+const CHALLAN_FIELDS = [
+    { key: 'transport', label: 'Transport', placeholder: 'By hand, courier name…' },
+    { key: 'gr_no', label: 'GR/RR No.', placeholder: 'Courier docket / LR number' },
+    { key: 'vehicle_no', label: 'Vehicle No.' },
+    { key: 'station', label: 'Station' },
+    { key: 'eway_bill', label: 'E-Way Bill No.' },
+    { key: 'party_licence', label: 'Party D.L. No.' }
+];
+
+/**
+ * Transport details for a dispatch's challan, then print the challan (for
+ * the courier) or the receiving slip (for the receiving site). The running
+ * number is taken on the first print and kept for every reprint.
+ */
+function ChallanDialog({ movementId, inventory, onClose }) {
+    const [loading, setLoading] = useState(true);
+    const [existing, setExisting] = useState(null);
+    const [details, setDetails] = useState({});
+    const [busy, setBusy] = useState(false);
+    const [err, setErr] = useState(null);
+    const firstRef = useRef(null);
+
+    useEffect(() => {
+        let alive = true;
+        inventory
+            .findChallan(movementId)
+            .then((j) => {
+                if (!alive) return;
+                if (j.challan) {
+                    setExisting(j.challan);
+                    setDetails(j.challan.details || {});
+                }
+            })
+            .catch((e) => alive && setErr(String(e.message || e)))
+            .finally(() => alive && setLoading(false));
+        return () => {
+            alive = false;
+        };
+    }, [inventory, movementId]);
+
+    useEffect(() => {
+        if (!loading && firstRef.current) firstRef.current.focus();
+    }, [loading]);
+
+    useEffect(() => {
+        const onKey = (e) => {
+            if (e.key === 'Escape') onClose();
+        };
+        document.addEventListener('keydown', onKey);
+        return () => document.removeEventListener('keydown', onKey);
+    }, [onClose]);
+
+    const set = (k, v) => setDetails((d) => ({ ...d, [k]: v }));
+
+    async function run(kind) {
+        setBusy(true);
+        setErr(null);
+        try {
+            const j = await inventory.saveChallan(movementId, details);
+            setExisting(j.challan);
+            if (kind === 'slip') printReceivingSlip(j.challan);
+            else printChallan(j.challan);
+        } catch (e) {
+            setErr(String(e.message || e));
+        } finally {
+            setBusy(false);
+        }
+    }
+
+    return (
+        <div className="cmdk-root" onMouseDown={onClose}>
+            <div
+                className="inv-challan nexus-card"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="inv-challan-title"
+                onMouseDown={(e) => e.stopPropagation()}
+            >
+                <div className="inv-challan-head">
+                    <div>
+                        <p className="eyebrow-lite">Dispatch paperwork</p>
+                        <h2 id="inv-challan-title" className="inv-challan-title">
+                            {existing ? `Challan No. ${existing.number}` : 'New challan'}
+                        </h2>
+                        <p className="muted small">
+                            {existing
+                                ? `${existing.from ? existing.from.name : ''} → ${existing.to ? existing.to.name : ''} · ${existing.lines.length} item${existing.lines.length === 1 ? '' : 's'}`
+                                : 'A running number is given the first time you print.'}
+                        </p>
+                    </div>
+                    <button type="button" className="chip chip-tool" onClick={onClose}>
+                        Close
+                    </button>
+                </div>
+                {loading ? (
+                    <p className="muted">Loading…</p>
+                ) : (
+                    <form
+                        className="inv-challan-form"
+                        onSubmit={(e) => {
+                            e.preventDefault();
+                            run('challan');
+                        }}
+                    >
+                        <label className="inv-challan-wide">
+                            Party address
+                            <textarea
+                                ref={firstRef}
+                                rows={3}
+                                value={details.party_address || ''}
+                                onChange={(e) => set('party_address', e.target.value)}
+                                placeholder="Receiving site's full address, as the courier should see it"
+                            />
+                        </label>
+                        {CHALLAN_FIELDS.map((f) => (
+                            <label key={f.key}>
+                                {f.label}
+                                <input value={details[f.key] || ''} placeholder={f.placeholder || ''} onChange={(e) => set(f.key, e.target.value)} />
+                            </label>
+                        ))}
+                        {err && <p className="login-err inv-challan-wide" role="alert">{err}</p>}
+                        <div className="inv-challan-actions inv-challan-wide">
+                            <button type="submit" className="btn-primary" disabled={busy}>
+                                {busy ? 'Preparing…' : 'Print / save challan'}
+                            </button>
+                            <button type="button" className="chip chip-tool" disabled={busy} onClick={() => run('slip')}>
+                                Print receiving slip
+                            </button>
+                        </div>
+                        <p className="muted small inv-challan-wide">
+                            The challan travels with the goods. The receiving slip is for the site to fill in what
+                            arrived and sign. In the print dialog, choose “Save as PDF” for a file.
+                        </p>
+                    </form>
+                )}
+            </div>
+        </div>
+    );
+}
+
 export function InventoryPage() {
     const { user, authRequired } = useAuth();
     const inventory = useInventory();
@@ -483,11 +638,13 @@ export function InventoryPage() {
     const showFlash = useCallback((msg, opts = {}) => {
         const ids = Array.isArray(opts.undoIds) ? opts.undoIds.filter(Boolean) : [];
         const undoIds = ids.length > 0 && ids.length <= UNDO_MAX_ROWS ? ids : null;
-        setFlash({ text: msg, undoIds, n: Date.now() });
+        setFlash({ text: msg, undoIds, challanFor: opts.challanFor || null, n: Date.now() });
         window.clearTimeout(showFlash._t);
-        showFlash._t = window.setTimeout(() => setFlash(null), undoIds ? 10000 : 5000);
+        showFlash._t = window.setTimeout(() => setFlash(null), undoIds || opts.challanFor ? 12000 : 5000);
     }, []);
     const [undoing, setUndoing] = useState(false);
+    const [challanFor, setChallanFor] = useState(null);
+    const openChallan = useCallback((movementId) => setChallanFor(movementId), []);
     const undoFlash = useCallback(async () => {
         if (!flash || !flash.undoIds) return;
         window.clearTimeout(showFlash._t);
@@ -544,6 +701,8 @@ export function InventoryPage() {
     const presetFor = (v) => (preset && preset.view === v ? preset : null);
 
     return (
+        <ChallanContext.Provider value={canMove ? openChallan : null}>
+        {challanFor && <ChallanDialog movementId={challanFor} inventory={inventory} onClose={() => setChallanFor(null)} />}
         <main className="inv-shell">
             <header className={`inv-masthead${view === 'stock' ? '' : ' inv-masthead--compact'}`}>
                 <div className="inv-masthead-lede">
@@ -565,6 +724,11 @@ export function InventoryPage() {
             {flash && (
                 <div className="inv-toast" role="status" key={flash.n}>
                     <span>{flash.text}</span>
+                    {flash.challanFor && (
+                        <button type="button" className="inv-toast-btn" onClick={() => openChallan(flash.challanFor)}>
+                            Challan
+                        </button>
+                    )}
                     {flash.undoIds && (
                         <button type="button" className="inv-toast-btn" onClick={undoFlash} disabled={undoing}>
                             {undoing ? 'Undoing…' : 'Undo'}
@@ -726,6 +890,7 @@ export function InventoryPage() {
                 </>
             )}
         </main>
+        </ChallanContext.Provider>
     );
 }
 
@@ -2805,7 +2970,8 @@ function RecentMovements({ kind, title, fetchMovements, tick, showRecorded }) {
                                     <td className="muted small inv-details">
                                         {(r.vendor_name || r.vendor) && <div>Vendor: {r.vendor_name || r.vendor}</div>}
                                         {r.reference && <div>Ref: {r.reference}</div>}
-                                        {!r.vendor_name && !r.vendor && !r.reference && <span className="inv-dash">·</span>}
+                                        {!r.vendor_name && !r.vendor && !r.reference && !isDispatch && <span className="inv-dash">·</span>}
+                                        {isDispatch && <ChallanButton movementId={r.id} />}
                                     </td>
                                 </tr>
                             );
@@ -2998,8 +3164,11 @@ function DispatchView({ inventory, canMove, showRecorded = false, onDone, onGoto
                 onDone(`Dispatched ${fmt(validLines.length)} material${validLines.length === 1 ? '' : 's'} to ${fmt(nDest)} BUs/labs (${fmt(moved)} movements).`);
             } else {
                 onDone(
-                    `Dispatched ${fmt(validLines.length)} material${validLines.length === 1 ? '' : 's'} (${fmt(totalOut)} units) to ${dest ? dest.name : ''}.`,
-                    { undoIds: (result.movements || []).map((m) => m.id) }
+                    `Dispatched ${fmt(validLines.length)} material${validLines.length === 1 ? '' : 's'} to ${dest ? dest.name : ''}.`,
+                    {
+                        undoIds: (result.movements || []).map((m) => m.id),
+                        challanFor: result.movements && result.movements[0] ? result.movements[0].id : null
+                    }
                 );
             }
             resetLines();
@@ -4395,6 +4564,9 @@ function LedgerView({ inventory, canMove, showRecorded = false, onDone, initialF
                                     </td>
                                     {canMove && (
                                         <td className="inv-row-actions">
+                                            {!r.voided_at && r.kind === 'dispatch' && (!voidState || voidState.id !== r.id) && (
+                                                <ChallanButton movementId={r.id} />
+                                            )}
                                             {!r.voided_at && (!voidState || voidState.id !== r.id) && (
                                                 <button
                                                     type="button"

@@ -221,6 +221,15 @@ export function useInventory() {
         return request(`/api/inventory/consumption${qs ? `?${qs}` : ''}`);
     }, []);
 
+    // Dispatch challans: read never takes a number; save creates on first
+    // print (next running number) and updates transport details after.
+    const findChallan = useCallback((movementId) => request(`/api/inventory/challans/for/${movementId}`), []);
+    const saveChallan = useCallback(
+        (movementId, details) =>
+            request('/api/inventory/challans', { method: 'POST', body: JSON.stringify({ movement_id: movementId, details }) }),
+        []
+    );
+
     const fetchOnHand = useCallback(async (materialId, locationId) => {
         const q = new URLSearchParams({ material_id: materialId, location_id: locationId });
         const j = await request(`/api/inventory/on-hand?${q.toString()}`);
@@ -263,6 +272,8 @@ export function useInventory() {
         fetchMovementUsers,
         fetchConsumption,
         fetchOnHand,
+        findChallan,
+        saveChallan,
         fetchLabs
     };
 }
