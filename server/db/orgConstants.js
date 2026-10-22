@@ -4,5 +4,5 @@
 module.exports = {
     DEFAULT_ORG_ID: 'org-default',
     DEFAULT_ORG_SLUG: 'acme-labs',
-    DEFAULT_ORG_NAME: 'Qugen Pathlabs pvt ltd'
+    DEFAULT_ORG_NAME: 'Qugen Pathlabs Pvt Ltd.'
 };

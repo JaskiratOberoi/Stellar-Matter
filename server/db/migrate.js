@@ -402,11 +402,12 @@ async function consolidateDefaultOrg(client) {
         await client.query(`DELETE FROM organizations WHERE id = $1`, [dupId]);
     }
 
-    await client.query(`UPDATE organizations SET slug = $2, name = $3 WHERE id = $1`, [
-        DEFAULT_ORG_ID,
-        DEFAULT_ORG_SLUG,
-        DEFAULT_ORG_NAME
-    ]);
+    await client.query(`UPDATE organizations SET slug = $2 WHERE id = $1`, [DEFAULT_ORG_ID, DEFAULT_ORG_SLUG]);
+    // Name the canonical row only when the merge just happened; after that
+    // the name is the admins' to change (Orgs), and a reboot must not undo it.
+    if (dup.rows.length) {
+        await client.query(`UPDATE organizations SET name = $2 WHERE id = $1`, [DEFAULT_ORG_ID, DEFAULT_ORG_NAME]);
+    }
 
     // Drop the auto-seeded Central Store when real locations already exist.
     await client.query(

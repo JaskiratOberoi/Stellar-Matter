@@ -327,6 +327,9 @@ router.post('/locations', requireMover, adminWriteLimiter, async (req, res) => {
             buCode: body.bu_code != null ? trimStr(body.bu_code) || null : null,
             clientCode: body.client_code != null ? trimStr(body.client_code) || null : null
         };
+        for (const col of SITE_FIELDS) {
+            if (body[col] != null) fields[col] = trimStr(body[col]).slice(0, 500) || null;
+        }
         const location = await inv.createLocation(orgOf(req), fields);
         await logAudit(req, {
             action: 'inventory.location.create',
@@ -341,10 +344,17 @@ router.post('/locations', requireMover, adminWriteLimiter, async (req, res) => {
     }
 });
 
-router.patch('/locations/:id', requireCatalogAdmin, adminWriteLimiter, async (req, res) => {
+router.patch('/locations/:id', requireMover, adminWriteLimiter, async (req, res) => {
     if (!dbGuard(res)) return;
     try {
         const orgId = orgOf(req);
+        // Operators keep delivery-site details current; renaming, retyping or
+        // retiring a location stays with admins.
+        const role = req.user && req.user.role;
+        if (role === 'operator') {
+            const other = Object.keys(req.body || {}).filter((k) => !SITE_FIELDS.includes(k));
+            if (other.length) return res.status(403).json({ error: 'Operators can only edit delivery-site details' });
+        }
         const before = await inv.getLocation(orgId, req.params.id);
         if (!before) return res.status(404).json({ error: 'Location not found' });
         const body = req.body || {};

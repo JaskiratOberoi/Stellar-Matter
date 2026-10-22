@@ -93,7 +93,7 @@ export function App() {
                 <Route
                     path="/admin/delivery-sites"
                     element={
-                        <RoleGate roles={['super_admin', 'admin']}>
+                        <RoleGate roles={['super_admin', 'admin', 'operator']}>
                             <AdminDeliverySitesPage />
                         </RoleGate>
                     }

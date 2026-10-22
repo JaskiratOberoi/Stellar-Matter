@@ -15,6 +15,9 @@ const KIND_FILTERS = [
     { key: 'store', label: 'Warehouses' }
 ];
 
+const KIND_ORDER = { store: 0, business_unit: 1, lab: 2 };
+const bySite = (a, b) => (KIND_ORDER[a.kind] ?? 3) - (KIND_ORDER[b.kind] ?? 3) || a.name.localeCompare(b.name);
+
 export function AdminDeliverySitesPage() {
     const [sites, setSites] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -23,6 +26,7 @@ export function AdminDeliverySitesPage() {
     const [kind, setKind] = useState('all');
     const [missingOnly, setMissingOnly] = useState(false);
     const [editing, setEditing] = useState(null);
+    const [creating, setCreating] = useState(false);
 
     const reload = useCallback(async () => {
         setErr(null);
@@ -69,11 +73,39 @@ export function AdminDeliverySitesPage() {
                             start from the site's address, contact and D.L. number.
                         </p>
                     </div>
-                    <p className="dsite-count" aria-live="polite">
-                        <strong>{withAddress}</strong>
-                        <span className="muted small"> of {sites.length} sites have an address</span>
-                    </p>
+                    <div className="dsite-head-side">
+                        <p className="dsite-count" aria-live="polite">
+                            <strong>{withAddress}</strong>
+                            <span className="muted small"> of {sites.length} sites have an address</span>
+                        </p>
+                        <button
+                            type="button"
+                            className="btn-primary"
+                            aria-expanded={creating ? 'true' : 'false'}
+                            onClick={() => {
+                                setCreating((v) => !v);
+                                setEditing(null);
+                            }}
+                        >
+                            {creating ? 'Cancel' : 'New site'}
+                        </button>
+                    </div>
                 </header>
+
+                {creating && (
+                    <div className="nexus-card dsite-new">
+                        <SiteForm
+                            onCancel={() => setCreating(false)}
+                            onSaved={(created) => {
+                                setSites((list) => [...list, created].sort(bySite));
+                                setCreating(false);
+                                setQuery(created.name);
+                                setKind('all');
+                                setMissingOnly(false);
+                            }}
+                        />
+                    </div>
+                )}
 
                 <div className="dsite-filters">
                     <input
@@ -167,12 +199,16 @@ function SiteRow({ site, onEdit }) {
     );
 }
 
+// Edits a site's delivery details, or (without `site`) adds a new site.
 function SiteForm({ site, onCancel, onSaved }) {
+    const isNew = !site;
     const [f, setF] = useState({
-        address: site.address || '',
-        contact_name: site.contact_name || '',
-        contact_phone: site.contact_phone || '',
-        licence_no: site.licence_no || ''
+        name: '',
+        kind: 'business_unit',
+        address: (site && site.address) || '',
+        contact_name: (site && site.contact_name) || '',
+        contact_phone: (site && site.contact_phone) || '',
+        licence_no: (site && site.licence_no) || ''
     });
     const [busy, setBusy] = useState(false);
     const [err, setErr] = useState(null);
@@ -183,10 +219,16 @@ function SiteForm({ site, onCancel, onSaved }) {
         setBusy(true);
         setErr(null);
         try {
-            const r = await apiFetch(`/api/inventory/locations/${site.id}`, {
-                method: 'PATCH',
-                body: JSON.stringify(f)
-            });
+            const { name, kind, ...details } = f;
+            const r = isNew
+                ? await apiFetch('/api/inventory/locations', {
+                      method: 'POST',
+                      body: JSON.stringify({ name: name.trim(), kind, ...details })
+                  })
+                : await apiFetch(`/api/inventory/locations/${site.id}`, {
+                      method: 'PATCH',
+                      body: JSON.stringify(details)
+                  });
             const j = await r.json().catch(() => ({}));
             if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
             onSaved(j.location);
@@ -205,12 +247,29 @@ function SiteForm({ site, onCancel, onSaved }) {
                 if (e.key === 'Escape') onCancel();
             }}
         >
-            <p className="dsite-title">{site.name}</p>
+            {isNew ? (
+                <div className="org-challan-row">
+                    <label className="dsite-span2">
+                        Site name
+                        <input value={f.name} onChange={set('name')} required autoFocus autoComplete="off" placeholder="As it should appear on the challan" />
+                    </label>
+                    <label>
+                        Type
+                        <select value={f.kind} onChange={set('kind')}>
+                            <option value="business_unit">BU</option>
+                            <option value="lab">Lab</option>
+                            <option value="store">Warehouse</option>
+                        </select>
+                    </label>
+                </div>
+            ) : (
+                <p className="dsite-title">{site.name}</p>
+            )}
             <label>
                 Delivery address
                 <textarea
                     rows={3}
-                    autoFocus
+                    autoFocus={!isNew}
                     value={f.address}
                     onChange={set('address')}
                     placeholder="Full address as the courier should see it, with PIN"
@@ -233,7 +292,7 @@ function SiteForm({ site, onCancel, onSaved }) {
             {err && <p className="login-err" role="alert">{err}</p>}
             <div className="form-actions">
                 <button type="submit" className="btn-primary btn-sm" disabled={busy}>
-                    {busy ? 'Saving…' : 'Save site'}
+                    {busy ? 'Saving…' : isNew ? 'Add site' : 'Save site'}
                 </button>
                 <button type="button" className="chip chip-tool" onClick={onCancel} disabled={busy}>
                     Cancel

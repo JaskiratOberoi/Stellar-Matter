@@ -8117,3 +8117,46 @@ a.topbar-brand {
         min-height: 44px;
     }
 }
+
+.dsite-head-side {
+    display: flex;
+    align-items: center;
+    gap: var(--sp-4);
+}
+
+.dsite-head-side .btn-primary {
+    white-space: nowrap;
+}
+
+.dsite-new {
+    margin-bottom: var(--sp-4);
+    padding: var(--sp-4) var(--sp-5);
+}
+
+.dsite-new .dsite-form {
+    padding: 0;
+}
+
+.dsite-span2 {
+    grid-column: span 2;
+}
+
+.org-challan-form select {
+    padding: var(--sp-2) var(--sp-3);
+    border: 1px solid rgb(var(--nx-rule-strong));
+    border-radius: var(--r-sm);
+    background: rgb(var(--nx-surface));
+    color: rgb(var(--nx-ink));
+    font: 400 var(--fs-sm) / 1.4 var(--font-sans);
+}
+
+@media (max-width: 760px) {
+    .dsite-head-side {
+        flex-wrap: wrap;
+        gap: var(--sp-3);
+    }
+
+    .dsite-span2 {
+        grid-column: auto;
+    }
+}

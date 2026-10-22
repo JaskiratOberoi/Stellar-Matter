@@ -14,7 +14,7 @@ const ROLE_LABEL = { super_admin: 'Super admin', admin: 'Admin', operator: 'Oper
 // instead of a row of chips.
 const ADMIN_LINKS = [
     { to: '/admin/material-requests', label: 'Material requests', caption: 'Review and approve requests', roles: ['super_admin', 'admin'] },
-    { to: '/admin/delivery-sites', label: 'Delivery sites', caption: 'Addresses and contacts for challans', roles: ['super_admin', 'admin'] },
+    { to: '/admin/delivery-sites', label: 'Delivery sites', caption: 'Addresses and contacts for challans', roles: ['super_admin', 'admin', 'operator'] },
     { to: '/admin/users', label: 'Users', caption: 'Accounts and roles', roles: ['super_admin'] },
     { to: '/admin/orgs', label: 'Orgs', caption: 'Organisations and members', roles: ['super_admin'] },
     { to: '/admin/audit-log', label: 'Audit trail', caption: 'Who changed what, when', roles: ['super_admin'] }
@@ -365,16 +365,18 @@ export function Topbar({ statusPill, lastUpdated, onOrgSwitched }) {
                                         </p>
                                         <OrgSwitcher user={user} orgs={orgs} onSwitch={switchOrgHandler} />
                                     </div>
-                                    {(user.role === 'super_admin' || user.role === 'admin') && (
+                                    {(user.role === 'super_admin' || user.role === 'admin' || user.role === 'operator') && (
                                         <div className="topbar-drawer-section">
                                             <p className="eyebrow">Admin</p>
-                                            <Link
-                                                to="/admin/material-requests"
-                                                className="chip chip-tool"
-                                                onClick={() => setMenuOpen(false)}
-                                            >
-                                                Materials requests
-                                            </Link>
+                                            {user.role !== 'operator' && (
+                                                <Link
+                                                    to="/admin/material-requests"
+                                                    className="chip chip-tool"
+                                                    onClick={() => setMenuOpen(false)}
+                                                >
+                                                    Materials requests
+                                                </Link>
+                                            )}
                                             <Link
                                                 to="/admin/delivery-sites"
                                                 className="chip chip-tool"

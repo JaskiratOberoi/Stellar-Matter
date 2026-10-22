@@ -16,7 +16,7 @@ const PAGES = [
     { label: 'Catalog', hint: 'Inventory', to: '/?tab=catalog', roles: ['super_admin', 'admin'] },
     { label: 'Consumption', hint: 'Inventory', to: '/?tab=consumption', roles: ['super_admin'] },
     { label: 'Tracer', hint: 'Demand from the LIS', to: '/tracer' },
-    { label: 'Delivery sites', hint: 'Admin', to: '/admin/delivery-sites', roles: ['super_admin', 'admin'] },
+    { label: 'Delivery sites', hint: 'Admin', to: '/admin/delivery-sites', roles: ['super_admin', 'admin', 'operator'] },
     { label: 'Users', hint: 'Admin', to: '/admin/users', roles: ['super_admin'] },
     { label: 'Organisations', hint: 'Admin', to: '/admin/orgs', roles: ['super_admin'] },
     { label: 'Audit trail', hint: 'Admin', to: '/admin/audit-log', roles: ['super_admin'] }

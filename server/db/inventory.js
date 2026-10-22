@@ -392,9 +392,20 @@ async function createLocation(orgId, fields) {
     try {
         await pool.query(
             `INSERT INTO inventory_locations
-                (id, org_id, name, kind, bu_code, client_code, active)
-             VALUES ($1, $2, $3, $4, $5, $6, true)`,
-            [id, orgId, fields.name, fields.kind || 'business_unit', fields.buCode ?? null, fields.clientCode ?? null]
+                (id, org_id, name, kind, bu_code, client_code, active, address, contact_name, contact_phone, licence_no)
+             VALUES ($1, $2, $3, $4, $5, $6, true, $7, $8, $9, $10)`,
+            [
+                id,
+                orgId,
+                fields.name,
+                fields.kind || 'business_unit',
+                fields.buCode ?? null,
+                fields.clientCode ?? null,
+                fields.address ?? null,
+                fields.contact_name ?? null,
+                fields.contact_phone ?? null,
+                fields.licence_no ?? null
+            ]
         );
     } catch (err) {
         if (err && err.code === '23505') {
