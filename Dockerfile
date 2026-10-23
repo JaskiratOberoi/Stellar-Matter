@@ -10,6 +10,8 @@ RUN npm run build
 # --- Runtime: Express + Puppeteer (system Chromium) -----------------------
 FROM node:20-bookworm-slim
 
+# fonts-dejavu-core: Liberation has no rupee sign (₹), which the challan PDFs
+# print; DejaVu Sans supplies it.
 # System Chromium for the legacy LIS scrape path. The SQL source path doesn't
 # need it, but we keep it baked in so the same image handles both data sources.
 RUN apt-get update \
@@ -17,6 +19,7 @@ RUN apt-get update \
         chromium \
         ca-certificates \
         fonts-liberation \
+        fonts-dejavu-core \
         wget \
     && rm -rf /var/lib/apt/lists/*
 

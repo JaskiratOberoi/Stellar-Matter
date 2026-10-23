@@ -114,7 +114,7 @@ function grandTotal(lines, label = 'Grand Total') {
 const BASE_CSS = `
 @page { size: A4; margin: 12mm; }
 * { box-sizing: border-box; }
-body { margin: 0; font: 11pt/1.35 Arial, "Liberation Sans", Helvetica, sans-serif; color: #111; }
+body { margin: 0; font: 11pt/1.35 Arial, "Liberation Sans", Helvetica, "DejaVu Sans", sans-serif; color: #111; }
 .sheet { border: 1.5px solid #111; }
 .head { text-align: center; padding: 8px 12px 10px; border-bottom: 1.5px solid #111; }
 .doc-title { font-size: 13pt; font-weight: 700; text-decoration: underline; letter-spacing: .02em; margin: 0 0 4px; }
