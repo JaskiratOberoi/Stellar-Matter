@@ -153,7 +153,34 @@ table.items tr.fill td { height: 160px; }
 .grand > span + span { border-left: 2px solid #111; min-width: 11em; text-align: right; }
 .words { padding: 6px 12px; border-top: 2px solid #111; font-weight: 700; font-size: 10pt; }
 .words small { font-weight: 400; color: #444; }
+.declaration { padding: 7px 12px 8px; border-top: 2px solid #111; font-size: 9.5pt; line-height: 1.4; }
+.declaration b { font-weight: 700; }
 `;
+
+// E-way bill threshold for a consignment: below this the courier needs no
+// E-way bill, which is what the declaration tells them.
+const EWAY_LIMIT = 50000;
+
+// Statement for transporters: our own goods moving between our sites, not a
+// sale, and their value. "Below ₹50,000" is said only when every line is
+// priced and the total really is below it.
+function declaration(c, lines) {
+    const org = (c.org && c.org.name) || 'the company';
+    const from = (c.from && c.from.name) || 'our warehouse';
+    const to = (c.to && c.to.name) || 'our site';
+    const t = priceTotals(lines);
+    const allPriced = lines.length > 0 && t.unpriced === 0;
+    let value = '';
+    if (allPriced && t.amount < EWAY_LIMIT) {
+        value = ` The total value of the goods is <b>₹ ${fmtMoney(t.amount)}</b>, which is below ₹ 50,000.`;
+    } else if (allPriced) {
+        value = ` The total value of the goods is <b>₹ ${fmtMoney(t.amount)}</b>.`;
+    }
+    return `
+  <div class="declaration"><b>Declaration :</b> We, ${esc(org)}, declare that the goods listed above are our own
+    material being moved from our ${esc(from)} to the ${esc(to)} site for internal use. They are not being sold
+    and no consideration is involved.${value}</div>`;
+}
 
 function letterhead(c, title) {
     const org = c.org || {};
@@ -224,6 +251,7 @@ function challanHtml(c) {
   <div class="total"><span>Total: ${lines.length} item${lines.length === 1 ? '' : 's'}</span><span>${unitTotals(lines)}</span></div>
   ${priced ? grandTotal(lines) : ''}
   ${c.reference || c.note ? `<div class="note">${c.reference ? `Ref: ${esc(c.reference)}` : ''}${c.reference && c.note ? ' · ' : ''}${esc(c.note || '')}</div>` : ''}
+  ${declaration(c, lines)}
   <div class="sign">
     <div><span>Received the above goods in good condition</span><span>Receiver's signature &amp; stamp</span></div>
     <div><span><b>for ${esc((c.org && c.org.name) || '')}</b></span><span><b>Authorised Signatory</b></span></div>
