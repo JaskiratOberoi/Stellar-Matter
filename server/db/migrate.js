@@ -790,6 +790,14 @@ async function migrateChallans(client) {
     await client.query(`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS phone TEXT`);
     await client.query(`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS licence_no TEXT`);
     await client.query(`ALTER TABLE organizations ADD COLUMN IF NOT EXISTS gst TEXT`);
+    // Price per base unit: the catalog rate, and the rate a dispatch line was
+    // sent at (kept so a later price change leaves old challans as issued).
+    await client.query(
+        `ALTER TABLE inventory_materials ADD COLUMN IF NOT EXISTS rate NUMERIC(12, 2) CHECK (rate IS NULL OR rate >= 0)`
+    );
+    await client.query(
+        `ALTER TABLE inventory_movements ADD COLUMN IF NOT EXISTS unit_rate NUMERIC(12, 2) CHECK (unit_rate IS NULL OR unit_rate >= 0)`
+    );
     // Delivery sites: where a dispatch to this location goes, and who takes it.
     for (const col of ['address', 'contact_name', 'contact_phone', 'licence_no']) {
         await client.query(`ALTER TABLE inventory_locations ADD COLUMN IF NOT EXISTS ${col} TEXT`);

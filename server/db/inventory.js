@@ -44,7 +44,7 @@ async function listMaterials(orgId, { includeInactive = false } = {}) {
     if (!includeInactive) where.push('active = true');
     const r = await pool.query(
         `SELECT id, org_id, name, sku, metric_kind, base_unit,
-                default_pack_size, default_pack_label, reorder_level, active, created_at
+                default_pack_size, default_pack_label, reorder_level, rate, active, created_at
          FROM inventory_materials
          WHERE ${where.join(' AND ')}
          ORDER BY name`,
@@ -57,7 +57,7 @@ async function getMaterial(orgId, id) {
     const pool = getPool();
     const r = await pool.query(
         `SELECT id, org_id, name, sku, metric_kind, base_unit,
-                default_pack_size, default_pack_label, reorder_level, active, created_at
+                default_pack_size, default_pack_label, reorder_level, rate, active, created_at
          FROM inventory_materials
          WHERE org_id = $1 AND id = $2`,
         [orgId, id]
@@ -72,8 +72,8 @@ async function createMaterial(orgId, fields) {
         await pool.query(
             `INSERT INTO inventory_materials
                 (id, org_id, name, sku, metric_kind, base_unit,
-                 default_pack_size, default_pack_label, reorder_level, active)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, true)`,
+                 default_pack_size, default_pack_label, reorder_level, rate, active)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, true)`,
             [
                 id,
                 orgId,
@@ -83,7 +83,8 @@ async function createMaterial(orgId, fields) {
                 fields.baseUnit || 'unit',
                 fields.defaultPackSize ?? 1,
                 fields.defaultPackLabel ?? null,
-                fields.reorderLevel ?? 0
+                fields.reorderLevel ?? 0,
+                fields.rate ?? null
             ]
         );
     } catch (err) {
@@ -110,6 +111,7 @@ async function updateMaterial(orgId, id, fields) {
     if (fields.defaultPackSize !== undefined) push('default_pack_size', fields.defaultPackSize);
     if (fields.defaultPackLabel !== undefined) push('default_pack_label', fields.defaultPackLabel);
     if (fields.reorderLevel !== undefined) push('reorder_level', fields.reorderLevel);
+    if (fields.rate !== undefined) push('rate', fields.rate);
     if (fields.active !== undefined) push('active', fields.active);
     if (!sets.length) return getMaterial(orgId, id);
     try {
@@ -925,14 +927,32 @@ async function createMovementsBatch(orgId, header, lines, opts = {}) {
                 photoPath: line.photoPath ?? null,
                 occurredAt: header.occurredAt ?? null
             };
+            // A rate typed at dispatch for a material without one becomes its
+            // catalog rate, so later dispatches price it too.
+            if (header.kind === 'dispatch' && line.unitRate != null) {
+                await client.query(
+                    `UPDATE inventory_materials SET rate = $3 WHERE org_id = $1 AND id = $2 AND rate IS NULL`,
+                    [orgId, line.materialId, line.unitRate]
+                );
+            }
+            const lineIds = [];
             if (header.kind === 'dispatch' && header.toAllBus) {
                 const { ids, destinations } = await insertDispatchAllBusTx(client, orgId, input, opts);
-                movementIds.push(...ids);
+                lineIds.push(...ids);
                 destinationNames = destinations.map((d) => d.name);
             } else {
-                const id = await insertMovementTx(client, orgId, input, opts);
-                movementIds.push(id);
+                lineIds.push(await insertMovementTx(client, orgId, input, opts));
             }
+            if (header.kind === 'dispatch') {
+                // The line's price as sent: the catalog rate at this moment.
+                await client.query(
+                    `UPDATE inventory_movements mv SET unit_rate = m.rate
+                     FROM inventory_materials m
+                     WHERE mv.id = ANY($2::bigint[]) AND m.org_id = $1 AND m.id = mv.material_id`,
+                    [orgId, lineIds]
+                );
+            }
+            movementIds.push(...lineIds);
         }
         // Receiving from a purchase order: link every movement back to the
         // order and close it, all inside the same transaction as the stock.

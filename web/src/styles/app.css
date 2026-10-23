@@ -8160,3 +8160,27 @@ a.topbar-brand {
         grid-column: auto;
     }
 }
+
+/* Dispatch line rate: the catalog rate, or a field for a material without
+   one; the line's value sits under it. */
+.inv-line-table .inv-lt-rate {
+    width: 116px;
+}
+
+.inv-line-table .inv-lt-rate-input {
+    width: 100%;
+}
+
+.inv-lt-sub {
+    display: block;
+    margin-top: 2px;
+    font: 500 var(--fs-3xs) / 1.2 var(--font-mono);
+    color: rgb(var(--nx-ink-3));
+    white-space: nowrap;
+}
+
+@media (max-width: 760px) {
+    .inv-line-table .inv-lt-rate {
+        width: auto;
+    }
+}

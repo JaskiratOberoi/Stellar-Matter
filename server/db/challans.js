@@ -49,7 +49,7 @@ async function loadBatch(client, orgId, movementId) {
     if (s.kind !== 'dispatch') throw httpError('Challans are for dispatches only', 400);
     const r = await client.query(
         `SELECT mv.id, mv.qty_base, mv.pack_size, mv.pack_qty, mv.reference, mv.note, mv.occurred_at,
-                m.name AS material_name, m.base_unit
+                mv.unit_rate, m.rate AS material_rate, m.name AS material_name, m.base_unit
          FROM inventory_movements mv
          JOIN inventory_materials m ON m.id = mv.material_id
          WHERE mv.org_id = $1 AND mv.kind = 'dispatch' AND mv.voided_at IS NULL
@@ -91,7 +91,10 @@ async function shape(client, orgId, challan, batch) {
             unit: l.base_unit,
             qty: Number(l.qty_base),
             pack_size: l.pack_size != null ? Number(l.pack_size) : null,
-            pack_qty: l.pack_qty != null ? Number(l.pack_qty) : null
+            pack_qty: l.pack_qty != null ? Number(l.pack_qty) : null,
+            // The rate the line was sent at; lines from before rates existed
+            // take the catalog rate.
+            rate: l.unit_rate != null ? Number(l.unit_rate) : l.material_rate != null ? Number(l.material_rate) : null
         }))
     };
 }

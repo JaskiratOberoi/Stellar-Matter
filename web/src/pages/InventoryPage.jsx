@@ -30,6 +30,17 @@ function fmt(n) {
     return Number(n || 0).toLocaleString();
 }
 
+// Rupees with paise, Indian grouping: 38,348.32.
+function fmtMoney(n) {
+    return Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+// A material's catalog rate as a number, or null when none is set (the API
+// returns NUMERIC columns as strings).
+function rateOf(m) {
+    return m && m.rate != null && m.rate !== '' ? Number(m.rate) : null;
+}
+
 function balanceKey(materialId, locationId) {
     return `${materialId}|${locationId}`;
 }
@@ -3129,16 +3140,29 @@ function DispatchView({ inventory, canMove, showRecorded = false, onDone, onGoto
         const available = l.materialId && fromLocationId ? balMap.get(balanceKey(l.materialId, fromLocationId)) || 0 : 0;
         const required = qty * destCount;
         const overdraw = qty > 0 && required > available;
-        return { ...l, qty, available, required, overdraw };
+        // The catalog rate, or one typed here for a material that has none
+        // (saved to the catalog with the dispatch).
+        const catalogRate = rateOf(matById.get(l.materialId));
+        const typedText = l.rate != null ? String(l.rate).trim() : '';
+        const typed = typedText !== '' ? Number(typedText) : null;
+        const typedOk = typed != null && Number.isFinite(typed) && typed >= 0;
+        const unitRate = catalogRate ?? (typedOk ? typed : null);
+        const rateInvalid = catalogRate == null && typedText !== '' && !typedOk;
+        const amount = unitRate != null ? Math.round(required * unitRate * 100) / 100 : null;
+        return { ...l, qty, available, required, overdraw, catalogRate, unitRate, rateInvalid, amount };
     });
     const validLines = decorated.filter((l) => l.materialId && l.qty > 0);
     const totalOut = validLines.reduce((s, l) => s + l.required, 0);
     const anyOverdraw = validLines.some((l) => l.overdraw);
     const anyUploading = lines.some((l) => l.uploading);
+    const pricedLines = validLines.filter((l) => l.amount != null);
+    const totalValue = pricedLines.reduce((s, l) => s + l.amount, 0);
+    const badRate = decorated.some((l) => l.rateInvalid);
 
     async function onSubmit(e) {
         e.preventDefault();
         setErr(null);
+        if (badRate) return setErr('A rate must be a price of 0 or more.');
         if (!fromLocationId) return setErr('Select a source.');
         if (!toLocationId) return setErr('Select a destination.');
         if (!isAllBus && fromLocationId === toLocationId) return setErr('Source and destination must differ.');
@@ -3170,7 +3194,8 @@ function DispatchView({ inventory, canMove, showRecorded = false, onDone, onGoto
                     material_id: l.materialId,
                     pack_size: Number(l.packSize) || 1,
                     pack_qty: Number(l.packQty),
-                    photo_path: l.photoUrl || undefined
+                    photo_path: l.photoUrl || undefined,
+                    unit_rate: l.catalogRate == null && l.unitRate != null ? l.unitRate : undefined
                 }))
             });
             await reload();
@@ -3309,6 +3334,7 @@ function DispatchView({ inventory, canMove, showRecorded = false, onDone, onGoto
                                         <th className="inv-lt-num">Packs</th>
                                         <th className="inv-lt-num">= Units</th>
                                         <th className="inv-lt-num">Available</th>
+                                        <th className="inv-lt-num inv-lt-rate">Rate (₹)</th>
                                         <th className="inv-lt-photo">Photo</th>
                                         <th aria-label="Remove" />
                                     </tr>
@@ -3349,6 +3375,29 @@ function DispatchView({ inventory, canMove, showRecorded = false, onDone, onGoto
                                                     data-label="Available"
                                                 >
                                                     {l.materialId ? fmt(l.available) : '—'}
+                                                </td>
+                                                <td className="inv-lt-num inv-lt-rate" data-label="Rate (₹)">
+                                                    {!l.materialId ? (
+                                                        '—'
+                                                    ) : l.catalogRate != null ? (
+                                                        <span title={`Catalog rate per ${unit}`}>{fmtMoney(l.catalogRate)}</span>
+                                                    ) : (
+                                                        <input
+                                                            className="inv-lt-rate-input"
+                                                            type="number"
+                                                            min="0"
+                                                            step="0.01"
+                                                            inputMode="decimal"
+                                                            value={l.rate ?? ''}
+                                                            onChange={(e) => updateLine(l.key, { rate: e.target.value })}
+                                                            placeholder="Add rate"
+                                                            aria-label={`Rate per ${unit || 'unit'} (saved to the catalog)`}
+                                                            title="No rate in the catalog yet. A rate entered here is saved to the catalog for future dispatches."
+                                                        />
+                                                    )}
+                                                    {l.amount != null && l.qty > 0 && (
+                                                        <span className="inv-lt-sub">₹{fmtMoney(l.amount)}</span>
+                                                    )}
                                                 </td>
                                                 <td className="inv-lt-photo" data-label="Photo">
                                                     <LinePhoto
@@ -3396,7 +3445,17 @@ function DispatchView({ inventory, canMove, showRecorded = false, onDone, onGoto
                     ...(isAllBus && destCount > 1
                         ? [['Per destination', `${fmt(validLines.reduce((s, l) => s + l.qty, 0))} units`]]
                         : []),
-                    ['With photo', `${fmt(validLines.filter((l) => l.photoUrl).length)} of ${fmt(validLines.length)}`]
+                    ['With photo', `${fmt(validLines.filter((l) => l.photoUrl).length)} of ${fmt(validLines.length)}`],
+                    ...(pricedLines.length
+                        ? [[
+                              'Value',
+                              `₹${fmtMoney(totalValue)}${
+                                  pricedLines.length < validLines.length
+                                      ? ` · ${fmt(validLines.length - pricedLines.length)} without a rate`
+                                      : ''
+                              }`
+                          ]]
+                        : [])
                 ]}
                 lines={validLines.map((l) => {
                     const m = matById.get(l.materialId);
@@ -4998,10 +5057,12 @@ function MaterialsPanel({ inventory, onDone }) {
     const [baseUnit, setBaseUnit] = useState('unit');
     const [packSize, setPackSize] = useState('1');
     const [reorder, setReorder] = useState('0');
+    const [rate, setRate] = useState('');
     const [busy, setBusy] = useState(false);
     const [err, setErr] = useState(null);
     const [query, setQuery] = useState('');
     const [editingReorder, setEditingReorder] = useState(null); // material id being edited inline
+    const [editingRate, setEditingRate] = useState(null);
 
     const shown = useMemo(() => {
         const q = query.trim().toLowerCase();
@@ -5018,7 +5079,8 @@ function MaterialsPanel({ inventory, onDone }) {
                 name: name.trim(),
                 base_unit: baseUnit.trim() || 'unit',
                 default_pack_size: Number(packSize) || 1,
-                reorder_level: Number(reorder) || 0
+                reorder_level: Number(reorder) || 0,
+                rate: rate.trim() === '' ? null : Number(rate)
             });
             await reload();
             onDone(`Added material “${name.trim()}”.`);
@@ -5026,6 +5088,7 @@ function MaterialsPanel({ inventory, onDone }) {
             setBaseUnit('unit');
             setPackSize('1');
             setReorder('0');
+            setRate('');
             setOpen(false);
         } catch (e2) {
             setErr(String(e2.message || e2));
@@ -5063,10 +5126,31 @@ function MaterialsPanel({ inventory, onDone }) {
         }
     }
 
+    // Rate per base unit, printed on challans; blank clears it.
+    async function saveRate(m, raw) {
+        const blank = String(raw).trim() === '';
+        const val = blank ? null : Number(raw);
+        if (!blank && (!Number.isFinite(val) || val < 0)) return 'Enter a price of 0 or more, or leave it blank.';
+        if (val === rateOf(m)) {
+            setEditingRate(null);
+            return null;
+        }
+        try {
+            await updateMaterial(m.id, { rate: val });
+            await reload();
+            onDone(val == null ? `Cleared the rate for ${m.name}.` : `Rate for ${m.name} set to ₹${fmtMoney(val)} per ${m.base_unit}.`);
+            setEditingRate(null);
+            return null;
+        } catch (e) {
+            return String(e.message || e);
+        }
+    }
+
+    const priced = materials.filter((m) => m.active && rateOf(m) != null).length;
     const caption =
         query.trim() && shown.length !== materials.length
             ? `${fmt(shown.length)} of ${fmt(materials.length)} materials match`
-            : `${fmt(materials.length)} in catalog · ${fmt(materials.filter((m) => !m.active).length)} inactive`;
+            : `${fmt(materials.length)} in catalog · ${fmt(materials.filter((m) => !m.active).length)} inactive · ${fmt(priced)} with a rate`;
 
     return (
         <section className="inv-panel">
@@ -5090,6 +5174,7 @@ function MaterialsPanel({ inventory, onDone }) {
                         <label className="inv-field"><span>Base unit</span><input value={baseUnit} onChange={(e) => setBaseUnit(e.target.value)} /></label>
                         <label className="inv-field"><span>Default pack size</span><input type="number" min="1" value={packSize} onChange={(e) => setPackSize(e.target.value)} /></label>
                         <label className="inv-field"><span>Reorder level</span><input type="number" min="0" value={reorder} onChange={(e) => setReorder(e.target.value)} /></label>
+                        <label className="inv-field"><span>Rate (₹ per {baseUnit.trim() || 'unit'})</span><input type="number" min="0" step="0.01" inputMode="decimal" value={rate} onChange={(e) => setRate(e.target.value)} placeholder="Optional" /></label>
                     </div>
                     {err && <p className="login-err">{err}</p>}
                     <div className="form-actions">
@@ -5101,7 +5186,7 @@ function MaterialsPanel({ inventory, onDone }) {
                 <div className="inv-table-wrap">
                     <table className="inv-table">
                         <thead>
-                            <tr><th>Material</th><th className="num">Reorder</th><th /></tr>
+                            <tr><th>Material</th><th className="num">Rate (₹)</th><th className="num">Reorder</th><th /></tr>
                         </thead>
                         <tbody>
                             {shown.map((m) => (
@@ -5112,6 +5197,21 @@ function MaterialsPanel({ inventory, onDone }) {
                                             {!m.active && <span className="inv-inactive-tag">inactive</span>}
                                         </span>
                                         <span className="inv-unit">{m.base_unit}</span>
+                                    </td>
+                                    <td className="num inv-reorder-cell">
+                                        {editingRate === m.id ? (
+                                            <ReorderEditor
+                                                initial={rateOf(m) ?? ''}
+                                                step="0.01"
+                                                label={`Rate per ${m.base_unit}`}
+                                                onSave={(raw) => saveRate(m, raw)}
+                                                onCancel={() => setEditingRate(null)}
+                                            />
+                                        ) : rateOf(m) != null ? (
+                                            <span title={`per ${m.base_unit}`}>{fmtMoney(rateOf(m))}</span>
+                                        ) : (
+                                            <span className="inv-dash">·</span>
+                                        )}
                                     </td>
                                     <td className="num inv-reorder-cell">
                                         {editingReorder === m.id ? (
@@ -5127,8 +5227,27 @@ function MaterialsPanel({ inventory, onDone }) {
                                         )}
                                     </td>
                                     <td className="inv-row-actions">
+                                        {editingRate !== m.id && (
+                                            <button
+                                                type="button"
+                                                className="chip chip-tool"
+                                                onClick={() => {
+                                                    setEditingRate(m.id);
+                                                    setEditingReorder(null);
+                                                }}
+                                            >
+                                                {rateOf(m) != null ? 'Edit rate' : 'Set rate'}
+                                            </button>
+                                        )}
                                         {editingReorder !== m.id && (
-                                            <button type="button" className="chip chip-tool" onClick={() => setEditingReorder(m.id)}>
+                                            <button
+                                                type="button"
+                                                className="chip chip-tool"
+                                                onClick={() => {
+                                                    setEditingReorder(m.id);
+                                                    setEditingRate(null);
+                                                }}
+                                            >
                                                 Set reorder
                                             </button>
                                         )}
@@ -5140,7 +5259,7 @@ function MaterialsPanel({ inventory, onDone }) {
                             ))}
                             {!shown.length && (
                                 <tr>
-                                    <td colSpan={3} className="muted inv-nomatch">No materials match “{query}”.</td>
+                                    <td colSpan={4} className="muted inv-nomatch">No materials match “{query}”.</td>
                                 </tr>
                             )}
                         </tbody>
@@ -5153,8 +5272,8 @@ function MaterialsPanel({ inventory, onDone }) {
     );
 }
 
-/** Inline number editor for a reorder level: Enter saves, Escape cancels. */
-function ReorderEditor({ initial, onSave, onCancel }) {
+/** Inline number editor (reorder level, rate): Enter saves, Escape cancels. */
+function ReorderEditor({ initial, onSave, onCancel, step = '1', label = 'Reorder level' }) {
     const [val, setVal] = useState(String(initial ?? 0));
     const [busy, setBusy] = useState(false);
     const [err, setErr] = useState(null);
@@ -5169,9 +5288,11 @@ function ReorderEditor({ initial, onSave, onCancel }) {
             <input
                 type="number"
                 min="0"
+                step={step}
+                inputMode={step === '1' ? 'numeric' : 'decimal'}
                 value={val}
                 autoFocus
-                aria-label="Reorder level"
+                aria-label={label}
                 disabled={busy}
                 onChange={(e) => setVal(e.target.value)}
                 onKeyDown={(e) => {

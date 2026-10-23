@@ -67,6 +67,18 @@ function trimStr(v) {
     return v != null ? String(v).trim() : '';
 }
 
+// A price in rupees (2 decimals) or null when blank. Throws a 400 otherwise.
+function optRate(v, label) {
+    if (v == null || String(v).trim() === '') return null;
+    const n = Number(v);
+    if (!Number.isFinite(n) || n < 0 || n > 9999999999) {
+        const err = new Error(`${label} must be a price of 0 or more`);
+        err.status = 400;
+        throw err;
+    }
+    return Math.round(n * 100) / 100;
+}
+
 // Parse an optional ISO timestamp. Returns null when absent, false when
 // present but unparseable, otherwise the normalised ISO string.
 function parseIsoDate(v) {
@@ -120,7 +132,8 @@ router.post('/materials', requireCatalogAdmin, adminWriteLimiter, async (req, re
             baseUnit: trimStr(body.base_unit) || 'unit',
             defaultPackSize: optInt(body.default_pack_size, 'default_pack_size', { min: 1 }) ?? 1,
             defaultPackLabel: body.default_pack_label != null ? trimStr(body.default_pack_label) || null : null,
-            reorderLevel: optInt(body.reorder_level, 'reorder_level', { min: 0 }) ?? 0
+            reorderLevel: optInt(body.reorder_level, 'reorder_level', { min: 0 }) ?? 0,
+            rate: optRate(body.rate, 'rate')
         };
         const material = await inv.createMaterial(orgOf(req), fields);
         await logAudit(req, {
@@ -155,6 +168,7 @@ router.patch('/materials/:id', requireCatalogAdmin, adminWriteLimiter, async (re
         if (body.default_pack_size !== undefined) fields.defaultPackSize = optInt(body.default_pack_size, 'default_pack_size', { min: 1 }) ?? 1;
         if (body.default_pack_label !== undefined) fields.defaultPackLabel = trimStr(body.default_pack_label) || null;
         if (body.reorder_level !== undefined) fields.reorderLevel = optInt(body.reorder_level, 'reorder_level', { min: 0 }) ?? 0;
+        if (body.rate !== undefined) fields.rate = optRate(body.rate, 'rate');
         if (typeof body.active === 'boolean') fields.active = body.active;
         const material = await inv.updateMaterial(orgId, req.params.id, fields);
         await logAudit(req, {
@@ -162,8 +176,10 @@ router.patch('/materials/:id', requireCatalogAdmin, adminWriteLimiter, async (re
             targetType: 'inventory_material',
             targetId: req.params.id,
             outcome: 'success',
-            before: { name: before.name, active: before.active, reorder_level: before.reorder_level },
-            after: material ? { name: material.name, active: material.active, reorder_level: material.reorder_level } : null
+            before: { name: before.name, active: before.active, reorder_level: before.reorder_level, rate: before.rate },
+            after: material
+                ? { name: material.name, active: material.active, reorder_level: material.reorder_level, rate: material.rate }
+                : null
         });
         res.json({ material });
     } catch (err) {
@@ -888,7 +904,8 @@ router.post('/movements/batch', requireMover, adminWriteLimiter, async (req, res
                 qtyBase,
                 packSize: packSize ?? null,
                 packQty: packQty ?? null,
-                photoPath: line.photo_path != null ? trimStr(line.photo_path) || null : null
+                photoPath: line.photo_path != null ? trimStr(line.photo_path) || null : null,
+                unitRate: kind === 'dispatch' ? optRate(line.unit_rate, `line ${i + 1} unit_rate`) : null
             };
         });
 

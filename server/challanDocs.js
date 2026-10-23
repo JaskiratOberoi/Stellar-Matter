@@ -37,6 +37,80 @@ function unitTotals(lines) {
     return [...m.entries()].map(([u, q]) => `${fmtQty(q)} ${esc(u)}`).join(' · ');
 }
 
+const fmtMoney = (n) =>
+    Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+const hasRate = (l) => l.rate != null && Number.isFinite(Number(l.rate));
+const lineAmount = (l) => (hasRate(l) ? Math.round(Number(l.qty || 0) * Number(l.rate) * 100) / 100 : null);
+
+// Value of the priced lines, and how many lines have no rate yet.
+function priceTotals(lines) {
+    let amount = 0;
+    let unpriced = 0;
+    for (const l of lines) {
+        const a = lineAmount(l);
+        if (a == null) unpriced += 1;
+        else amount += a;
+    }
+    return { amount: Math.round(amount * 100) / 100, unpriced };
+}
+
+const ONES = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten', 'Eleven', 'Twelve',
+    'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
+const TENS = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+
+function under100(n) {
+    return n < 20 ? ONES[n] : `${TENS[Math.floor(n / 10)]}${n % 10 ? ` ${ONES[n % 10]}` : ''}`;
+}
+
+function under1000(n) {
+    const h = Math.floor(n / 100);
+    const r = n % 100;
+    return [h ? `${ONES[h]} Hundred` : '', r ? under100(r) : ''].filter(Boolean).join(' ');
+}
+
+// Indian numbering (Crore, Lakh, Thousand), as on the reference voucher.
+function wholeInWords(n) {
+    if (n === 0) return 'Zero';
+    const parts = [];
+    const crore = Math.floor(n / 10000000);
+    if (crore) parts.push(`${wholeInWords(crore)} Crore`);
+    const lakh = Math.floor((n % 10000000) / 100000);
+    if (lakh) parts.push(`${under100(lakh)} Lakh`);
+    const thousand = Math.floor((n % 100000) / 1000);
+    if (thousand) parts.push(`${under100(thousand)} Thousand`);
+    const rest = n % 1000;
+    if (rest) parts.push(under1000(rest));
+    return parts.join(' ');
+}
+
+function rupeesInWords(amount) {
+    const paise = Math.round(amount * 100);
+    const r = Math.floor(paise / 100);
+    const p = paise % 100;
+    return `Rupees ${wholeInWords(r)}${p ? ` and Paisa ${under100(p)}` : ''} Only`;
+}
+
+// Rate and amount cells for a line, when the document shows prices.
+function priceCells(l) {
+    return `
+      <td class="num">${hasRate(l) ? fmtMoney(l.rate) : '—'}</td>
+      <td class="num">${hasRate(l) ? fmtMoney(lineAmount(l)) : '—'}</td>`;
+}
+
+const PRICE_HEADS = '<th class="num">Rate (₹)</th><th class="num">Amount (₹)</th>';
+
+// Grand total in rupees with the amount in words, as on the reference voucher.
+function grandTotal(lines, label = 'Grand Total') {
+    const t = priceTotals(lines);
+    const note = t.unpriced
+        ? ` <small>(${t.unpriced} item${t.unpriced === 1 ? '' : 's'} without a rate not included)</small>`
+        : '';
+    return `
+  <div class="grand"><span>${esc(label)}</span><span>₹ ${fmtMoney(t.amount)}</span></div>
+  <div class="words">${esc(rupeesInWords(t.amount))}${note}</div>`;
+}
+
 const BASE_CSS = `
 @page { size: A4; margin: 12mm; }
 * { box-sizing: border-box; }
@@ -72,6 +146,11 @@ table.items tr.fill td { height: 160px; }
 .fields { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 24px; padding: 12px; border-top: 1.5px solid #111; font-size: 10pt; }
 .fields div { display: flex; gap: 8px; align-items: flex-end; }
 .fields .line { flex: 1; border-bottom: 1px solid #111; height: 1.2em; }
+.grand { display: grid; grid-template-columns: 1fr auto; border-top: 1.5px solid #111; font-weight: 700; }
+.grand > span { padding: 7px 12px; }
+.grand > span + span { border-left: 1.5px solid #111; min-width: 11em; text-align: right; }
+.words { padding: 6px 12px; border-top: 1.5px solid #111; font-weight: 700; font-size: 10pt; }
+.words small { font-weight: 400; color: #444; }
 `;
 
 function letterhead(c, title) {
@@ -107,6 +186,8 @@ function partyBlock(c) {
 function challanHtml(c) {
     const d = c.details || {};
     const lines = c.lines || [];
+    // Price columns appear once any line has a rate; quantities only otherwise.
+    const priced = lines.some(hasRate);
     const rows = lines
         .map(
             (l, i) => `<tr>
@@ -114,7 +195,7 @@ function challanHtml(c) {
       <td>${esc(l.material_name)}</td>
       <td class="num">${esc(packText(l))}</td>
       <td class="num">${fmtQty(l.qty)}</td>
-      <td>${esc(l.unit)}</td>
+      <td>${esc(l.unit)}</td>${priced ? priceCells(l) : ''}
     </tr>`
         )
         .join('');
@@ -135,10 +216,11 @@ function challanHtml(c) {
     </div>
   </div>
   <table class="items">
-    <thead><tr><th class="sn">S.N.</th><th>Description of Goods</th><th class="num">Packs</th><th class="num">Qty.</th><th>Unit</th></tr></thead>
-    <tbody>${rows}<tr class="fill"><td></td><td></td><td></td><td></td><td></td></tr></tbody>
+    <thead><tr><th class="sn">S.N.</th><th>Description of Goods</th><th class="num">Packs</th><th class="num">Qty.</th><th>Unit</th>${priced ? PRICE_HEADS : ''}</tr></thead>
+    <tbody>${rows}<tr class="fill">${'<td></td>'.repeat(priced ? 7 : 5)}</tr></tbody>
   </table>
   <div class="total"><span>Total: ${lines.length} item${lines.length === 1 ? '' : 's'}</span><span>${unitTotals(lines)}</span></div>
+  ${priced ? grandTotal(lines) : ''}
   ${c.reference || c.note ? `<div class="note">${c.reference ? `Ref: ${esc(c.reference)}` : ''}${c.reference && c.note ? ' · ' : ''}${esc(c.note || '')}</div>` : ''}
   <div class="sign">
     <div><span>Received the above goods in good condition</span><span>Receiver's signature &amp; stamp</span></div>
@@ -151,13 +233,14 @@ function challanHtml(c) {
 
 function receivingHtml(c) {
     const lines = c.lines || [];
+    const priced = lines.some(hasRate);
     const rows = lines
         .map(
             (l, i) => `<tr>
       <td class="sn">${i + 1}.</td>
       <td>${esc(l.material_name)}</td>
       <td class="num">${fmtQty(l.qty)}</td>
-      <td>${esc(l.unit)}</td>
+      <td>${esc(l.unit)}</td>${priced ? priceCells(l) : ''}
       <td></td>
       <td></td>
     </tr>`
@@ -180,9 +263,10 @@ table.items td { height: 26px; }
     </div>
   </div>
   <table class="items">
-    <thead><tr><th class="sn">S.N.</th><th>Item</th><th class="num">Qty. sent</th><th>Unit</th><th style="width:7.5em">Qty. received</th><th style="width:12em">Remarks (short / damaged)</th></tr></thead>
+    <thead><tr><th class="sn">S.N.</th><th>Item</th><th class="num">Qty. sent</th><th>Unit</th>${priced ? PRICE_HEADS : ''}<th style="width:7em">Qty. received</th><th style="width:${priced ? 9 : 12}em">Remarks (short / damaged)</th></tr></thead>
     <tbody>${rows}</tbody>
   </table>
+  ${priced ? grandTotal(lines, 'Value sent') : ''}
   <div class="check">
     <span><span class="box"></span>All items received in good condition</span>
     <span><span class="box"></span>Short / damaged (see remarks)</span>
@@ -199,4 +283,4 @@ table.items td { height: 26px; }
 </body></html>`;
 }
 
-module.exports = { challanHtml, receivingHtml };
+module.exports = { challanHtml, receivingHtml, rupeesInWords };
