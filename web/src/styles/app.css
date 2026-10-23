@@ -8184,3 +8184,86 @@ a.topbar-brand {
         width: auto;
     }
 }
+
+/* Catalog: rate and reorder values edit in place. The value is the button,
+   so each row keeps one action chip instead of a stack of three. */
+.inv-cell-edit {
+    display: inline-block;
+    min-width: 3.5em;
+    padding: var(--sp-1) var(--sp-2);
+    margin: calc(-1 * var(--sp-1)) calc(-1 * var(--sp-2));
+    border: 1px dashed transparent;
+    border-radius: var(--r-sm);
+    background: none;
+    color: rgb(var(--nx-ink));
+    font: inherit;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+    cursor: pointer;
+}
+
+.inv-cell-edit.is-empty {
+    color: rgb(var(--nx-ink-3));
+    font: 600 var(--fs-3xs) / 1.6 var(--font-mono);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.inv-cell-edit:hover,
+.inv-cell-edit:focus-visible {
+    border-color: rgb(var(--nx-rule-strong));
+    background: rgb(var(--nx-surface-2, var(--nx-surface)));
+    color: rgb(var(--nx-accent));
+    outline: none;
+}
+
+.inv-cell-edit:focus-visible {
+    box-shadow: var(--focus-ring);
+}
+
+.inv-reorder-editor {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: var(--sp-1);
+}
+
+.inv-reorder-editor .inv-reorder-err {
+    flex-basis: 100%;
+    text-align: right;
+}
+
+.inv-reorder-editor input {
+    width: 10ch;
+}
+
+.inv-reorder-btn {
+    width: 28px;
+    height: 28px;
+    border: 1px solid rgb(var(--nx-rule-strong));
+    border-radius: var(--r-sm);
+    background: rgb(var(--nx-surface));
+    color: rgb(var(--nx-ink-2));
+    font-size: var(--fs-sm);
+    line-height: 1;
+    cursor: pointer;
+}
+
+.inv-reorder-btn.is-save {
+    border-color: rgb(var(--nx-accent));
+    color: rgb(var(--nx-accent));
+}
+
+.inv-reorder-btn:hover:not(:disabled) {
+    background: rgb(var(--nx-accent) / 0.12);
+}
+
+@media (max-width: 760px) {
+    .inv-cell-edit,
+    .inv-reorder-btn {
+        min-height: 40px;
+    }
+
+    .inv-reorder-btn {
+        width: 40px;
+    }
+}

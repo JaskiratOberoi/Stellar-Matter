@@ -5207,10 +5207,19 @@ function MaterialsPanel({ inventory, onDone }) {
                                                 onSave={(raw) => saveRate(m, raw)}
                                                 onCancel={() => setEditingRate(null)}
                                             />
-                                        ) : rateOf(m) != null ? (
-                                            <span title={`per ${m.base_unit}`}>{fmtMoney(rateOf(m))}</span>
                                         ) : (
-                                            <span className="inv-dash">·</span>
+                                            <button
+                                                type="button"
+                                                className={`inv-cell-edit${rateOf(m) == null ? ' is-empty' : ''}`}
+                                                onClick={() => {
+                                                    setEditingRate(m.id);
+                                                    setEditingReorder(null);
+                                                }}
+                                                aria-label={`${rateOf(m) != null ? 'Edit' : 'Set'} rate for ${m.name}`}
+                                                title={rateOf(m) != null ? `₹${fmtMoney(rateOf(m))} per ${m.base_unit} · click to edit` : 'Set a rate'}
+                                            >
+                                                {rateOf(m) != null ? fmtMoney(rateOf(m)) : 'Set'}
+                                            </button>
                                         )}
                                     </td>
                                     <td className="num inv-reorder-cell">
@@ -5220,37 +5229,22 @@ function MaterialsPanel({ inventory, onDone }) {
                                                 onSave={(raw) => saveReorder(m, raw)}
                                                 onCancel={() => setEditingReorder(null)}
                                             />
-                                        ) : m.reorder_level ? (
-                                            fmt(m.reorder_level)
                                         ) : (
-                                            <span className="inv-dash">·</span>
-                                        )}
-                                    </td>
-                                    <td className="inv-row-actions">
-                                        {editingRate !== m.id && (
                                             <button
                                                 type="button"
-                                                className="chip chip-tool"
-                                                onClick={() => {
-                                                    setEditingRate(m.id);
-                                                    setEditingReorder(null);
-                                                }}
-                                            >
-                                                {rateOf(m) != null ? 'Edit rate' : 'Set rate'}
-                                            </button>
-                                        )}
-                                        {editingReorder !== m.id && (
-                                            <button
-                                                type="button"
-                                                className="chip chip-tool"
+                                                className={`inv-cell-edit${m.reorder_level ? '' : ' is-empty'}`}
                                                 onClick={() => {
                                                     setEditingReorder(m.id);
                                                     setEditingRate(null);
                                                 }}
+                                                aria-label={`${m.reorder_level ? 'Edit' : 'Set'} reorder level for ${m.name}`}
+                                                title={m.reorder_level ? 'Click to edit' : 'Set a reorder level'}
                                             >
-                                                Set reorder
+                                                {m.reorder_level ? fmt(m.reorder_level) : 'Set'}
                                             </button>
                                         )}
+                                    </td>
+                                    <td className="inv-row-actions">
                                         <button type="button" className="chip chip-tool" onClick={() => toggleActive(m)}>
                                             {m.active ? 'Disable' : 'Enable'}
                                         </button>
@@ -5304,11 +5298,11 @@ function ReorderEditor({ initial, onSave, onCancel, step = '1', label = 'Reorder
                     }
                 }}
             />
-            <button type="button" className="chip chip-tool" onClick={save} disabled={busy}>
-                {busy ? 'Saving…' : 'Save'}
+            <button type="button" className="inv-reorder-btn is-save" onClick={save} disabled={busy} aria-label="Save" title="Save (Enter)">
+                ✓
             </button>
-            <button type="button" className="chip chip-tool" onClick={onCancel} disabled={busy}>
-                Cancel
+            <button type="button" className="inv-reorder-btn" onClick={onCancel} disabled={busy} aria-label="Cancel" title="Cancel (Esc)">
+                ✕
             </button>
             {err && <span className="inv-reorder-err">{err}</span>}
         </span>
