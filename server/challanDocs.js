@@ -115,41 +115,43 @@ const BASE_CSS = `
 @page { size: A4; margin: 12mm; }
 * { box-sizing: border-box; }
 body { margin: 0; font: 11pt/1.35 Arial, "Liberation Sans", Helvetica, "DejaVu Sans", sans-serif; color: #111; }
-.sheet { border: 1.5px solid #111; }
-.head { text-align: center; padding: 8px 12px 10px; border-bottom: 1.5px solid #111; }
+/* Whole-pixel width and borders: a fractional right edge drew the frame
+   faint in some PDF viewers. */
+.sheet { width: 700px; margin: 0 auto; border: 2px solid #111; }
+.head { text-align: center; padding: 8px 12px 10px; border-bottom: 2px solid #111; }
 .doc-title { font-size: 13pt; font-weight: 700; text-decoration: underline; letter-spacing: .02em; margin: 0 0 4px; }
 .org { font-size: 20pt; font-weight: 700; margin: 0; letter-spacing: .02em; }
 .org-sub { font-size: 9.5pt; font-weight: 700; margin: 2px 0 0; }
-.meta { display: grid; grid-template-columns: 1.05fr 1fr; border-bottom: 1.5px solid #111; }
+.meta { display: grid; grid-template-columns: 1.05fr 1fr; border-bottom: 2px solid #111; }
 .meta > div { padding: 8px 12px; min-height: 120px; }
-.meta > div + div { border-left: 1.5px solid #111; }
+.meta > div + div { border-left: 2px solid #111; }
 .label { font-weight: 700; font-style: italic; margin: 0 0 4px; }
 .party-name { font-weight: 700; margin: 0 0 2px; }
 .kv { display: grid; grid-template-columns: 9.5em 1em 1fr; row-gap: 3px; font-size: 10pt; }
 .kv b { font-weight: 400; }
 table.items { width: 100%; border-collapse: collapse; font-size: 10pt; }
-table.items th { text-align: left; font-weight: 700; padding: 6px 6px; border-bottom: 1.5px solid #111; }
+table.items th { text-align: left; font-weight: 700; padding: 6px 6px; border-bottom: 2px solid #111; }
 table.items td { padding: 5px 6px; vertical-align: top; }
 table.items th + th, table.items td + td { border-left: 1px solid #111; }
 table.items .num { text-align: right; white-space: nowrap; }
 table.items .sn { width: 2.5em; }
 table.items tr.fill td { height: 160px; }
-.total { display: flex; justify-content: space-between; gap: 12px; padding: 7px 12px; border-top: 1.5px solid #111; font-weight: 700; }
-.note { padding: 6px 12px; border-top: 1.5px solid #111; font-size: 9.5pt; }
-.sign { display: grid; grid-template-columns: 1fr 1fr; border-top: 1.5px solid #111; }
+.total { display: flex; justify-content: space-between; gap: 12px; padding: 7px 12px; border-top: 2px solid #111; font-weight: 700; }
+.note { padding: 6px 12px; border-top: 2px solid #111; font-size: 9.5pt; }
+.sign { display: grid; grid-template-columns: 1fr 1fr; border-top: 2px solid #111; }
 .sign > div { padding: 10px 12px 12px; min-height: 92px; display: flex; flex-direction: column; justify-content: space-between; }
-.sign > div + div { border-left: 1.5px solid #111; text-align: right; }
-.foot { display: flex; justify-content: space-between; font-size: 8.5pt; color: #555; margin-top: 4px; }
+.sign > div + div { border-left: 2px solid #111; text-align: right; }
+.foot { width: 700px; margin: 4px auto 0; display: flex; justify-content: space-between; font-size: 8.5pt; color: #555; }
 .blank { border-bottom: 1px solid #111; min-width: 9em; display: inline-block; }
-.check { display: flex; gap: 22px; padding: 8px 12px; border-top: 1.5px solid #111; font-size: 10pt; }
+.check { display: flex; gap: 22px; padding: 8px 12px; border-top: 2px solid #111; font-size: 10pt; }
 .box { display: inline-block; width: 11px; height: 11px; border: 1px solid #111; margin-right: 6px; vertical-align: -1px; }
-.fields { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 24px; padding: 12px; border-top: 1.5px solid #111; font-size: 10pt; }
+.fields { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 24px; padding: 12px; border-top: 2px solid #111; font-size: 10pt; }
 .fields div { display: flex; gap: 8px; align-items: flex-end; }
 .fields .line { flex: 1; border-bottom: 1px solid #111; height: 1.2em; }
-.grand { display: grid; grid-template-columns: 1fr auto; border-top: 1.5px solid #111; font-weight: 700; }
+.grand { display: grid; grid-template-columns: 1fr auto; border-top: 2px solid #111; font-weight: 700; }
 .grand > span { padding: 7px 12px; }
-.grand > span + span { border-left: 1.5px solid #111; min-width: 11em; text-align: right; }
-.words { padding: 6px 12px; border-top: 1.5px solid #111; font-weight: 700; font-size: 10pt; }
+.grand > span + span { border-left: 2px solid #111; min-width: 11em; text-align: right; }
+.words { padding: 6px 12px; border-top: 2px solid #111; font-weight: 700; font-size: 10pt; }
 .words small { font-weight: 400; color: #444; }
 `;
 
