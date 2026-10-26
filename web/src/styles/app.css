@@ -7289,7 +7289,7 @@ a.topbar-brand {
 }
 
 .mreq-layout.has-panel {
-    grid-template-columns: minmax(0, 1fr) minmax(320px, 400px);
+    grid-template-columns: minmax(0, 1fr) minmax(340px, 480px);
 }
 
 .mreq-filters {
@@ -7481,6 +7481,10 @@ a.topbar-brand {
 .mreq-items .num {
     text-align: right;
     font-variant-numeric: tabular-nums;
+}
+
+.mreq-items .num .mreq-was,
+.mreq-items .num .mreq-qty-n {
     white-space: nowrap;
 }
 
@@ -8312,6 +8316,7 @@ a.topbar-brand {
 }
 .mreq-over--row { margin-left: 0.35rem; vertical-align: middle; }
 .mreq-trim { display: inline-flex; margin: 0.3rem 0 0 0.4rem; white-space: nowrap; max-width: 100%; }
+.mreq-items td .mreq-over { white-space: normal; text-align: left; }
 .mreq-panel { min-width: 0; }
 .mreq-items td:first-child { min-width: 0; overflow-wrap: anywhere; }
 .mreq-was { text-decoration: line-through; color: rgb(var(--nx-ink-3)); margin-right: 0.3rem; }

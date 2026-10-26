@@ -567,7 +567,7 @@ function RequestPanel({ request, usage, usageBusy, onTrim, busy, cancelling, onA
                                     {line.requested_quantity != null && line.requested_quantity !== line.quantity ? (
                                         <span className="mreq-was" title="What was asked for">{Number(line.requested_quantity).toLocaleString()}</span>
                                     ) : null}
-                                    {Number(line.quantity).toLocaleString()} <span className="muted small">{line.unit}</span>
+                                    <span className="mreq-qty-n">{Number(line.quantity).toLocaleString()}</span> <span className="muted small">{line.unit}</span>
                                 </td>
                                 {usage && usage.site ? (
                                     <td className="mreq-td-used">
@@ -581,8 +581,8 @@ function RequestPanel({ request, usage, usageBusy, onTrim, busy, cancelling, onA
                                                     <div className="muted small">sent {Number(u.dispatched_last_month).toLocaleString()}</div>
                                                 ) : null}
                                                 {over && open0 && u.suggested_quantity > 0 ? (
-                                                    <button type="button" className="chip chip-tool mreq-trim" disabled={busy} onClick={() => onTrim(line.id, u.suggested_quantity)}>
-                                                        Trim to {Number(u.suggested_quantity).toLocaleString()} {line.unit}
+                                                    <button type="button" className="chip chip-tool mreq-trim" disabled={busy} title={`Set the line to ${Number(u.suggested_quantity).toLocaleString()} ${line.unit}`} onClick={() => onTrim(line.id, u.suggested_quantity)}>
+                                                        Trim to {Number(u.suggested_quantity).toLocaleString()}
                                                     </button>
                                                 ) : null}
                                             </>
