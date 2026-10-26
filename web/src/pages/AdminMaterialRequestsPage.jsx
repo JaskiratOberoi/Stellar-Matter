@@ -5,12 +5,13 @@ import { InfinitySourceTag } from '../components/InfinityMark.jsx';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { useMaterialRequests } from '../hooks/useMaterialRequests.js';
 
+// Every request first; the status chips narrow from there.
 const REQUEST_FILTERS = [
+    { id: 'all', label: 'All' },
     { id: 'submitted', label: 'Submitted' },
     { id: 'approved', label: 'Approved' },
     { id: 'batched', label: 'Batched' },
-    { id: 'cancelled', label: 'Cancelled' },
-    { id: 'all', label: 'All' }
+    { id: 'cancelled', label: 'Cancelled' }
 ];
 
 const STATUS_LABEL = {
@@ -94,7 +95,7 @@ export function AdminMaterialRequestsPage() {
     const { requests, batches, loading, error, reload } = mr;
 
     const [tab, setTab] = useState('requests');
-    const [filter, setFilter] = useState('submitted');
+    const [filter, setFilter] = useState('all');
     const [selected, setSelected] = useState(() => new Set());
     const [detail, setDetail] = useState(null);
     const [detailKind, setDetailKind] = useState(null);
@@ -297,7 +298,7 @@ export function AdminMaterialRequestsPage() {
                                     <p className="muted">Loading…</p>
                                 ) : !filtered.length ? (
                                     <p className="muted mreq-empty">
-                                        {filter === 'submitted' ? 'Nothing waiting for review.' : 'No requests here.'}
+                                        {filter === 'submitted' ? 'Nothing waiting for review.' : filter === 'all' ? 'No requests yet.' : 'No requests here.'}
                                     </p>
                                 ) : (
                                     <ul className="mreq-list">
