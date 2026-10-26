@@ -253,7 +253,8 @@ body {
     color: rgb(var(--nx-ink-2));
 }
 
-.login-form input {
+.login-form input,
+.login-form select {
     background: rgb(var(--nx-surface-2));
     color: rgb(var(--nx-ink));
     border: 1px solid rgb(var(--nx-rule-soft));
@@ -263,11 +264,13 @@ body {
     transition: border-color var(--dur-fast) var(--ease);
 }
 
-.login-form input:hover {
+.login-form input:hover,
+.login-form select:hover {
     border-color: rgb(var(--nx-rule-strong));
 }
 
-.login-form input:focus {
+.login-form input:focus,
+.login-form select:focus {
     outline: none;
     border-color: rgb(var(--nx-accent));
 }
