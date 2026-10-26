@@ -49,6 +49,24 @@ function actorLabel(actor) {
     return actor.displayName || actor.username || actor.id || null;
 }
 
+/**
+ * A DATE column as the calendar day it holds. pg hands a DATE back as a JS
+ * Date at local midnight, which JSON then writes in UTC — 2026-11-05 became
+ * "2026-11-04T18:30:00.000Z" and every reader that took the first ten
+ * characters showed the day before. The row is sent as the plain YYYY-MM-DD.
+ */
+function dayOnly(v) {
+    if (v == null) return null;
+    if (v instanceof Date) {
+        if (Number.isNaN(v.getTime())) return null;
+        const y = v.getFullYear();
+        const m = String(v.getMonth() + 1).padStart(2, '0');
+        const d = String(v.getDate()).padStart(2, '0');
+        return `${y}-${m}-${d}`;
+    }
+    return String(v).slice(0, 10);
+}
+
 function mapRequestRow(row, lines = []) {
     if (!row) return null;
     return {
@@ -58,7 +76,7 @@ function mapRequestRow(row, lines = []) {
         requester_name: row.requester_name,
         requester_contact: row.requester_contact,
         location_text: row.location_text,
-        needed_by: row.needed_by,
+        needed_by: dayOnly(row.needed_by),
         notes: row.notes,
         created_at: row.created_at,
         approved_at: row.approved_at,
