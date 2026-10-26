@@ -7698,9 +7698,15 @@ a.topbar-brand {
     grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-.mreq-form .grid2 input {
+.mreq-form .grid2 > label {
+    min-width: 0;
+}
+
+.mreq-form .grid2 input,
+.mreq-form .grid2 select {
     width: 100%;
     min-width: 0;
+    box-sizing: border-box;
 }
 
 .mreq-form textarea {
