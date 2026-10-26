@@ -60,7 +60,9 @@ export function InfinityMark({ className, size, title = 'Stellar Infinity' }) {
  */
 export function InfinitySourceTag({ meta, compact = false }) {
     const m = meta || {};
-    const where = [m.clientCode, m.region || m.state || m.city].filter(Boolean).join(' · ');
+    // A centre's login IS its client code, so one of the two is enough.
+    const sameAsUser = m.clientCode && m.username && m.clientCode.toLowerCase() === m.username.toLowerCase();
+    const where = [sameAsUser ? null : m.clientCode, m.region || m.state || m.city].filter(Boolean).join(' · ');
     return (
         <span className="mreq-src" title={`Raised from Stellar Infinity by ${m.displayName || m.username || 'an Infinity user'}${where ? ` · ${where}` : ''}`}>
             <InfinityMark className="mreq-src-mark" />
