@@ -4,6 +4,10 @@ import { Topbar } from '../components/Topbar.jsx';
 
 export function AdminOrgsPage() {
     const [orgs, setOrgs] = useState([]);
+    // A freshly minted request code is shown once. It lives here, not in the
+    // row, because the reload that follows the mint re-renders the table and
+    // a row's own state went with it — the code was never seen.
+    const [freshCodes, setFreshCodes] = useState({});
     const [users, setUsers] = useState([]);
     const [loading, setLoading] = useState(true);
     const [err, setErr] = useState(null);
@@ -88,6 +92,8 @@ export function AdminOrgsPage() {
                                     assignOpen={assignOpenFor === o.id}
                                     onToggleAssign={() => setAssignOpenFor((v) => (v === o.id ? null : o.id))}
                                     onChanged={reload}
+                                    freshCode={freshCodes[o.id] || null}
+                                    onFreshCode={(code) => setFreshCodes((m) => ({ ...m, [o.id]: code }))}
                                 />
                             ))}
                             {!orgs.length && (
@@ -159,9 +165,9 @@ function CreateOrgForm({ onCreated }) {
     );
 }
 
-function OrgRow({ org, users, assignOpen, onToggleAssign, onChanged }) {
+function OrgRow({ org, users, assignOpen, onToggleAssign, onChanged, freshCode = null, onFreshCode = () => {} }) {
     const [busy, setBusy] = useState(false);
-    const [freshCode, setFreshCode] = useState(null);
+    const setFreshCode = onFreshCode;
     const [detailsOpen, setDetailsOpen] = useState(false);
     const isDefault = org.id === 'org-default';
 
