@@ -530,17 +530,17 @@ function RequestPanel({ request, usage, usageBusy, onTrim, busy, cancelling, onA
             {request.notes && <p className="mreq-notes">{request.notes}</p>}
             {open0 && (
                 <div className="mreq-usage-head">
-                    {usageBusy && !usage ? <span className="muted">Reading last month\u2019s usage…</span> : null}
+                    {usageBusy && !usage ? <span className="muted">Reading last month’s usage…</span> : null}
                     {usage && usage.site ? (
                         <>
                             <span><b>{usage.month.label}</b> at <b>{usage.site.name}</b></span>
                             <span>{usage.tracer ? `Tracer run for ${usage.tracer.bu}${usage.tracer.scope === 'centre' ? ` · centre ${usage.tracer.centre}` : ''}` : usage.centre_without_history ? `No Tracer figures for centre ${usage.centre_code} last month` : 'No Tracer run covers the month; dispatches only'}</span>
                             {usage.over_lines > 0
                                 ? <span className="mreq-over">{usage.over_lines} line{usage.over_lines === 1 ? '' : 's'} over usage</span>
-                                : <span className="muted">Nothing above last month\u2019s usage</span>}
+                                : <span className="muted">Nothing above last month’s usage</span>}
                         </>
                     ) : usage && !usage.site ? (
-                        <span className="muted">No site on this request, so last month\u2019s usage cannot be read.</span>
+                        <span className="muted">No site on this request, so last month’s usage cannot be read.</span>
                     ) : null}
                 </div>
             )}
@@ -597,7 +597,7 @@ function RequestPanel({ request, usage, usageBusy, onTrim, busy, cancelling, onA
                 </tbody>
             </table>
             {usage && usage.site && usage.over_lines > 0 ? (
-                <p className="mreq-usage-note">Last month\u2019s figure is the Tracer\u2019s count for the site where a run covers the month (letterhead pages, envelopes, samples per tube), else what was dispatched to it. Trim sets the line to that figure; the quantity asked for stays on record.</p>
+                <p className="mreq-usage-note">Last month’s figure is the Tracer’s count for the site where a run covers the month (letterhead pages, envelopes, samples per tube), else what was dispatched to it. Trim sets the line to that figure; the quantity asked for stays on record.</p>
             ) : null}
             {open &&
                 (cancelling ? (
