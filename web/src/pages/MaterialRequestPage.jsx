@@ -15,6 +15,17 @@ function readRequester() {
     }
 }
 
+/**
+ * A YYYY-MM-DD as the calendar day it names, built from its parts so no
+ * timezone can move it: parsing the string as a timestamp read it as UTC
+ * midnight in some browsers and printed the day before in India.
+ */
+function dayLabel(v) {
+    const [y, m, d] = String(v || '').slice(0, 10).split('-').map(Number);
+    if (!y || !m || !d) return String(v || '');
+    return new Date(y, m - 1, d).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
 let lineSeq = 0;
 function emptyLine() {
     lineSeq += 1;
@@ -243,7 +254,7 @@ export function MaterialRequestPage() {
                     <h1 className="wordmark login-title">Request sent</h1>
                     <p className="muted small login-sub">
                         Thanks{requesterName ? `, ${requesterName.split(' ')[0]}` : ''}. An admin will review it
-                        {sent.neededBy ? ` before ${new Date(`${sent.neededBy}T12:00:00`).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}` : ''} and
+                        {sent.neededBy ? ` before ${dayLabel(sent.neededBy)}` : ''} and
                         contact you at {requesterContact} if anything is unclear.
                     </p>
                     <ul className="mreq-sent">
