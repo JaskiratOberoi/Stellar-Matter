@@ -67,6 +67,11 @@ function mapRequestRow(row, lines = []) {
         cancelled_by: row.cancelled_by,
         cancel_reason: row.cancel_reason,
         batch_id: row.batch_id,
+        // 'portal' (the public form) or 'infinity' (raised from Stellar Infinity).
+        source: row.source || 'portal',
+        source_ref: row.source_ref || null,
+        source_meta: row.source_meta || null,
+        external_id: row.external_id || null,
         line_count: row.line_count != null ? Number(row.line_count) : lines.length,
         lines
     };
@@ -203,7 +208,7 @@ async function getRequest(orgId, id, { client = null } = {}) {
         `SELECT id, org_id, status, requester_name, requester_contact,
                 location_text, needed_by, notes, created_at,
                 approved_at, approved_by, cancelled_at, cancelled_by,
-                cancel_reason, batch_id
+                cancel_reason, batch_id, source, source_ref, source_meta, external_id
          FROM material_requests
          WHERE org_id = $1 AND id = $2`,
         [orgId, id]
@@ -211,6 +216,16 @@ async function getRequest(orgId, id, { client = null } = {}) {
     if (!r.rows.length) return null;
     const lines = await loadLines(db, id);
     return mapRequestRow(r.rows[0], lines);
+}
+
+/** The request an external system already filed under this id, if any. */
+async function findByExternalId(orgId, externalId) {
+    if (!externalId) return null;
+    const r = await getPool().query(
+        `SELECT id FROM material_requests WHERE org_id = $1 AND external_id = $2`,
+        [orgId, String(externalId)]
+    );
+    return r.rows.length ? getRequest(orgId, r.rows[0].id) : null;
 }
 
 async function createRequest(orgId, fields) {
@@ -268,8 +283,8 @@ async function createRequest(orgId, fields) {
         await client.query(
             `INSERT INTO material_requests
                 (id, org_id, status, requester_name, requester_contact,
-                 location_text, needed_by, notes)
-             VALUES ($1, $2, 'submitted', $3, $4, $5, $6, $7)`,
+                 location_text, needed_by, notes, source, source_ref, source_meta, external_id)
+             VALUES ($1, $2, 'submitted', $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
             [
                 id,
                 orgId,
@@ -277,7 +292,11 @@ async function createRequest(orgId, fields) {
                 fields.requesterContact,
                 fields.locationText || null,
                 fields.neededBy || null,
-                fields.notes || null
+                fields.notes || null,
+                fields.source === 'infinity' ? 'infinity' : 'portal',
+                fields.sourceRef || null,
+                fields.sourceMeta ? JSON.stringify(fields.sourceMeta) : null,
+                fields.externalId || null
             ]
         );
 
@@ -312,27 +331,46 @@ async function createRequest(orgId, fields) {
     return getRequest(orgId, id);
 }
 
-async function listRequests(orgId, { status = null } = {}) {
+async function listRequests(orgId, { status = null, source = null, sourceRef = null, limit = null, withLines = false } = {}) {
     const pool = getPool();
     const params = [orgId];
-    let statusClause = '';
+    const clauses = [];
     if (status) {
         if (!REQUEST_STATUSES.has(status)) throw httpError('Invalid status filter', 400);
         params.push(status);
-        statusClause = `AND r.status = $${params.length}`;
+        clauses.push(`AND r.status = $${params.length}`);
+    }
+    if (source) {
+        params.push(source);
+        clauses.push(`AND r.source = $${params.length}`);
+    }
+    if (sourceRef) {
+        params.push(sourceRef);
+        clauses.push(`AND r.source_ref = $${params.length}`);
+    }
+    let limitClause = '';
+    if (limit) {
+        params.push(Math.max(1, Math.min(500, Number(limit) || 100)));
+        limitClause = `LIMIT $${params.length}`;
     }
     const r = await pool.query(
         `SELECT r.id, r.org_id, r.status, r.requester_name, r.requester_contact,
                 r.location_text, r.needed_by, r.notes, r.created_at,
                 r.approved_at, r.approved_by, r.cancelled_at, r.cancelled_by,
-                r.cancel_reason, r.batch_id,
+                r.cancel_reason, r.batch_id, r.source, r.source_ref, r.source_meta, r.external_id,
                 (SELECT COUNT(*)::int FROM material_request_lines l WHERE l.request_id = r.id) AS line_count
          FROM material_requests r
-         WHERE r.org_id = $1 ${statusClause}
-         ORDER BY r.created_at DESC`,
+         WHERE r.org_id = $1 ${clauses.join(' ')}
+         ORDER BY r.created_at DESC
+         ${limitClause}`,
         params
     );
-    return r.rows.map((row) => mapRequestRow(row));
+    if (!withLines) return r.rows.map((row) => mapRequestRow(row));
+    const out = [];
+    for (const row of r.rows) {
+        out.push(mapRequestRow(row, await loadLines(pool, row.id)));
+    }
+    return out;
 }
 
 async function approveRequest(orgId, id, actor) {
@@ -672,6 +710,7 @@ module.exports = {
     resolveOrgByRequestCode,
     listPublicCatalog,
     createRequest,
+    findByExternalId,
     listRequests,
     getRequest,
     approveRequest,

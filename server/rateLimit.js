@@ -71,8 +71,21 @@ const materialRequestPublicLimiter = rateLimit({
     validate: false
 });
 
+// The Infinity bridge: one server (Infinity's API) raises requests for many
+// people, so a per-IP budget sized for one person's form would trip at the
+// first busy hour. Keyed by IP still (it is one trusted caller), but wide.
+const infinityLimiter = rateLimit({
+    windowMs: ONE_MINUTE_MS,
+    limit: 120,
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    handler: buildHandler('Infinity bridge'),
+    validate: false
+});
+
 module.exports = {
     loginLimiter,
     adminWriteLimiter,
-    materialRequestPublicLimiter
+    materialRequestPublicLimiter,
+    infinityLimiter
 };

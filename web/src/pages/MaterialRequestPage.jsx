@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { BrandMark } from '../components/BrandMark.jsx';
 import { unlockMaterialRequestCatalog, submitMaterialRequest } from '../hooks/useMaterialRequests.js';
 
@@ -146,12 +146,11 @@ export function MaterialRequestPage() {
     const [notes, setNotes] = useState('');
     const [lines, setLines] = useState(() => [emptyLine()]);
 
-    async function onUnlock(e) {
-        e.preventDefault();
+    async function unlock(value) {
         setBusy(true);
         setErr(null);
         try {
-            const j = await unlockMaterialRequestCatalog(code.trim());
+            const j = await unlockMaterialRequestCatalog(value.trim());
             setOrg(j.org || null);
             setMaterials((j.materials || []).slice().sort((a, b) => a.name.localeCompare(b.name)));
             setStep('form');
@@ -161,6 +160,23 @@ export function MaterialRequestPage() {
             setBusy(false);
         }
     }
+
+    async function onUnlock(e) {
+        e.preventDefault();
+        await unlock(code);
+    }
+
+    // A quick link carries the code: /request?code=XXXXXXXXXX opens the form
+    // straight away, for a QR at a site or a bookmark on a shared desk. The
+    // code is dropped from the address bar once it has been used.
+    const [searchParams, setSearchParams] = useSearchParams();
+    const linkCode = (searchParams.get('code') || '').trim().toUpperCase();
+    useEffect(() => {
+        if (!linkCode || step !== 'code' || busy) return;
+        setCode(linkCode);
+        unlock(linkCode).then(() => setSearchParams({}, { replace: true }));
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [linkCode]);
 
     const updateLine = (key, patch) => setLines((prev) => prev.map((l) => (l.key === key ? { ...l, ...patch } : l)));
     const removeLine = (key) => setLines((prev) => (prev.length <= 1 ? prev : prev.filter((l) => l.key !== key)));

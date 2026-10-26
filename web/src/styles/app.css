@@ -8267,3 +8267,26 @@ a.topbar-brand {
         width: 40px;
     }
 }
+
+/* ---- Requests raised from Stellar Infinity: the Infinity mark on the row and
+   in the panel, as Biosentry and Sense mark everything that came from it. */
+.mreq-src {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    margin-left: var(--sp-2);
+    padding: 0.12rem 0.5rem 0.12rem 0.35rem;
+    border-radius: 999px;
+    border: 1px solid rgb(45 212 191 / 0.45);
+    background: linear-gradient(90deg, rgb(34 211 238 / 0.12), rgb(96 165 250 / 0.10));
+    font: 600 var(--fs-3xs) / 1.2 var(--font-sans);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: rgb(45 212 191);
+    vertical-align: middle;
+    white-space: nowrap;
+}
+.mreq-src-mark { width: 1.35rem; height: 0.45rem; }
+.mreq-src-who { text-transform: none; letter-spacing: 0; color: rgb(var(--nx-ink)); font-family: var(--font-mono); }
+.mreq-src-where { text-transform: none; letter-spacing: 0; color: rgb(var(--nx-ink-2)); }
+.mreq-fact-wide { grid-column: 1 / -1; }

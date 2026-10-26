@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Topbar } from '../components/Topbar.jsx';
+import { InfinitySourceTag } from '../components/InfinityMark.jsx';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { useMaterialRequests } from '../hooks/useMaterialRequests.js';
 
@@ -318,8 +319,15 @@ export function AdminMaterialRequestsPage() {
                                                     </span>
                                                     <button type="button" className="mreq-row-main" onClick={() => open('request', r.id)}>
                                                         <span className="mreq-who">
-                                                            <strong>{r.requester_name}</strong>
-                                                            <span className="muted small">{r.location_text || 'No location given'}</span>
+                                                            <strong>
+                                                                {r.requester_name}
+                                                                {r.source === 'infinity' && <InfinitySourceTag meta={r.source_meta} compact />}
+                                                            </strong>
+                                                            <span className="muted small">
+                                                                {r.location_text || 'No location given'}
+                                                                {r.source === 'infinity' && r.source_meta && (r.source_meta.region || r.source_meta.state)
+                                                                    ? ` · ${r.source_meta.region || r.source_meta.state}` : ''}
+                                                            </span>
                                                         </span>
                                                         <span className="mreq-meta-line">
                                                             {r.line_count} item{r.line_count === 1 ? '' : 's'} · sent {fmtWhen(r.created_at)}
@@ -447,6 +455,12 @@ function RequestPanel({ request, busy, cancelling, onAskCancel, onKeep, onApprov
                 </button>
             </div>
             <dl className="mreq-facts">
+                {request.source === 'infinity' && (
+                    <div className="mreq-fact-wide">
+                        <dt>Raised from</dt>
+                        <dd><InfinitySourceTag meta={request.source_meta} /></dd>
+                    </div>
+                )}
                 <div>
                     <dt>Contact</dt>
                     <dd>{href ? <a href={href}>{request.requester_contact}</a> : request.requester_contact || '—'}</dd>

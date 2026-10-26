@@ -71,6 +71,11 @@ services:
       # box. Clamped to 8 in sql-tracer-source.js.
       TRACER_FANOUT_CONCURRENCY: ${TRACER_FANOUT_CONCURRENCY:-4}
       CORS_ORIGINS: ${CORS_ORIGINS:-https://matter.stellarinfomatica.com}
+      # Stellar Infinity raises material requests here for its signed-in
+      # users (server/infinityPartner.js): the shared key, and which org the
+      # requests belong to. Empty key = bridge off.
+      MATTER_INFINITY_KEY: ${MATTER_INFINITY_KEY:-}
+      MATTER_INFINITY_ORG_ID: ${MATTER_INFINITY_ORG_ID:-org-default}
       TZ: ${TZ:-Asia/Kolkata}
     extra_hosts:
       - "host.docker.internal:host-gateway"

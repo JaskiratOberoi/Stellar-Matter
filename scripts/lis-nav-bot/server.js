@@ -770,6 +770,8 @@ if (auth) {
         if (req.path.startsWith('/api/auth/')) return next();
         if (req.path.startsWith('/api/admin/')) return next(); // adminApi installs its own gates
         if (req.path.startsWith('/api/material-requests/public')) return next();
+        // The Stellar Infinity bridge carries its own key (server/infinityPartner.js).
+        if (req.path.startsWith('/api/material-requests/infinity')) return next();
         return auth.requireAuth(req, res, next);
     });
 }

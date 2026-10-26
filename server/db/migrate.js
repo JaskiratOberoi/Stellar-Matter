@@ -941,6 +941,29 @@ async function migrateMaterialRequests(client) {
         END
         $body$;
     `);
+
+    // Where a request came from. 'portal' is the code-gated public form (every
+    // row before this column existed); 'infinity' is Stellar Infinity raising
+    // it for one of its signed-in users (server/infinityPartner.js).
+    //   source_ref   the Infinity username, so a user sees their own requests
+    //   source_meta  {userId, username, displayName, email, clientCode,
+    //                 clientName, mcc, city, state, businessUnit, region}
+    //   external_id  Infinity's id for the submission; the unique index makes
+    //                a retried submit land on the same request
+    await client.query(
+        `ALTER TABLE material_requests ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'portal'`
+    );
+    await client.query(`ALTER TABLE material_requests ADD COLUMN IF NOT EXISTS source_ref TEXT`);
+    await client.query(`ALTER TABLE material_requests ADD COLUMN IF NOT EXISTS source_meta JSONB`);
+    await client.query(`ALTER TABLE material_requests ADD COLUMN IF NOT EXISTS external_id TEXT`);
+    await client.query(
+        `CREATE UNIQUE INDEX IF NOT EXISTS material_requests_external_idx
+         ON material_requests (org_id, external_id) WHERE external_id IS NOT NULL;`
+    );
+    await client.query(
+        `CREATE INDEX IF NOT EXISTS material_requests_source_idx
+         ON material_requests (org_id, source, source_ref, created_at DESC);`
+    );
 }
 
 async function seedSuperAdmin(client) {

@@ -22,10 +22,11 @@
 //   POST /batches/:id/send
 
 const express = require('express');
-const { useDatabase } = require('../db/pool');
+const { useDatabase, getPool } = require('../db/pool');
 const { requireAuth, requireRole } = require('../auth');
-const { adminWriteLimiter, materialRequestPublicLimiter } = require('../rateLimit');
+const { adminWriteLimiter, materialRequestPublicLimiter, infinityLimiter } = require('../rateLimit');
 const { logAudit } = require('../audit');
+const { requireInfinityKey } = require('../infinityPartner');
 const mr = require('../db/materialRequests');
 
 const router = express.Router();
@@ -176,6 +177,155 @@ router.post('/public/submit', materialRequestPublicLimiter, async (req, res) => 
                 metadata: { reason: 'invalid_code' }
             });
         }
+        sendError(res, err);
+    }
+});
+
+// -- Stellar Infinity (keyed partner surface) ------------------------------
+//
+// Infinity's API calls these for its signed-in users; the user never holds
+// the key. The request is filed under the Infinity org with source='infinity'
+// and who raised it (name, username, centre, region) in source_meta, so the
+// review page can show the Infinity mark and the requester's region. A
+// retried submit with the same external_id returns the request already filed.
+
+router.use('/infinity', infinityLimiter, requireInfinityKey);
+
+function infinityRequester(raw) {
+    const r = raw && typeof raw === 'object' ? raw : {};
+    const username = trimStr(r.username).slice(0, 80);
+    if (!username) return null;
+    return {
+        userId: Number.isFinite(Number(r.userId)) ? Number(r.userId) : null,
+        username,
+        displayName: trimStr(r.displayName).slice(0, MAX_TEXT) || null,
+        email: trimStr(r.email).slice(0, MAX_TEXT) || null,
+        clientCode: trimStr(r.clientCode).slice(0, 40) || null,
+        clientName: trimStr(r.clientName).slice(0, MAX_TEXT) || null,
+        mcc: Number.isFinite(Number(r.mcc)) ? Number(r.mcc) : null,
+        city: trimStr(r.city).slice(0, 80) || null,
+        state: trimStr(r.state).slice(0, 80) || null,
+        businessUnit: trimStr(r.businessUnit).slice(0, 80) || null,
+        region: trimStr(r.region).slice(0, 120) || null,
+        role: trimStr(r.role).slice(0, 40) || null
+    };
+}
+
+/** The username as the row keys it: case-insensitive, the LIS is. */
+function sourceRefOf(requester) {
+    return requester.username.toLowerCase();
+}
+
+router.get('/infinity/catalogue', async (req, res) => {
+    if (!dbGuard(res)) return;
+    try {
+        const orgId = req.infinity.orgId;
+        const org = await getPool().query(`SELECT id, name, slug FROM organizations WHERE id = $1 AND active = true`, [orgId]);
+        if (!org.rows.length) return res.status(503).json({ error: 'The Infinity org is not active on this server.' });
+        const materials = await mr.listPublicCatalog(orgId);
+        res.json({ org: org.rows[0], materials });
+    } catch (err) {
+        sendError(res, err);
+    }
+});
+
+router.post('/infinity/submit', async (req, res) => {
+    if (!dbGuard(res)) return;
+    try {
+        const orgId = req.infinity.orgId;
+        const body = req.body || {};
+        const requester = infinityRequester(body.requester);
+        if (!requester) return res.status(400).json({ error: 'requester.username is required' });
+
+        const externalId = trimStr(body.external_id).slice(0, 80) || null;
+        if (externalId) {
+            const existing = await mr.findByExternalId(orgId, externalId);
+            if (existing) return res.status(200).json({ request: existing, duplicate: true });
+        }
+
+        const requesterName = (trimStr(body.requester_name) || requester.displayName || requester.username).slice(0, MAX_TEXT);
+        const requesterContact = (trimStr(body.requester_contact) || requester.email || `${requester.username} (Infinity)`).slice(0, MAX_TEXT);
+        const neededBy = parseNeededBy(body.needed_by);
+        if (neededBy === false) return res.status(400).json({ error: 'needed_by must be YYYY-MM-DD' });
+
+        const defaultLocation = [requester.clientCode, requester.clientName].filter(Boolean).join(' · ')
+            || requester.businessUnit || null;
+        const lines = sanitizePublicLines(body.lines);
+        const request = await mr.createRequest(orgId, {
+            requesterName,
+            requesterContact,
+            locationText: trimStr(body.location_text).slice(0, MAX_TEXT) || defaultLocation,
+            neededBy,
+            notes: trimStr(body.notes).slice(0, MAX_NOTES) || null,
+            lines,
+            source: 'infinity',
+            sourceRef: sourceRefOf(requester),
+            sourceMeta: requester,
+            externalId
+        });
+
+        await logAudit(req, {
+            action: 'material_request.submit',
+            outcome: 'success',
+            targetType: 'material_request',
+            targetId: request.id,
+            after: {
+                org_id: orgId,
+                source: 'infinity',
+                requester_name: requesterName,
+                infinity_user: requester.username,
+                client_code: requester.clientCode,
+                region: requester.region,
+                line_count: request.lines.length
+            }
+        });
+        res.status(201).json({ request });
+    } catch (err) {
+        sendError(res, err);
+    }
+});
+
+router.get('/infinity/requests', async (req, res) => {
+    if (!dbGuard(res)) return;
+    try {
+        const requester = trimStr(req.query.requester).toLowerCase();
+        if (!requester) return res.status(400).json({ error: 'requester is required' });
+        const rows = await mr.listRequests(req.infinity.orgId, {
+            source: 'infinity',
+            sourceRef: requester,
+            limit: Number(req.query.limit) || 50,
+            withLines: true
+        });
+        res.json({ requests: rows });
+    } catch (err) {
+        sendError(res, err);
+    }
+});
+
+router.post('/infinity/requests/:id/cancel', async (req, res) => {
+    if (!dbGuard(res)) return;
+    try {
+        const orgId = req.infinity.orgId;
+        const body = req.body || {};
+        const requester = infinityRequester(body.requester);
+        if (!requester) return res.status(400).json({ error: 'requester.username is required' });
+        const existing = await mr.getRequest(orgId, req.params.id);
+        // Only the person who raised it, and only one raised from Infinity.
+        if (!existing || existing.source !== 'infinity' || existing.source_ref !== sourceRefOf(requester)) {
+            return res.status(404).json({ error: 'Request not found' });
+        }
+        const request = await mr.cancelRequest(orgId, req.params.id,
+            { username: requester.username, displayName: `${requester.displayName || requester.username} (Infinity)` },
+            trimStr(body.reason).slice(0, MAX_TEXT) || 'Cancelled by the requester on Infinity');
+        await logAudit(req, {
+            action: 'material_request.cancel',
+            outcome: 'success',
+            targetType: 'material_request',
+            targetId: request.id,
+            metadata: { source: 'infinity', infinity_user: requester.username }
+        });
+        res.json({ request });
+    } catch (err) {
         sendError(res, err);
     }
 });
