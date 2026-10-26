@@ -8290,3 +8290,20 @@ a.topbar-brand {
 .mreq-src-who { text-transform: none; letter-spacing: 0; color: rgb(var(--nx-ink)); font-family: var(--font-mono); }
 .mreq-src-where { text-transform: none; letter-spacing: 0; color: rgb(var(--nx-ink-2)); }
 .mreq-fact-wide { grid-column: 1 / -1; }
+
+/* ---- Usage check: a request's lines against the site's last month. ---- */
+.mreq-usage-head { display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-3); align-items: center; margin: var(--sp-3) 0 var(--sp-2); font-size: var(--fs-xs); color: rgb(var(--nx-ink-2)); }
+.mreq-usage-head b { color: rgb(var(--nx-ink)); }
+.mreq-items th.mreq-th-used, .mreq-items td.mreq-td-used { text-align: right; white-space: nowrap; }
+.mreq-used { font-size: var(--fs-xs); color: rgb(var(--nx-ink-2)); }
+.mreq-used-src { font: 500 var(--fs-3xs) / 1 var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; color: rgb(var(--nx-ink-3)); margin-left: 0.3rem; }
+.mreq-over {
+    display: inline-block; margin-left: 0.4rem; padding: 0.1rem 0.45rem; border-radius: 999px;
+    font: 600 var(--fs-3xs) / 1.3 var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase;
+    color: rgb(var(--nx-signal-warning)); border: 1px solid rgb(var(--nx-signal-warning) / 0.45);
+    background: rgb(var(--nx-signal-warning) / 0.1); white-space: nowrap;
+}
+.mreq-over--row { margin-left: 0.35rem; vertical-align: middle; }
+.mreq-trim { margin-left: 0.4rem; }
+.mreq-was { text-decoration: line-through; color: rgb(var(--nx-ink-3)); margin-right: 0.3rem; }
+.mreq-usage-note { font-size: var(--fs-xs); color: rgb(var(--nx-ink-3)); margin: var(--sp-2) 0 0; }

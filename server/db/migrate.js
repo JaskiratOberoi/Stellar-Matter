@@ -964,6 +964,21 @@ async function migrateMaterialRequests(client) {
         `CREATE INDEX IF NOT EXISTS material_requests_source_idx
          ON material_requests (org_id, source, source_ref, created_at DESC);`
     );
+
+    // The site the request is for (server/db/requestUsage.js): picked on the
+    // form, or resolved from an Infinity user's centre / unit. Its last
+    // month's dispatches and Tracer figures are what the lines are read
+    // against. location_text stays as the free text the person typed.
+    await client.query(
+        `ALTER TABLE material_requests ADD COLUMN IF NOT EXISTS location_id TEXT
+         REFERENCES inventory_locations(id) ON DELETE SET NULL`
+    );
+    await client.query(
+        `CREATE INDEX IF NOT EXISTS material_requests_location_idx
+         ON material_requests (org_id, location_id) WHERE location_id IS NOT NULL;`
+    );
+    // A line trimmed by the reviewer keeps what was asked for.
+    await client.query(`ALTER TABLE material_request_lines ADD COLUMN IF NOT EXISTS requested_quantity NUMERIC`);
 }
 
 async function seedSuperAdmin(client) {

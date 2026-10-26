@@ -90,6 +90,9 @@ function mapRequestRow(row, lines = []) {
         source_ref: row.source_ref || null,
         source_meta: row.source_meta || null,
         external_id: row.external_id || null,
+        // The delivery site the request is read against (requestUsage.js).
+        location_id: row.location_id || null,
+        location_name: row.location_name || null,
         line_count: row.line_count != null ? Number(row.line_count) : lines.length,
         lines
     };
@@ -103,6 +106,8 @@ function mapLineRow(row) {
         material_name: row.material_name,
         is_custom: !!row.is_custom,
         quantity: Number(row.quantity),
+        // What was asked for before a reviewer trimmed it; null when untouched.
+        requested_quantity: row.requested_quantity != null ? Number(row.requested_quantity) : null,
         unit: row.unit,
         position: row.position
     };
@@ -211,7 +216,7 @@ async function listPublicCatalog(orgId) {
 async function loadLines(client, requestId) {
     const r = await client.query(
         `SELECT id, request_id, material_id, material_name, is_custom,
-                quantity, unit, position
+                quantity, requested_quantity, unit, position
          FROM material_request_lines
          WHERE request_id = $1
          ORDER BY position, id`,
@@ -223,12 +228,14 @@ async function loadLines(client, requestId) {
 async function getRequest(orgId, id, { client = null } = {}) {
     const db = client || getPool();
     const r = await db.query(
-        `SELECT id, org_id, status, requester_name, requester_contact,
-                location_text, needed_by, notes, created_at,
-                approved_at, approved_by, cancelled_at, cancelled_by,
-                cancel_reason, batch_id, source, source_ref, source_meta, external_id
-         FROM material_requests
-         WHERE org_id = $1 AND id = $2`,
+        `SELECT r.id, r.org_id, r.status, r.requester_name, r.requester_contact,
+                r.location_text, r.needed_by, r.notes, r.created_at,
+                r.approved_at, r.approved_by, r.cancelled_at, r.cancelled_by,
+                r.cancel_reason, r.batch_id, r.source, r.source_ref, r.source_meta, r.external_id,
+                r.location_id, loc.name AS location_name
+         FROM material_requests r
+         LEFT JOIN inventory_locations loc ON loc.id = r.location_id
+         WHERE r.org_id = $1 AND r.id = $2`,
         [orgId, id]
     );
     if (!r.rows.length) return null;
@@ -281,7 +288,8 @@ async function createRequest(orgId, fields) {
                     materialName: mat.rows[0].name,
                     isCustom: false,
                     quantity: qty,
-                    unit: unit || mat.rows[0].base_unit || 'unit',
+                    // A catalogue line with no unit given is in the catalogue's own.
+                    unit: (String(line.unit || '').trim() || mat.rows[0].base_unit || 'unit'),
                     position: i
                 });
             } else if (customName) {
@@ -301,8 +309,8 @@ async function createRequest(orgId, fields) {
         await client.query(
             `INSERT INTO material_requests
                 (id, org_id, status, requester_name, requester_contact,
-                 location_text, needed_by, notes, source, source_ref, source_meta, external_id)
-             VALUES ($1, $2, 'submitted', $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+                 location_text, needed_by, notes, source, source_ref, source_meta, external_id, location_id)
+             VALUES ($1, $2, 'submitted', $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
             [
                 id,
                 orgId,
@@ -314,7 +322,8 @@ async function createRequest(orgId, fields) {
                 fields.source === 'infinity' ? 'infinity' : 'portal',
                 fields.sourceRef || null,
                 fields.sourceMeta ? JSON.stringify(fields.sourceMeta) : null,
-                fields.externalId || null
+                fields.externalId || null,
+                fields.locationId || null
             ]
         );
 
@@ -376,8 +385,10 @@ async function listRequests(orgId, { status = null, source = null, sourceRef = n
                 r.location_text, r.needed_by, r.notes, r.created_at,
                 r.approved_at, r.approved_by, r.cancelled_at, r.cancelled_by,
                 r.cancel_reason, r.batch_id, r.source, r.source_ref, r.source_meta, r.external_id,
+                r.location_id, loc.name AS location_name,
                 (SELECT COUNT(*)::int FROM material_request_lines l WHERE l.request_id = r.id) AS line_count
          FROM material_requests r
+         LEFT JOIN inventory_locations loc ON loc.id = r.location_id
          WHERE r.org_id = $1 ${clauses.join(' ')}
          ORDER BY r.created_at DESC
          ${limitClause}`,
@@ -389,6 +400,46 @@ async function listRequests(orgId, { status = null, source = null, sourceRef = n
         out.push(mapRequestRow(row, await loadLines(pool, row.id)));
     }
     return out;
+}
+
+/**
+ * A reviewer trims (or corrects) one line before approval. The first change
+ * keeps what was asked for in requested_quantity; the request must still be
+ * open (submitted or approved).
+ */
+async function updateLineQuantity(orgId, requestId, lineId, quantity) {
+    const qty = Number(quantity);
+    if (!Number.isFinite(qty) || qty <= 0) throw httpError('quantity must be a number > 0', 400);
+    const pool = getPool();
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        const locked = await client.query(
+            `SELECT status FROM material_requests WHERE org_id = $1 AND id = $2 FOR UPDATE`,
+            [orgId, requestId]
+        );
+        if (!locked.rows.length) throw httpError('Request not found', 404);
+        const status = locked.rows[0].status;
+        if (status !== 'submitted' && status !== 'approved') {
+            throw httpError(`A ${status} request cannot be changed`, 409);
+        }
+        const r = await client.query(
+            `UPDATE material_request_lines
+             SET requested_quantity = COALESCE(requested_quantity, quantity),
+                 quantity = $3
+             WHERE request_id = $2 AND id = $1
+             RETURNING id`,
+            [Number(lineId), requestId, qty]
+        );
+        if (!r.rows.length) throw httpError('Line not found', 404);
+        await client.query('COMMIT');
+    } catch (err) {
+        try { await client.query('ROLLBACK'); } catch { /* ignore */ }
+        throw err;
+    } finally {
+        client.release();
+    }
+    return getRequest(orgId, requestId);
 }
 
 async function approveRequest(orgId, id, actor) {
@@ -731,6 +782,7 @@ module.exports = {
     findByExternalId,
     listRequests,
     getRequest,
+    updateLineQuantity,
     approveRequest,
     cancelRequest,
     listBatches,

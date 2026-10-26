@@ -104,6 +104,33 @@ export function AdminMaterialRequestsPage() {
     const [batchNote, setBatchNote] = useState('');
     const [cancelling, setCancelling] = useState(null); // { kind, id }
     const panelRef = useRef(null);
+    // Last month's usage: per-request flags for the list, the full breakdown
+    // for the open request (server/db/requestUsage.js).
+    const [flags, setFlags] = useState({});
+    const [usage, setUsage] = useState(null);
+    const [usageBusy, setUsageBusy] = useState(false);
+    useEffect(() => {
+        let live = true;
+        mr.getUsageFlags().then((j) => { if (live) setFlags(j.flags || {}); }).catch(() => {});
+        return () => { live = false; };
+    }, [requests]);
+    const detailKey = detailKind === 'request' && detail
+        ? `${detail.id}|${detail.status}|${(detail.lines || []).map((l) => `${l.id}:${l.quantity}`).join(',')}`
+        : '';
+    useEffect(() => {
+        if (!detailKey || (detail.status !== 'submitted' && detail.status !== 'approved')) { setUsage(null); return undefined; }
+        let live = true;
+        setUsageBusy(true);
+        mr.getUsage(detail.id)
+            .then((u) => { if (live) setUsage(u); })
+            .catch(() => { if (live) setUsage(null); })
+            .finally(() => { if (live) setUsageBusy(false); });
+        return () => { live = false; };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [detailKey]);
+    async function trimLine(lineId, qty) {
+        await run(async () => { await mr.setLineQuantity(detail.id, lineId, qty, 'Trimmed to last month\u2019s usage'); }, 'Line trimmed to last month\u2019s usage.');
+    }
 
     const counts = useMemo(() => {
         const c = { all: requests.length };
@@ -331,6 +358,9 @@ export function AdminMaterialRequestsPage() {
                                                             </span>
                                                         </span>
                                                         <span className="mreq-meta-line">
+                                                            {flags[r.id] && flags[r.id].over_lines > 0 && (
+                                                                <span className="mreq-over mreq-over--row" title="Asks for more than the site used last month">{flags[r.id].over_lines} over usage</span>
+                                                            )}
                                                             {r.line_count} item{r.line_count === 1 ? '' : 's'} · sent {fmtWhen(r.created_at)}
                                                             {r.needed_by ? ` · needed ${fmtDay(r.needed_by)}` : ''}
                                                             {due && <span className={`mreq-due is-${due.tone}`}> · {due.text}</span>}
@@ -398,6 +428,9 @@ export function AdminMaterialRequestsPage() {
                         <aside className="mreq-panel nexus-card" ref={panelRef} aria-label="Details">
                             {detailKind === 'request' ? (
                                 <RequestPanel
+                                usage={usage}
+                                usageBusy={usageBusy}
+                                onTrim={trimLine}
                                     request={detail}
                                     busy={busy}
                                     cancelling={cancelling && cancelling.kind === 'request' && cancelling.id === detail.id}
@@ -440,7 +473,11 @@ export function AdminMaterialRequestsPage() {
     );
 }
 
-function RequestPanel({ request, busy, cancelling, onAskCancel, onKeep, onApprove, onCancel, onClose }) {
+function RequestPanel({ request, usage, usageBusy, onTrim, busy, cancelling, onAskCancel, onKeep, onApprove, onCancel, onClose }) {
+    const usageByLine = {};
+    for (const l of (usage && usage.lines) || []) usageByLine[l.line_id] = l;
+    const open0 = request.status === 'submitted' || request.status === 'approved';
+    const REASON = { custom_item: 'not in catalog', unit_unreadable: 'unit not comparable', no_history: 'no history', no_site: 'no site', centre_no_history: 'no figures for this centre' };
     const href = contactHref(request.requester_contact);
     const open = request.status === 'submitted' || request.status === 'approved';
     return (
@@ -467,8 +504,13 @@ function RequestPanel({ request, busy, cancelling, onAskCancel, onKeep, onApprov
                     <dd>{href ? <a href={href}>{request.requester_contact}</a> : request.requester_contact || '—'}</dd>
                 </div>
                 <div>
-                    <dt>Location</dt>
-                    <dd>{request.location_text || '—'}</dd>
+                    <dt>Site</dt>
+                    <dd>
+                        {request.location_name || request.location_text || '—'}
+                        {request.location_name && request.location_text && request.location_text !== request.location_name ? (
+                            <span className="muted small"> · {request.location_text}</span>
+                        ) : null}
+                    </dd>
                 </div>
                 <div>
                     <dt>Needed by</dt>
@@ -486,27 +528,77 @@ function RequestPanel({ request, busy, cancelling, onAskCancel, onKeep, onApprov
                 )}
             </dl>
             {request.notes && <p className="mreq-notes">{request.notes}</p>}
+            {open0 && (
+                <div className="mreq-usage-head">
+                    {usageBusy && !usage ? <span className="muted">Reading last month\u2019s usage…</span> : null}
+                    {usage && usage.site ? (
+                        <>
+                            <span><b>{usage.month.label}</b> at <b>{usage.site.name}</b></span>
+                            <span>{usage.tracer ? `Tracer run for ${usage.tracer.bu}${usage.tracer.scope === 'centre' ? ` · centre ${usage.tracer.centre}` : ''}` : usage.centre_without_history ? `No Tracer figures for centre ${usage.centre_code} last month` : 'No Tracer run covers the month; dispatches only'}</span>
+                            {usage.over_lines > 0
+                                ? <span className="mreq-over">{usage.over_lines} line{usage.over_lines === 1 ? '' : 's'} over usage</span>
+                                : <span className="muted">Nothing above last month\u2019s usage</span>}
+                        </>
+                    ) : usage && !usage.site ? (
+                        <span className="muted">No site on this request, so last month\u2019s usage cannot be read.</span>
+                    ) : null}
+                </div>
+            )}
             <table className="mreq-items">
                 <thead>
                     <tr>
                         <th>Item</th>
                         <th className="num">Quantity</th>
+                        {usage && usage.site ? <th className="mreq-th-used">Used last month</th> : null}
                     </tr>
                 </thead>
                 <tbody>
-                    {(request.lines || []).map((line) => (
-                        <tr key={line.id}>
-                            <td>
-                                {line.material_name}
-                                {line.is_custom ? <span className="mreq-custom">not in catalog</span> : null}
-                            </td>
-                            <td className="num">
-                                {Number(line.quantity).toLocaleString()} <span className="muted small">{line.unit}</span>
-                            </td>
-                        </tr>
-                    ))}
+                    {(request.lines || []).map((line) => {
+                        const u = usageByLine[line.id];
+                        const over = Boolean(u && u.comparable && u.over_by > 0);
+                        return (
+                            <tr key={line.id}>
+                                <td>
+                                    {line.material_name}
+                                    {line.is_custom ? <span className="mreq-custom">not in catalog</span> : null}
+                                    {over ? <span className="mreq-over">over by {Number(u.over_by).toLocaleString()} {u.base_unit}</span> : null}
+                                </td>
+                                <td className="num">
+                                    {line.requested_quantity != null && line.requested_quantity !== line.quantity ? (
+                                        <span className="mreq-was" title="What was asked for">{Number(line.requested_quantity).toLocaleString()}</span>
+                                    ) : null}
+                                    {Number(line.quantity).toLocaleString()} <span className="muted small">{line.unit}</span>
+                                </td>
+                                {usage && usage.site ? (
+                                    <td className="mreq-td-used">
+                                        {u && u.comparable ? (
+                                            <>
+                                                <span className="mreq-used">
+                                                    {Number(u.baseline).toLocaleString()} {u.base_unit}
+                                                    <span className="mreq-used-src">{u.baseline_source === 'tracer' ? 'tracer' : 'sent'}</span>
+                                                </span>
+                                                {u.baseline_source === 'tracer' && u.dispatched_last_month != null ? (
+                                                    <div className="muted small">sent {Number(u.dispatched_last_month).toLocaleString()}</div>
+                                                ) : null}
+                                                {over && open0 && u.suggested_quantity > 0 ? (
+                                                    <button type="button" className="chip chip-tool mreq-trim" disabled={busy} onClick={() => onTrim(line.id, u.suggested_quantity)}>
+                                                        Trim to {Number(u.suggested_quantity).toLocaleString()} {line.unit}
+                                                    </button>
+                                                ) : null}
+                                            </>
+                                        ) : (
+                                            <span className="muted small">{u ? REASON[u.reason] || '—' : '—'}</span>
+                                        )}
+                                    </td>
+                                ) : null}
+                            </tr>
+                        );
+                    })}
                 </tbody>
             </table>
+            {usage && usage.site && usage.over_lines > 0 ? (
+                <p className="mreq-usage-note">Last month\u2019s figure is the Tracer\u2019s count for the site where a run covers the month (letterhead pages, envelopes, samples per tube), else what was dispatched to it. Trim sets the line to that figure; the quantity asked for stays on record.</p>
+            ) : null}
             {open &&
                 (cancelling ? (
                     <CancelAsk what="request" busy={busy} onConfirm={onCancel} onKeep={onKeep} />

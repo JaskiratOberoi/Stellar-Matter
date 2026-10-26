@@ -105,6 +105,27 @@ export function useMaterialRequests({ status = null, autoLoad = true } = {}) {
         return j.request;
     }, []);
 
+    /** Last month's usage at the request's site, line by line. */
+    const getUsage = useCallback(async (id) => {
+        const j = await request(`/api/material-requests/${id}/usage`);
+        return j.usage;
+    }, []);
+
+    /** Over-usage flags for every open request, keyed by request id. */
+    const getUsageFlags = useCallback(async () => {
+        const j = await request('/api/material-requests/usage-flags');
+        return j;
+    }, []);
+
+    /** Trim or correct one line; the request comes back with the new quantity. */
+    const setLineQuantity = useCallback(async (id, lineId, quantity, reason) => {
+        const j = await request(`/api/material-requests/${id}/lines/${lineId}/quantity`, {
+            method: 'POST',
+            body: JSON.stringify({ quantity, reason: reason || null })
+        });
+        return j.request;
+    }, []);
+
     const combine = useCallback(
         async (requestIds, note) => {
             const j = await request('/api/material-requests/batches', {
@@ -168,6 +189,9 @@ export function useMaterialRequests({ status = null, autoLoad = true } = {}) {
         approve,
         cancelRequest,
         getRequest,
+        getUsage,
+        getUsageFlags,
+        setLineQuantity,
         combine,
         getBatch,
         submitBatch,

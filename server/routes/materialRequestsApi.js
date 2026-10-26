@@ -28,6 +28,20 @@ const { adminWriteLimiter, materialRequestPublicLimiter, infinityLimiter } = req
 const { logAudit } = require('../audit');
 const { requireInfinityKey } = require('../infinityPartner');
 const mr = require('../db/materialRequests');
+const usage = require('../db/requestUsage');
+
+/** The site a form picked, when it is one of the org's active delivery sites. */
+async function siteFromBody(orgId, raw) {
+    const id = trimStr(raw);
+    if (!id) return null;
+    const site = await usage.getSite(orgId, id);
+    if (!site) {
+        const err = new Error('location_id is not one of this organisation\'s delivery sites');
+        err.status = 400;
+        throw err;
+    }
+    return site;
+}
 
 const router = express.Router();
 
@@ -107,6 +121,7 @@ router.post('/public/unlock', materialRequestPublicLimiter, async (req, res) => 
         const code = mr.normalizeCode(req.body && req.body.code);
         const org = await mr.resolveOrgByRequestCode(code);
         const materials = await mr.listPublicCatalog(org.id);
+        const sites = await usage.listSites(org.id);
         await logAudit(req, {
             action: 'material_request.public.unlock',
             outcome: 'success',
@@ -116,7 +131,8 @@ router.post('/public/unlock', materialRequestPublicLimiter, async (req, res) => 
         });
         res.json({
             org: { id: org.id, name: org.name, slug: org.slug },
-            materials
+            materials,
+            sites
         });
     } catch (err) {
         if (err && err.status === 401) {
@@ -148,10 +164,12 @@ router.post('/public/submit', materialRequestPublicLimiter, async (req, res) => 
         }
 
         const lines = sanitizePublicLines(body.lines);
+        const site = await siteFromBody(org.id, body.location_id);
         const request = await mr.createRequest(org.id, {
             requesterName,
             requesterContact,
-            locationText: trimStr(body.location_text).slice(0, MAX_TEXT) || null,
+            locationText: trimStr(body.location_text).slice(0, MAX_TEXT) || (site ? site.name : null),
+            locationId: site ? site.id : null,
             neededBy,
             notes: trimStr(body.notes).slice(0, MAX_NOTES) || null,
             lines
@@ -223,7 +241,8 @@ router.get('/infinity/catalogue', async (req, res) => {
         const org = await getPool().query(`SELECT id, name, slug FROM organizations WHERE id = $1 AND active = true`, [orgId]);
         if (!org.rows.length) return res.status(503).json({ error: 'The Infinity org is not active on this server.' });
         const materials = await mr.listPublicCatalog(orgId);
-        res.json({ org: org.rows[0], materials });
+        const sites = await usage.listSites(orgId);
+        res.json({ org: org.rows[0], materials, sites });
     } catch (err) {
         sendError(res, err);
     }
@@ -251,10 +270,14 @@ router.post('/infinity/submit', async (req, res) => {
         const defaultLocation = [requester.clientCode, requester.clientName].filter(Boolean).join(' · ')
             || requester.businessUnit || null;
         const lines = sanitizePublicLines(body.lines);
+        // The site: the one picked on Infinity's form, else the user's own
+        // centre / unit as Matter knows it.
+        const site = (await siteFromBody(orgId, body.location_id)) || (await usage.resolveSiteForRequester(orgId, requester));
         const request = await mr.createRequest(orgId, {
             requesterName,
             requesterContact,
-            locationText: trimStr(body.location_text).slice(0, MAX_TEXT) || defaultLocation,
+            locationText: trimStr(body.location_text).slice(0, MAX_TEXT) || defaultLocation || (site ? site.name : null),
+            locationId: site ? site.id : null,
             neededBy,
             notes: trimStr(body.notes).slice(0, MAX_NOTES) || null,
             lines,
@@ -457,11 +480,69 @@ router.get('/', requireReviewer, async (req, res) => {
     }
 });
 
+// Last month's usage at each open request's site, in one call, so the list
+// can flag the ones asking for more than was used (server/db/requestUsage.js).
+router.get('/usage-flags', requireReviewer, async (req, res) => {
+    if (!dbGuard(res)) return;
+    try {
+        const orgId = orgOf(req);
+        const open = (await mr.listRequests(orgId, { withLines: true }))
+            .filter((r) => (r.status === 'submitted' || r.status === 'approved') && r.location_id);
+        const flags = {};
+        for (const r of open) {
+            const u = await usage.usageForRequest(orgId, r);
+            flags[r.id] = { over_lines: u.over_lines, site: u.site ? u.site.name : null, tracer: Boolean(u.tracer) };
+        }
+        res.json({ month: usage.previousMonth().key, flags });
+    } catch (err) {
+        sendError(res, err);
+    }
+});
+
 router.get('/:id', requireReviewer, async (req, res) => {
     if (!dbGuard(res)) return;
     try {
         const request = await mr.getRequest(orgOf(req), req.params.id);
         if (!request) return res.status(404).json({ error: 'Request not found' });
+        res.json({ request });
+    } catch (err) {
+        sendError(res, err);
+    }
+});
+
+// One request's lines against its site's last month: dispatched and Tracer
+// figures, the baseline, and what each line is over by.
+router.get('/:id/usage', requireReviewer, async (req, res) => {
+    if (!dbGuard(res)) return;
+    try {
+        const request = await mr.getRequest(orgOf(req), req.params.id);
+        if (!request) return res.status(404).json({ error: 'Request not found' });
+        res.json({ usage: await usage.usageForRequest(orgOf(req), request) });
+    } catch (err) {
+        sendError(res, err);
+    }
+});
+
+// A reviewer trims (or corrects) one line before approving; what was asked
+// for is kept on the line.
+router.post('/:id/lines/:lineId/quantity', requireReviewer, adminWriteLimiter, async (req, res) => {
+    if (!dbGuard(res)) return;
+    try {
+        const orgId = orgOf(req);
+        const before = await mr.getRequest(orgId, req.params.id);
+        if (!before) return res.status(404).json({ error: 'Request not found' });
+        const lineBefore = (before.lines || []).find((l) => String(l.id) === String(req.params.lineId));
+        if (!lineBefore) return res.status(404).json({ error: 'Line not found' });
+        const quantity = Number(req.body && req.body.quantity);
+        const request = await mr.updateLineQuantity(orgId, req.params.id, req.params.lineId, quantity);
+        await logAudit(req, {
+            action: 'material_request.line_trim',
+            outcome: 'success',
+            targetType: 'material_request',
+            targetId: request.id,
+            before: { line_id: lineBefore.id, material_name: lineBefore.material_name, quantity: lineBefore.quantity, unit: lineBefore.unit },
+            after: { quantity, reason: trimStr(req.body && req.body.reason).slice(0, MAX_TEXT) || null }
+        });
         res.json({ request });
     } catch (err) {
         sendError(res, err);

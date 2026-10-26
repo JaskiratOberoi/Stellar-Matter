@@ -5,6 +5,8 @@ import { unlockMaterialRequestCatalog, submitMaterialRequest } from '../hooks/us
 
 // Who is asking, kept on this device so a repeat requester doesn't retype it.
 const LS_REQUESTER = 'stellar-matter.request.requester';
+// The site picker's "somewhere else" choice: keep the free-text box.
+const OTHER_SITE = '__other__';
 
 function readRequester() {
     try {
@@ -146,6 +148,10 @@ export function MaterialRequestPage() {
     const [code, setCode] = useState('');
     const [org, setOrg] = useState(null);
     const [materials, setMaterials] = useState([]);
+    // The org's delivery sites: picking one lets the reviewer read the request
+    // against what that site used last month. "Somewhere else" keeps free text.
+    const [sites, setSites] = useState([]);
+    const [siteId, setSiteId] = useState(remembered.siteId || '');
     const [busy, setBusy] = useState(false);
     const [err, setErr] = useState(null);
     const [sent, setSent] = useState(null);
@@ -164,6 +170,7 @@ export function MaterialRequestPage() {
             const j = await unlockMaterialRequestCatalog(value.trim());
             setOrg(j.org || null);
             setMaterials((j.materials || []).slice().sort((a, b) => a.name.localeCompare(b.name)));
+            setSites(Array.isArray(j.sites) ? j.sites : []);
             setStep('form');
         } catch (e2) {
             setErr(String(e2.message || e2));
@@ -213,7 +220,8 @@ export function MaterialRequestPage() {
                 code: code.trim(),
                 requester_name: requesterName.trim(),
                 requester_contact: requesterContact.trim(),
-                location_text: locationText.trim() || null,
+                location_text: siteId && siteId !== OTHER_SITE ? null : (locationText.trim() || null),
+                location_id: siteId && siteId !== OTHER_SITE ? siteId : null,
                 needed_by: neededBy || null,
                 notes: notes.trim() || null,
                 lines: payloadLines
@@ -221,7 +229,7 @@ export function MaterialRequestPage() {
             try {
                 localStorage.setItem(
                     LS_REQUESTER,
-                    JSON.stringify({ name: requesterName.trim(), contact: requesterContact.trim(), location: locationText.trim() })
+                    JSON.stringify({ name: requesterName.trim(), contact: requesterContact.trim(), location: locationText.trim(), siteId: siteId || '' })
                 );
             } catch {
                 /* storage blocked: nothing remembered */
@@ -365,11 +373,26 @@ export function MaterialRequestPage() {
                             </label>
                             <label>
                                 Site or lab
-                                <input
-                                    value={locationText}
-                                    onChange={(e) => setLocationText(e.target.value)}
-                                    placeholder="e.g. Karnal collection centre"
-                                />
+                                {sites.length > 0 ? (
+                                    <select
+                                        value={siteId}
+                                        onChange={(e) => setSiteId(e.target.value)}
+                                        aria-label="Site or lab"
+                                    >
+                                        <option value="">Choose your site…</option>
+                                        {sites.map((s) => (
+                                            <option key={s.id} value={s.id}>{s.name}{s.kind === 'lab' ? ' · lab' : ''}</option>
+                                        ))}
+                                        <option value={OTHER_SITE}>Somewhere else (type it)</option>
+                                    </select>
+                                ) : null}
+                                {(sites.length === 0 || siteId === OTHER_SITE) && (
+                                    <input
+                                        value={locationText}
+                                        onChange={(e) => setLocationText(e.target.value)}
+                                        placeholder="e.g. Karnal collection centre"
+                                    />
+                                )}
                             </label>
                             <label>
                                 Needed by
