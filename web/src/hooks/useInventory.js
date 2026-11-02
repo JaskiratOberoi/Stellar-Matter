@@ -229,15 +229,23 @@ export function useInventory() {
             request('/api/inventory/challans', { method: 'POST', body: JSON.stringify({ movement_id: movementId, details }) }),
         []
     );
-    // Downloads the server-rendered PDF (kind 'challan' or 'slip').
-    const downloadChallanPdf = useCallback(async (number, kind) => {
+    // Downloads the server-rendered PDF (kind 'challan' or 'slip') as
+    // "Karnal-Challan-16.pdf": named after the site it went to, with the
+    // running number to keep repeats apart. Mirrors challanFileName in
+    // server/routes/inventoryApi.js.
+    const downloadChallanPdf = useCallback(async (challan, kind) => {
+        const { number } = challan;
         const res = await apiFetch(`/api/inventory/challans/${number}/pdf?kind=${kind}`);
         if (!res.ok) await readJson(res);
         const blob = await res.blob();
         const url = URL.createObjectURL(blob);
+        const site = String((challan.to && challan.to.name) || '')
+            .replace(/[^A-Za-z0-9]+/g, '-')
+            .replace(/^-+|-+$/g, '');
+        const base = kind === 'slip' ? `Receiving-slip-${number}` : `Challan-${number}`;
         const a = document.createElement('a');
         a.href = url;
-        a.download = kind === 'slip' ? `Receiving-slip-${number}.pdf` : `Challan-${number}.pdf`;
+        a.download = `${site ? `${site}-` : ''}${base}.pdf`;
         document.body.appendChild(a);
         a.click();
         a.remove();

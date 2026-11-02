@@ -550,7 +550,7 @@ function ChallanDialog({ movementId, inventory, onClose }) {
         try {
             const j = await inventory.saveChallan(movementId, details);
             setExisting(j.challan);
-            await inventory.downloadChallanPdf(j.challan.number, kind);
+            await inventory.downloadChallanPdf(j.challan, kind);
         } catch (e) {
             setErr(String(e.message || e));
         } finally {

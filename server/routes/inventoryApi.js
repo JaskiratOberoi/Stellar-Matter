@@ -1008,6 +1008,17 @@ router.post('/challans', requireMover, adminWriteLimiter, async (req, res) => {
     }
 });
 
+// "Karnal-Challan-16.pdf": the file is named after the site it went to, so a
+// folder of downloads reads by destination; the running number keeps two
+// challans to the same site apart. Mirrored client-side in useInventory.
+function challanFileName(challan, kind) {
+    const site = String((challan.to && challan.to.name) || '')
+        .replace(/[^A-Za-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '');
+    const base = kind === 'slip' ? `Receiving-slip-${challan.number}` : `Challan-${challan.number}`;
+    return `${site ? `${site}-` : ''}${base}.pdf`;
+}
+
 // The challan or its receiving slip as an A4 PDF download.
 router.get('/challans/:number/pdf', requireMover, async (req, res) => {
     if (!dbGuard(res)) return;
@@ -1017,7 +1028,7 @@ router.get('/challans/:number/pdf', requireMover, async (req, res) => {
         const kind = req.query.kind === 'slip' ? 'slip' : 'challan';
         const challan = await challans.getChallanByNumber(orgOf(req), number);
         const pdf = await renderChallanPdf(challan, kind);
-        const name = kind === 'slip' ? `Receiving-slip-${number}.pdf` : `Challan-${number}.pdf`;
+        const name = challanFileName(challan, kind);
         res.set('Content-Type', 'application/pdf');
         res.set('Content-Disposition', `attachment; filename="${name}"`);
         res.set('Cache-Control', 'no-store');
