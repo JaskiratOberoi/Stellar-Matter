@@ -3308,10 +3308,10 @@ table.packages td.envelope-cell {
     cursor: help;
 }
 
-/* Recent receipts under the Receive form: full width beneath both the form
-   and the docket, separated by the same hairline as the section head. */
+/* Recent receipts under the Receive form. Rendered after the form grid, not
+   inside it, so the sticky docket stops at the end of the form instead of
+   riding over the table. */
 .inv-recent {
-    grid-column: 1 / -1;
     margin-top: var(--sp-6);
 }
 
@@ -4467,7 +4467,8 @@ td.inv-low {
 /* Docket — the sticky receipt beside a form: figure, breakdown, action. */
 .inv-docket {
     position: sticky;
-    top: var(--sp-5);
+    /* Clears the sticky topbar, which would otherwise cover the figure. */
+    top: calc(var(--topbar-h) + var(--sp-4));
     padding: var(--sp-5);
     background: rgb(var(--nx-surface));
     border: 1px solid rgb(var(--nx-rule-soft));
@@ -4697,9 +4698,15 @@ td.inv-low {
         flex: 0 0 auto;
     }
 
-    /* Leave room under the form so the bar never covers the last line. */
-    .inv-form-layout {
+    /* Leave room under the form so the bar never covers the last line. When
+       a recent-movements table follows the form, the room goes under it. */
+    .inv-form-layout,
+    .inv-recent {
         padding-bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+    }
+
+    .inv-form-layout:has(+ .inv-recent) {
+        padding-bottom: 0;
     }
 }
 
@@ -6307,8 +6314,13 @@ tr.inv-voided td:nth-child(3) {
         padding-bottom: var(--sp-3);
     }
 
-    .inv-form-layout {
+    .inv-form-layout,
+    .inv-recent {
         padding-bottom: calc(72px + var(--inv-tabs-h));
+    }
+
+    .inv-form-layout:has(+ .inv-recent) {
+        padding-bottom: 0;
     }
 
     .inv-toast {

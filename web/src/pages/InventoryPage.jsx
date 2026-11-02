@@ -2649,6 +2649,7 @@ function ReceiveView({ inventory, canMove, showRecorded = false, onDone, onGoto,
     const destination = activeLocations.find((l) => l.id === toLocationId) || null;
 
     return (
+        <>
         <div className="inv-form-layout">
             <section className="inv-panel">
                 <SectionHead
@@ -2829,6 +2830,7 @@ function ReceiveView({ inventory, canMove, showRecorded = false, onDone, onGoto,
                 disabled={busy || anyUploading || !validLines.length}
                 label={busy ? 'Recording…' : anyUploading ? 'Uploading photo…' : 'Record receipt'}
             />
+        </div>
             <RecentMovements
                 kind="receipt"
                 title="Recent receipts"
@@ -2836,7 +2838,7 @@ function ReceiveView({ inventory, canMove, showRecorded = false, onDone, onGoto,
                 tick={recentTick}
                 showRecorded={showRecorded}
             />
-        </div>
+        </>
     );
 }
 
@@ -3181,6 +3183,7 @@ function DispatchView({ inventory, canMove, showRecorded = false, onDone, onGoto
     }
 
     return (
+        <>
         <div className="inv-form-layout">
             <section className="inv-panel">
                 <SectionHead
@@ -3426,6 +3429,7 @@ function DispatchView({ inventory, canMove, showRecorded = false, onDone, onGoto
                         : null
                 }
             />
+        </div>
             <RecentMovements
                 kind="dispatch"
                 title="Recent dispatches"
@@ -3433,7 +3437,7 @@ function DispatchView({ inventory, canMove, showRecorded = false, onDone, onGoto
                 tick={recentTick}
                 showRecorded={showRecorded}
             />
-        </div>
+        </>
     );
 }
 
