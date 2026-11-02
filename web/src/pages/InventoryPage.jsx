@@ -10,10 +10,6 @@ const ALL_BUS_DEST = '__all_bus__';
 const CATALOG_ROLES = new Set(['super_admin', 'admin']);
 const MOVER_ROLES = new Set(['super_admin', 'admin', 'operator']);
 
-// Business-unit columns shown by default in the stock matrix (stores are
-// always shown). Chosen so the table fits a laptop without a scrollbar.
-const MAX_BU_COLUMNS = 6;
-
 const VIEWS = [
     { id: 'stock', label: 'Stock', icon: 'grid', caption: 'On-hand matrix' },
     { id: 'orders', label: 'Orders', icon: 'clip', caption: 'Placed with vendors' },
@@ -1100,61 +1096,47 @@ function EmptyState({ icon = 'box', title, children, action }) {
 
 // -- Stock matrix ----------------------------------------------------------
 
+// Only stores (warehouses) are shown. Stock sitting at a business unit or
+// lab is already slated for consumption there, so listing it next to the
+// warehouse figures made the on-hand total read as more than could be
+// dispatched. Site balances remain visible in Movement history and Stock-take.
+//
 // showRecorded (super admin only): every cell's tooltip carries when that
 // balance last changed and by whom, and a trailing column shows the same for
-// the material's most recent change anywhere.
+// the material's most recent change at any store.
 function StockView({ inventory, showRecorded = false, onGoto, initialLowOnly = false, initialQuery = '' }) {
     const { materials, locations, balances } = inventory;
     const activeMaterials = materials.filter((m) => m.active);
     const activeLocations = locations.filter((l) => l.active);
     const balMap = useBalanceMap(balances);
     const everStocked = useEverStockedSet(balances);
+    const storeIds = useMemo(
+        () => new Set(activeLocations.filter((l) => l.kind === 'store').map((l) => l.id)),
+        [activeLocations]
+    );
+    const stores = useMemo(() => activeLocations.filter((l) => storeIds.has(l.id)), [activeLocations, storeIds]);
     const stamps = useMemo(() => {
         const cell = new Map();
         const row = new Map();
         for (const b of balances) {
-            if (!b.last_recorded_at) continue;
+            if (!b.last_recorded_at || !storeIds.has(b.location_id)) continue;
             const s = { at: b.last_recorded_at, who: b.last_recorded_by || null, where: b.location_name };
             cell.set(balanceKey(b.material_id, b.location_id), s);
             const cur = row.get(b.material_id);
             if (!cur || new Date(s.at) > new Date(cur.at)) row.set(b.material_id, s);
         }
         return { cell, row };
-    }, [balances]);
+    }, [balances, storeIds]);
     const [query, setQuery] = useState(initialQuery);
     const [hideEmpty, setHideEmpty] = useState(false);
-    const [showAllLocations, setShowAllLocations] = useState(false);
     // Same rule as the summary: stock across all stores under the reorder level.
     const [lowOnly, setLowOnly] = useState(initialLowOnly);
 
-    const storeIds = useMemo(
-        () => new Set(activeLocations.filter((l) => l.kind === 'store').map((l) => l.id)),
-        [activeLocations]
-    );
-
-    // Columns: stores first, then the busiest business units. The full set is
-    // 80-odd columns wide, which is a horizontal scroll nobody reads; the
-    // default view keeps the two stores plus the BUs actually holding stock,
-    // and "Show all" is one click away. Row totals still sum every location.
-    const shownLocations = useMemo(() => {
-        const stores = activeLocations.filter((l) => l.kind === 'store');
-        const others = activeLocations.filter((l) => l.kind !== 'store');
-        if (showAllLocations) return [...stores, ...others];
-        const colTotalAll = (locId) =>
-            activeMaterials.reduce((s, m) => s + (balMap.get(balanceKey(m.id, locId)) || 0), 0);
-        const ranked = others
-            .map((l) => ({ l, t: colTotalAll(l.id) }))
-            .filter((x) => x.t > 0)
-            .sort((a, b) => b.t - a.t)
-            .slice(0, MAX_BU_COLUMNS)
-            .map((x) => x.l);
-        return [...stores, ...ranked];
-    }, [activeLocations, activeMaterials, balMap, showAllLocations]);
-    const hiddenLocationCount = activeLocations.length - shownLocations.length;
-
+    // Row totals sum the stores only, so the Total column is what can
+    // actually be dispatched.
     const totalFor = useCallback(
-        (materialId) => activeLocations.reduce((s, l) => s + (balMap.get(balanceKey(materialId, l.id)) || 0), 0),
-        [activeLocations, balMap]
+        (materialId) => stores.reduce((s, l) => s + (balMap.get(balanceKey(materialId, l.id)) || 0), 0),
+        [stores, balMap]
     );
 
     const rows = useMemo(() => {
@@ -1164,14 +1146,13 @@ function StockView({ inventory, showRecorded = false, onGoto, initialLowOnly = f
             if (hideEmpty && totalFor(m.id) === 0) return false;
             if (lowOnly) {
                 if (!(m.reorder_level > 0)) return false;
-                const storeTotal = [...storeIds].reduce((a, id) => a + (balMap.get(balanceKey(m.id, id)) || 0), 0);
-                if (storeTotal >= m.reorder_level) return false;
+                if (totalFor(m.id) >= m.reorder_level) return false;
             }
             return true;
         });
-    }, [activeMaterials, query, hideEmpty, totalFor, lowOnly, storeIds, balMap]);
+    }, [activeMaterials, query, hideEmpty, totalFor, lowOnly]);
 
-    if (!activeMaterials.length || !activeLocations.length) {
+    if (!activeMaterials.length || !stores.length) {
         return (
             <EmptyState
                 title="Nothing to show yet"
@@ -1181,23 +1162,19 @@ function StockView({ inventory, showRecorded = false, onGoto, initialLowOnly = f
                     </button>
                 }
             >
-                Add materials and at least one location in the Catalog to start tracking stock.
+                Add materials and at least one store in the Catalog to start tracking stock.
             </EmptyState>
         );
     }
 
     const colTotal = (locId) => rows.reduce((s, m) => s + (balMap.get(balanceKey(m.id, locId)) || 0), 0);
-    const grandTotal = activeLocations.reduce((s, l) => s + colTotal(l.id), 0);
+    const grandTotal = stores.reduce((s, l) => s + colTotal(l.id), 0);
 
     return (
         <section className="inv-panel">
             <SectionHead
                 title="Stock on hand"
-                caption={
-                    hiddenLocationCount > 0
-                        ? `${fmt(rows.length)} of ${fmt(activeMaterials.length)} materials · stores first, then the ${fmt(shownLocations.length - storeIds.size)} busiest of ${fmt(activeLocations.length - storeIds.size)} business units and labs`
-                        : `${fmt(rows.length)} of ${fmt(activeMaterials.length)} materials across ${fmt(activeLocations.length)} locations`
-                }
+                caption={`${fmt(rows.length)} of ${fmt(activeMaterials.length)} materials across ${fmt(stores.length)} store${stores.length === 1 ? '' : 's'} · stock already at business units and labs is not counted`}
             >
                 <input
                     className="inv-search"
@@ -1223,16 +1200,6 @@ function StockView({ inventory, showRecorded = false, onGoto, initialLowOnly = f
                         Below reorder only ✕
                     </button>
                 )}
-                {(hiddenLocationCount > 0 || showAllLocations) && (
-                    <button
-                        type="button"
-                        className="chip chip-tool inv-stock-allcols"
-                        aria-pressed={showAllLocations ? 'true' : 'false'}
-                        onClick={() => setShowAllLocations((v) => !v)}
-                    >
-                        {showAllLocations ? 'Busiest only' : `Show all ${fmt(activeLocations.length)} locations`}
-                    </button>
-                )}
                 <button type="button" className="chip chip-tool" onClick={() => onGoto('receive')}>
                     Receive
                 </button>
@@ -1244,8 +1211,7 @@ function StockView({ inventory, showRecorded = false, onGoto, initialLowOnly = f
 
             <StockCards
                 rows={rows}
-                locations={activeLocations}
-                storeIds={storeIds}
+                stores={stores}
                 balMap={balMap}
                 everStocked={everStocked}
                 totalFor={totalFor}
@@ -1258,7 +1224,7 @@ function StockView({ inventory, showRecorded = false, onGoto, initialLowOnly = f
                     <thead>
                         <tr>
                             <th className="sticky-col">Material</th>
-                            {shownLocations.map((l) => (
+                            {stores.map((l) => (
                                 <th key={l.id} className="num">
                                     <span className="inv-col-name">{l.name}</span>
                                     <span className="inv-col-kind">
@@ -1278,10 +1244,10 @@ function StockView({ inventory, showRecorded = false, onGoto, initialLowOnly = f
                                     <span className="inv-mat-name">{m.name}</span>
                                     <span className="inv-unit">{m.base_unit}</span>
                                 </td>
-                                {shownLocations.map((l) => {
+                                {stores.map((l) => {
                                     const val = balMap.get(balanceKey(m.id, l.id)) || 0;
                                     const stocked = everStocked.has(balanceKey(m.id, l.id));
-                                    const low = storeIds.has(l.id) && m.reorder_level > 0 && val < m.reorder_level;
+                                    const low = m.reorder_level > 0 && val < m.reorder_level;
                                     const st = showRecorded ? stamps.cell.get(balanceKey(m.id, l.id)) : null;
                                     const tip = [];
                                     if (low) tip.push(`Below reorder level (${fmt(m.reorder_level)})`);
@@ -1300,7 +1266,7 @@ function StockView({ inventory, showRecorded = false, onGoto, initialLowOnly = f
                                 {showRecorded && (() => {
                                     const st = stamps.row.get(m.id);
                                     return (
-                                        <td className="inv-stock-rec" title={st ? 'When this material\'s stock last changed anywhere, and by whom' : undefined}>
+                                        <td className="inv-stock-rec" title={st ? 'When this material\'s store stock last changed, and by whom' : undefined}>
                                             {st ? (
                                                 <>
                                                     <span className="inv-stock-rec-at">{fmtRecorded(new Date(st.at))}</span>
@@ -1318,7 +1284,7 @@ function StockView({ inventory, showRecorded = false, onGoto, initialLowOnly = f
                         ))}
                         {!rows.length && (
                             <tr>
-                                <td colSpan={shownLocations.length + (showRecorded ? 3 : 2)} className="muted inv-nomatch">
+                                <td colSpan={stores.length + (showRecorded ? 3 : 2)} className="muted inv-nomatch">
                                     No materials match “{query}”.
                                 </td>
                             </tr>
@@ -1328,7 +1294,7 @@ function StockView({ inventory, showRecorded = false, onGoto, initialLowOnly = f
                         <tfoot>
                             <tr>
                                 <td className="sticky-col">Total</td>
-                                {shownLocations.map((l) => {
+                                {stores.map((l) => {
                                     const t = colTotal(l.id);
                                     return (
                                         <td key={l.id} className="num">
@@ -1348,22 +1314,12 @@ function StockView({ inventory, showRecorded = false, onGoto, initialLowOnly = f
 }
 
 // Phone layout of the stock matrix (CSS shows it at <=640px instead of the
-// table): one card per material with its total and store figures up front,
-// the busiest sites as a preview, and every site holding stock on expand.
-const CARD_SITE_PREVIEW = 3;
-
-function StockCards({ rows, locations, storeIds, balMap, everStocked, totalFor, stamps, query }) {
-    const stores = locations.filter((l) => storeIds.has(l.id));
-    const sites = locations.filter((l) => !storeIds.has(l.id));
-
+// table): one card per material with its store total and per-store figures.
+function StockCards({ rows, stores, balMap, everStocked, totalFor, stamps, query }) {
     return (
         <ul className="inv-stock-cards" aria-label="Stock by material">
             {rows.map((m) => {
                 const total = totalFor(m.id);
-                const holding = sites
-                    .map((l) => ({ l, v: balMap.get(balanceKey(m.id, l.id)) || 0 }))
-                    .filter((x) => x.v > 0)
-                    .sort((a, b) => b.v - a.v);
                 const low = stores.some(
                     (s) => m.reorder_level > 0 && (balMap.get(balanceKey(m.id, s.id)) || 0) < m.reorder_level
                 );
@@ -1393,25 +1349,6 @@ function StockCards({ rows, locations, storeIds, balMap, everStocked, totalFor, 
                                 );
                             })}
                         </dl>
-                        {holding.length > 0 ? (
-                            holding.length > CARD_SITE_PREVIEW ? (
-                                <details className="inv-stock-card-sites">
-                                    <summary>
-                                        <SitePreview items={holding.slice(0, CARD_SITE_PREVIEW)} />
-                                        <span className="inv-stock-card-more">
-                                            +{holding.length - CARD_SITE_PREVIEW} more site{holding.length - CARD_SITE_PREVIEW === 1 ? '' : 's'}
-                                        </span>
-                                    </summary>
-                                    <SitePreview items={holding.slice(CARD_SITE_PREVIEW)} />
-                                </details>
-                            ) : (
-                                <div className="inv-stock-card-sites">
-                                    <SitePreview items={holding} />
-                                </div>
-                            )
-                        ) : (
-                            <p className="inv-stock-card-none">No business unit or lab holds any.</p>
-                        )}
                         {st && (
                             <p className="inv-stock-card-rec">
                                 rec {fmtRecorded(new Date(st.at))}
@@ -1424,20 +1361,6 @@ function StockCards({ rows, locations, storeIds, balMap, everStocked, totalFor, 
             })}
             {!rows.length && <li className="muted inv-nomatch">No materials match “{query}”.</li>}
         </ul>
-    );
-}
-
-function SitePreview({ items }) {
-    return (
-        <span className="inv-stock-card-sitelist">
-            {items.map(({ l, v }) => (
-                <span key={l.id} className="inv-stock-card-site">
-                    <span className={`inv-dot inv-dot-${kindDot(l.kind)}`} />
-                    {l.name}
-                    <b>{fmt(v)}</b>
-                </span>
-            ))}
-        </span>
     );
 }
 
